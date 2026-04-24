@@ -1,0 +1,42 @@
+# PDFs (copyrighted textbook material)
+*.pdf
+
+# HTML outputs (regenerable from .qmd)
+*.html
+
+# Quarto render artifacts
+*_files/
+.quarto/
+_freeze/
+
+# Archives (source data is already extracted into folders)
+*.zip
+
+# Claude session / editor state
+.claude/
+.vscode/
+
+# Temp / log files
+error_output.txt
+first_100_lines.txt
+*.log
+*.aux
+*.bbl
+*.blg
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+*~
+*.swp
+
+# Julia
+*.jl.cov
+*.jl.*.cov
+*.jl.mem
+Manifest.toml
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/

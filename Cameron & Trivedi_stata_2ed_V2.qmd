@@ -1,0 +1,1134 @@
+---
+title: "Microeconometrics Using Stata"
+Authors:
+- Colin Cameron
+- Pravin Trivedi
+format: 
+  html:
+    toc: true
+    toc-depth: 5
+    toc-expand: 5
+    toc-title: Contents
+    toc-location: left
+execute:
+  enabled: false
+jupyter: python3
+---
+
+Use kernel Python 3.12.10
+
+[Microeconometrics with R](https://ycroissant.github.io/micsr_book/)
+
+[UCLA](https://stats.oarc.ucla.edu/stata/modules/)
+
+[Github](https://github.com/thousandoaks?tab=repositories)
+
+# Stata setup instructions (for Stata 19)
+
+```{python}
+import stata_setup
+import sys
+from contextlib import redirect_stdout
+
+# Suppress Stata header output
+with open('nul', 'w') as fnull, redirect_stdout(fnull):
+    stata_setup.config("C:/Program Files/StataNow19", "se")
+```
+
+# Chapter 16 Nonlinear optimization methods
+
+## 16.1 Introduction
+
+## 16.2 Newton–Raphson method
+
+### 16.2.1 NR method
+
+### 16.2.2 NR method for Poisson
+
+### 16.2.3 Poisson NR example using Mata
+
+#### Core Mata code for Poisson NR iterations
+
+```{python}
+%%stata
+/*
+* Core Mata code for Poisson MLE NR iterations
+mata
+    P       = cols(X)       // Number of regressors
+    b       = J(p,1,.02)    // Start values are close to Zero
+    gHinvg  = 1             // Initialize scaled gradient
+    iter    = 0             // Initialize number of iterations
+    do {
+        mu      = exp(X*b)
+        grad    = X'*(y-mu)             // k x 1 gradient vector
+        hes     = cross(X,mu,X)         // Negative of the k x k Hessian matrix
+        diff    = cholinv(hes)*grad     // Upgrade amount
+        bold    = b
+        b       = bold + diff
+        iter    = iter + 1
+        gHinvg  = grad'*diff            // Equals grad'*cholinv(hes)*grad
+        printf("iter = %s, gHginv = %6.5g\n", strofreal(iter), gHinvg)
+    } while (gHinvg > 1e-8)             // end of iteration loops
+end
+*/
+```
+
+#### Complete Stata and Mata code for Poisson NR iterations
+
+```{python}
+%%stata
+* Set up data and local macros for dependent variable and regressors
+qui use mus2/mus210mepsdocvisyoung, clear
+keep if year02 == 1
+generate cons = 1
+global y docvis
+global xlist private chronic female income cons
+```
+
+```{python}
+%%stata
+* Complete Mata code for Poisson MLE NR iterations
+mata:
+    st_view(y=., ., "$y")             // Read in stata data to y and X
+    st_view(X=., ., tokens("$xlist"))
+    p      = cols(X)                  // Number of regressors
+    n      = rows(X)
+    b      = J(p, 1, .02)             // Start values are close to zero
+    gHinvg = 1                        // Initialize scaled gradient 	
+    iter   = 0                        // Initialize number of iterations
+    do {
+        mu   = exp(X*b)
+        grad = X'*(y-mu)              // k x 1 gradient vector
+        hes  = cross(X, mu, X)        // Negative of the kxk Hessian matrix
+        diff = cholinv(hes)*grad      // Update amount
+        bold = b
+        b    = bold + diff
+        iter = iter + 1
+        gHinvg = grad'*diff           // Equals grad'*cholinv(hes)*grad
+        printf("iter = %s, gHginv = %6.5g\n", strofreal(iter), gHinvg)
+    } while (gHinvg > 1e-8)           // End of iteration loops
+    mu = exp(X*b)
+    hes = cross(X, mu, X)
+    vgrad = cross(X, (y-mu):^2, X)
+    vb = cholinv(hes)*vgrad*cholinv(hes)*n/(n-cols(X))
+    st_matrix("b",b')                 // Pass results from Mata to Stata
+    st_matrix("V",vb)                 // Pass results from Mata to Stata
+end
+```
+
+```{python}
+%%stata
+* Present results, nicely formatted using Stata command ereturn
+matrix colnames b = $xlist
+matrix colnames V = $xlist
+matrix rownames V = $xlist
+ereturn post b V
+ereturn display
+```
+
+## 16.3 Gradient methods
+
+### 16.3.1 Maximization options
+
+```{python}
+%%stata
+// Not included - Example of various maximize options
+poisson docvis private chronic female income, log trace gradient ///
+  iterate(100) tol(1e-4) ltol(0) robust
+```
+
+### 16.3.2 Gradient methods
+
+### 16.3.3 Messages during iterations
+
+### 16.3.4 Stopping criteria
+
+### 16.3.5 Nonconvergence and possible lack of identification
+
+### 16.3.6 Multiple maximums
+
+#### Figure 16.1. Objective function with multiple optimums
+
+```{python}
+%%stata
+* Objective function with multiple optima
+graph twoway function                                          ///
+    y=100-0.0000001*(x-10)*(x-30)*(x-50)*(x-50)*(x-70)*(x-80), ///
+    range (5 90) plotregion(style(none)) scale(1.2)            ///
+    title("Objective function Q({&theta}) as {&theta} varies") ///
+    xtitle("{&theta}", size(medlarge)) xscale(titlegap(*5))    ///
+    ytitle("Q({&theta})", size(medlarge)) yscale(titlegap(*5))
+```
+
+### 16.3.7 Numerical derivatives
+
+### 16.3.8 Constraints on parameters
+
+## 16.4 Overview of ml, moptimize(), and optimize()
+
+### 16.4.1 Evaluator types
+
+### 16.4.2 Optimization techniques
+
+## 16.5 The ml command: lf method
+
+### 16.5.1 The ml commands
+
+### 16.5.2 The lf method
+
+### 16.5.3 Poisson example: Single-index model
+
+```{python}
+%%stata
+* Poisson ML program lfpois to be called by command ml method lf
+program lfpois
+    version 17
+    args lnf theta1                  // theta1=x'b, lnf=ln(y)
+    tempvar lnyfact mu
+    local y "$ML_y1"                 // Define y so program more readable
+    generate double `lnyfact' = lnfactorial(`y')
+    generate double `mu'      = exp(`theta1')
+    qui replace `lnf'     = -`mu' + `y'*`theta1' - `lnyfact'
+end
+```
+
+```{python}
+%%stata
+* Following command only part of outpur included in book
+* Command ml model defines y and x with heteroskedastic robust standard errors plus ml check
+ml model lf lfpois (docvis = private chronic female income), vce(robust)
+ml check
+```
+
+```{python}
+%%stata
+* Search for better starting values
+ml search
+```
+
+```{python}
+%%stata
+* Command lfpois implemented for Poisson MLE
+ml maximize
+```
+
+```{python}
+%%stata
+* Following in text but with output omitted
+* Same model but with cluster–robust standard errors
+ml model lf lfpois (docvis = private chronic female income), vce(cluster age)
+ml maximize
+```
+
+### 16.5.4 Negative binomial example: Two-index model
+
+```{python}
+%%stata
+* Negbin ML two-index program lfnb to be called by command ml method lf
+program lfnb
+    version 17
+    args lnf theta1 a               // theta1=x'b, a=alpha, lnf=ln(y)
+    tempvar mu
+    local y $ML_y1                  // Define y so program more readable
+    generate double `mu'  = exp(`theta1')
+    qui replace `lnf' = lngamma(`y'+(1/`a')) - lngamma((1/`a'))    ///
+               -  lnfactorial(`y') - (`y'+(1/`a'))*ln(1+`a'*`mu')  ///
+               + `y'*ln(`a') + `y'*ln(`mu')
+end
+```
+
+```{python}
+%%stata
+* Command lf implemented for negative binomial MLE
+ml model lf lfnb (docvis = private chronic female income) (), vce(robust)
+ml maximize, nolog
+```
+
+### 16.5.5 NLS example: Nonlikelihood model
+
+```{python}
+%%stata
+* NLS program lfnls to be called by command ml method lf
+program lfnls
+    version 17
+    args lnf theta1                 // theta1=x'b, lnf=squared residual
+    local y "$ML_y1"                // Define y so program more readable
+    qui replace `lnf' = -(`y'-exp(`theta1'))^2
+end
+```
+
+```{python}
+%%stata
+* Following in text but with output omitted
+* Command lf implemented for NLS estimator
+ml model lf lfnls (docvis = private chronic female income), vce(robust)
+ml maximize
+```
+
+## 16.6 Checking the program
+
+### 16.6.1 Program debugging using ml check and ml trace
+
+### 16.6.2 Getting the program to run
+
+### 16.6.3 Checking the data
+
+### 16.6.4 Multicollinearity and near collinearity
+
+```{python}
+%%stata
+* Example with high collinearity interpreted as perfect collinearity
+generate extra = income + 0.001*runiform()
+ml model lf lfpois (docvis = private chronic female income extra), vce(robust)
+ml maximize
+```
+
+```{python}
+%%stata
+* Example with high collinearity not interpreted as perfect collinearity
+generate extra2 = income + 0.01*runiform()
+ml model lf lfpois (docvis = private chronic female income extra2), vce(robust)
+ml maximize, nolog
+```
+
+```{python}
+%%stata
+* Detect multicollinearity by using _rmcoll
+_rmcoll income extra
+_rmcoll income extra2
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```
+
+```{python}
+%%stata
+
+```

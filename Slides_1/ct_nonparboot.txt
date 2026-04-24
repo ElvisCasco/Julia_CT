@@ -1,0 +1,467 @@
+-------------------------------------------------------------------------------------------------------------------------------
+      name:  <unnamed>
+       log:  c:\Imbook\courses\2013_bgpe_germany\day3panelextra\ct_nonparboot.txt
+  log type:  text
+ opened on:   7 Jul 2013, 10:18:56
+
+. 
+. * STATA Program by A. Colin Cameron
+. * Kernel density
+. * Nonparametric
+. * Bootstrap 
+. 
+. * To run you need files
+. *   nonparametric.dta  
+. *   bootstrap.dta    
+. * in your directory
+. 
+. *** THE BOOTSTRAPS TAKE TIME
+. *** TO SPEED UP COMMENT THEM OUT OR CHANGE NUMBER OF REPS TO 50
+. 
+. ********** SETUP **********
+. 
+. set more off
+
+. version 10.0
+
+. set mem 10m
+
+. set scheme s1mono  /* Graphics scheme */
+
+. 
+. ********** DATA DESCRIPTION **********
+. 
+. * The original data are from the PSID Individual Level Final Release 1993 data
+. * From www.isr.umich.edu/src/psid  then choose Data Center 
+. * 4856 observations on 9 variables for Females 30 to 50 years 
+. * See mma09p1np.do for further description
+. 
+. ******* OLS WITH DOCTOR VISITS DATA
+. 
+. * Read in data, select, describe and summarize key variables
+. use nonparametric.dta, clear
+(PSID 1993 women 30 to 50 years with earnings - MMA ch.9)
+
+. describe 
+
+Contains data from nonparametric.dta
+  obs:         3,504                          PSID 1993 women 30 to 50 years with earnings - MMA ch.9
+ vars:            10                          7 Nov 2009 14:25
+ size:       119,136                          
+-------------------------------------------------------------------------------------------------------------------------------
+              storage  display     value
+variable name   type   format      label      variable label
+-------------------------------------------------------------------------------------------------------------------------------
+intnum          float  %9.0g                  1968 interview number
+persnum         float  %9.0g                  1968 person number
+age             float  %9.0g                  age in years 1992
+educatn         float  %9.0g                  years of completed schooling 1992
+earnings        float  %9.0g                  total labor income 1992
+hours           float  %9.0g                  annual work hours 1992
+sex             byte   %8.0g                  sex : 2=female 1=male
+married         byte   %8.0g                  last known marital status
+hwage           float  %9.0g                  earnings divided by hours
+lnhwage         float  %9.0g                  natural log of hwage
+-------------------------------------------------------------------------------------------------------------------------------
+Sorted by:  
+
+. 
+. * Work with age 36 and nonmissing education data
+. keep if age == 36
+(3327 observations deleted)
+
+. drop if educatn == .
+(0 observations deleted)
+
+. summarize
+
+    Variable |       Obs        Mean    Std. Dev.       Min        Max
+-------------+--------------------------------------------------------
+      intnum |       177    4699.853    2765.081         14       9240
+     persnum |       177    59.53672    79.73001          1        188
+         age |       177          36           0         36         36
+     educatn |       177    12.58757    2.841347          3         17
+    earnings |       177    17470.55    13513.56         87      70000
+-------------+--------------------------------------------------------
+       hours |       177    1506.401    698.4145          8       3160
+         sex |       177           2           0          2          2
+     married |       177    .7457627    .4366669          0          1
+       hwage |       177    12.71631    16.58889   .6837607        175
+     lnhwage |       177    2.198163    .8281614  -.3801473   5.164786
+
+. 
+. ******* KERNEL DENSITY ESTIMATE
+. 
+. histogram lnhwage
+(bin=13, start=-.38014728, width=.42653332)
+
+. histogram lnhwage, bin(30)
+(bin=30, start=-.38014728, width=.1848311)
+
+. graph save ct_nonparametric1, replace
+(file ct_nonparametric1.gph saved)
+
+. graph export ct_nonparametric1.wmf, replace
+(file c:\Imbook\courses\2013_bgpe_germany\day3panelextra\ct_nonparametric1.wmf written in Windows Metafile format)
+
+. kdensity lnhwage
+
+. kdensity lnhwage, bw(0.21)
+
+. graph twoway (kdensity lnhwage, bw(0.21)) (kdensity lnhwage, bw(0.07) clstyle(p2)) (kdensity lnhwage, bw(0.63) clstyle(p3)), 
+> legend( label(1 "Default") label(2 "Half default") label(3 "Twice default") ) 
+
+. graph save ct_nonparametric2, replace
+(file ct_nonparametric2.gph saved)
+
+. graph export ct_nonparametric2.wmf, replace
+(file c:\Imbook\courses\2013_bgpe_germany\day3panelextra\ct_nonparametric2.wmf written in Windows Metafile format)
+
+. histogram lnhwage, kdensity  
+(bin=13, start=-.38014728, width=.42653332)
+
+. kdensity lnhwage, normal
+
+. 
+. ******* NONPARAMETRIC REGRESSION 
+. 
+. regress lnhwage educatn
+
+      Source |       SS       df       MS              Number of obs =     177
+-------------+------------------------------           F(  1,   175) =   25.19
+       Model |   15.189945     1   15.189945           Prob > F      =  0.0000
+    Residual |  105.519895   175  .602970827           R-squared     =  0.1258
+-------------+------------------------------           Adj R-squared =  0.1208
+       Total |   120.70984   176  .685851362           Root MSE      =  .77651
+
+------------------------------------------------------------------------------
+     lnhwage |      Coef.   Std. Err.      t    P>|t|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+     educatn |   .1033945      .0206     5.02   0.000     .0627381     .144051
+       _cons |   .8966776   .2657917     3.37   0.001     .3721077    1.421247
+------------------------------------------------------------------------------
+
+. * Kernel
+. lpoly lnhwage educatn, ci msize(medsmall)
+
+. graph save ct_nonparametric3, replace
+(file ct_nonparametric3.gph saved)
+
+. graph export ct_nonparametric3.wmf, replace
+(file c:\Imbook\courses\2013_bgpe_germany\day3panelextra\ct_nonparametric3.wmf written in Windows Metafile format)
+
+. * Local linear
+. lpoly lnhwage educatn, degree(1) ci
+
+. * Lowess
+. lowess lnhwage educatn
+
+. * Kernel for different bandwidths - default, halfdefault, twicedefault
+. graph twoway (lpoly lnhwage educatn, bw(1.5)) (lpoly lnhwage educatn, bw(0.75) clstyle(p2)) (lpoly lnhwage educatn, bw(3.0) c
+> lstyle(p3)), legend( label(1 "Default") label(2 "Half default") label(3 "Twice default") ) 
+
+. graph save ct_nonparametric4, replace
+(file ct_nonparametric4.gph saved)
+
+. graph export ct_nonparametric4.wmf, replace
+(file c:\Imbook\courses\2013_bgpe_germany\day3panelextra\ct_nonparametric4.wmf written in Windows Metafile format)
+
+. * Compare kernel, local linear, lowess with default bandwidths
+. graph twoway (lpoly lnhwage educ) (lpoly lnhwage educ, degree(1) clstyle(p2)) (lowess lnhwage educ, clstyle(p3)), legend( lab
+> el(1 "Kernel") label(2 "Local linear") label(3 "lowess") ) 
+
+. graph save ct_nonparametric5, replace
+(file ct_nonparametric5.gph saved)
+
+. graph export ct_nonparametric5.wmf, replace
+(file c:\Imbook\courses\2013_bgpe_germany\day3panelextra\ct_nonparametric5.wmf written in Windows Metafile format)
+
+. 
+. ****** BOOTSTRAP PAIRS USING THE VCE(BOOTSTRAP) OPTION
+. 
+. * Data description
+. use bootdata.dta, clear 
+
+. describe 
+
+Contains data from bootdata.dta
+  obs:            50                          
+ vars:             3                          26 Nov 2008 10:46
+ size:           350                          
+-------------------------------------------------------------------------------------------------------------------------------
+              storage  display     value
+variable name   type   format      label      variable label
+-------------------------------------------------------------------------------------------------------------------------------
+docvis          int    %8.0g                  number of doctor visits
+age             float  %9.0g                  Age in years / 10
+chronic         byte   %8.0g                  = 1 if a chronic condition
+-------------------------------------------------------------------------------------------------------------------------------
+Sorted by:  
+
+. summarize
+
+    Variable |       Obs        Mean    Std. Dev.       Min        Max
+-------------+--------------------------------------------------------
+      docvis |        50        4.12     7.82106          0         43
+         age |        50       4.162    1.160382        2.6        6.2
+     chronic |        50         .28    .4535574          0          1
+
+. 
+. * Default and robust standard errors
+. poisson docvis chronic, nolog
+
+Poisson regression                                Number of obs   =         50
+                                                  LR chi2(1)      =      48.18
+                                                  Prob > chi2     =     0.0000
+Log likelihood = -238.75384                       Pseudo R2       =     0.0917
+
+------------------------------------------------------------------------------
+      docvis |      Coef.   Std. Err.      z    P>|z|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+     chronic |   .9833014   .1393729     7.06   0.000     .7101356    1.256467
+       _cons |   1.031602   .0995037    10.37   0.000     .8365779    1.226625
+------------------------------------------------------------------------------
+
+. poisson docvis chronic, nolog vce(robust)
+
+Poisson regression                                Number of obs   =         50
+                                                  Wald chi2(1)    =       3.64
+                                                  Prob > chi2     =     0.0565
+Log pseudolikelihood = -238.75384                 Pseudo R2       =     0.0917
+
+------------------------------------------------------------------------------
+             |               Robust
+      docvis |      Coef.   Std. Err.      z    P>|z|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+     chronic |   .9833014   .5154894     1.91   0.056    -.0270391    1.993642
+       _cons |   1.031602   .3446734     2.99   0.003     .3560541    1.707149
+------------------------------------------------------------------------------
+
+. 
+. * Compute bootstrap standard errors using option vce(bootstrap) to 
+. poisson docvis chronic, vce(boot, reps(400) seed(10101) nodots)
+
+Poisson regression                              Number of obs      =        50
+                                                Replications       =       400
+                                                Wald chi2(1)       =      3.50
+                                                Prob > chi2        =    0.0612
+Log likelihood = -238.75384                     Pseudo R2          =    0.0917
+
+------------------------------------------------------------------------------
+             |   Observed   Bootstrap                         Normal-based
+      docvis |      Coef.   Std. Err.      z    P>|z|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+     chronic |   .9833014   .5253149     1.87   0.061    -.0462968      2.0129
+       _cons |   1.031602   .3497212     2.95   0.003     .3461607    1.717042
+------------------------------------------------------------------------------
+
+. 
+. * Same using bootstrap prefix command
+. bootstrap, seed(10101) reps(400) nodots: poisson docvis chronic
+
+Poisson regression                              Number of obs      =        50
+                                                Replications       =       400
+                                                Wald chi2(1)       =      3.50
+                                                Prob > chi2        =    0.0612
+Log likelihood = -238.75384                     Pseudo R2          =    0.0917
+
+------------------------------------------------------------------------------
+             |   Observed   Bootstrap                         Normal-based
+      docvis |      Coef.   Std. Err.      z    P>|z|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+     chronic |   .9833014   .5253149     1.87   0.061    -.0462968      2.0129
+       _cons |   1.031602   .3497212     2.95   0.003     .3461607    1.717042
+------------------------------------------------------------------------------
+
+. 
+. * The jackknife
+. poisson docvis chronic, vce(jackknife)
+(running poisson on estimation sample)
+
+Jackknife replications (50)
+----+--- 1 ---+--- 2 ---+--- 3 ---+--- 4 ---+--- 5 
+..................................................    50
+
+Poisson regression                              Number of obs      =        50
+                                                Replications       =        50
+                                                F(   1,     49)    =      2.50
+                                                Prob > F           =    0.1205
+Log likelihood = -238.75384                     Pseudo R2          =    0.0917
+
+------------------------------------------------------------------------------
+             |              Jackknife
+      docvis |      Coef.   Std. Err.      t    P>|t|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+     chronic |   .9833014   .6222826     1.58   0.121    -.2672222    2.233825
+       _cons |   1.031602   .3919746     2.63   0.011     .2438992    1.819304
+------------------------------------------------------------------------------
+
+. 
+. * Bootstrap confidence intervals: normal-based, percentile, BC, and BCa
+. quietly poisson docvis chronic, vce(boot, reps(999) seed(10101) bca)
+
+. estat bootstrap, all
+
+Poisson regression                              Number of obs      =        50
+                                                Replications       =       999
+
+------------------------------------------------------------------------------
+             |    Observed               Bootstrap
+      docvis |       Coef.       Bias    Std. Err.  [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+     chronic |   .98330144  -.0244473   .54040762    -.075878   2.042481   (N)
+             |                                      -.1316499   2.076792   (P)
+             |                                      -.0820317   2.100361  (BC)
+             |                                      -.0215526   2.181476 (BCa)
+       _cons |   1.0316016  -.0503223   .35257252    .3405721   1.722631   (N)
+             |                                       .2177235   1.598568   (P)
+             |                                       .2578293   1.649789  (BC)
+             |                                       .3794897   1.781907 (BCa)
+------------------------------------------------------------------------------
+(N)    normal confidence interval
+(P)    percentile confidence interval
+(BC)   bias-corrected confidence interval
+(BCa)  bias-corrected and accelerated confidence interval
+
+. 
+. /* SKIP THE FOLLOWING AS TAKES TIME
+> 
+> * Bootstrap standard errors for different reps and seeds
+> quietly poisson docvis chronic, vce(boot, reps(50) seed(10101))
+> estimates store boot50
+> quietly poisson docvis chronic, vce(boot, reps(50) seed(20202))
+> estimates store boot50diff
+> quietly poisson docvis chronic, vce(boot, reps(2000) seed(10101))
+> estimates store boot2000
+> quietly poisson docvis chronic, vce(robust)
+> estimates store robust
+> estimates table boot50 boot50diff boot2000 robust, b(%8.5f) se(%8.5f)
+> 
+> */
+. 
+. * MAY WANT TO SKIP THE FOLLOWING AS TAKES TIME
+. 
+. ****** PERCENTILE-T BOOTSTRAP WITH ASYMPTOTIC REFINEMENT
+. 
+. * Percentile-t for a single coefficient: Bootstrap the t statistic
+. use bootdata.dta, clear 
+
+. quietly poisson docvis chronic, vce(robust)
+
+. local theta = _b[chronic] 
+
+. local setheta = _se[chronic]
+
+. bootstrap tstar=((_b[chronic]-`theta')/_se[chronic]), seed(10101)        ///
+>   reps(999) nodots saving(percentilet, replace): poisson docvis chronic, ///
+>   vce(robust)
+(note: file percentilet.dta not found)
+
+Bootstrap results                               Number of obs      =        50
+                                                Replications       =       999
+
+      command:  poisson docvis chronic, vce(robust)
+        tstar:  (_b[chronic]-.9833014421442415)/_se[chronic]
+
+------------------------------------------------------------------------------
+             |   Observed   Bootstrap                         Normal-based
+             |      Coef.   Std. Err.      z    P>|z|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+       tstar |          0     1.3004     0.00   1.000    -2.548736    2.548736
+------------------------------------------------------------------------------
+
+. 
+. * Simple plot of the distribution of the tstar
+. use percentilet, clear
+(bootstrap: poisson)
+
+. summarize
+
+    Variable |       Obs        Mean    Std. Dev.       Min        Max
+-------------+--------------------------------------------------------
+       tstar |       999   -.0874198      1.3004  -4.435354   4.611352
+
+. centile tstar, c(2.5,50,97.5)
+
+                                                       -- Binom. Interp. --
+    Variable |     Obs  Percentile      Centile        [95% Conf. Interval]
+-------------+-------------------------------------------------------------
+       tstar |     999        2.5     -2.756196       -3.030972   -2.567785
+             |                 50     -.0569957       -.1464812    .0312477
+             |               97.5      2.568691          2.3092    2.917802
+
+. kdensity tstar, normal
+
+. 
+. * Fancier plot of the distribution of the tstar
+. use percentilet, clear
+(bootstrap: poisson)
+
+. summarize
+
+    Variable |       Obs        Mean    Std. Dev.       Min        Max
+-------------+--------------------------------------------------------
+       tstar |       999   -.0874198      1.3004  -4.435354   4.611352
+
+. centile tstar, c(2.5,50,97.5)
+
+                                                       -- Binom. Interp. --
+    Variable |     Obs  Percentile      Centile        [95% Conf. Interval]
+-------------+-------------------------------------------------------------
+       tstar |     999        2.5     -2.756196       -3.030972   -2.567785
+             |                 50     -.0569957       -.1464812    .0312477
+             |               97.5      2.568691          2.3092    2.917802
+
+. kdensity tstar, generate(evalpoint densityest) xtitle("tstar from the bootstrap replications")
+
+. generate phistnorm = normalden(evalpoint)
+(949 missing values generated)
+
+. label variable phistnorm "Standard normal"
+
+. label variable densityest "Bootstrap density"
+
+. label variable evalpoint "tstar"
+
+. graph twoway (scatter densityest evalpoint, connect(l) msize(tiny)) ///
+>   (scatter phistnorm evalpoint, connect(l) msize(tiny))
+
+. * graph export ct_bootstrap5.wmf, replace
+. 
+. * Percentile-t p-value for symmetric two-sided Wald test of H0: theta = 0
+. use percentilet, clear
+(bootstrap: poisson)
+
+. quietly count if abs(`theta'/`setheta') < abs(tstar)
+
+. display "p-value = " r(N)/(_N+1)
+p-value = .145
+
+. 
+. * Percentile-t critical values and confidence interval
+. _pctile tstar, p(2.5,97.5) 
+
+. scalar lb = `theta' + r(r1)*`setheta'
+
+. scalar ub = `theta' + r(r2)*`setheta'
+
+. display "2.5 and 97.5 percentiles of t* distn: " r(r1) ", " r(r2) _n ///
+>     "95 percent percentile-t confidence interval is:  (" lb   ","  ub ")"
+2.5 and 97.5 percentiles of t* distn: -2.7561963, 2.5686913
+95 percent percentile-t confidence interval is:  (-.43748842,2.3074345)
+
+. 
+. ********** CLOSE OUTPUT
+. * log close
+. * clear
+. * exit
+. 
+. 
+. 
+end of do-file
+
+. graph export ct_bootstrap5.wmf, replace
+(note: file ct_bootstrap5.wmf not found)
+(file c:\Imbook\courses\2013_bgpe_germany\day3panelextra\ct_bootstrap5.wmf written in Windows Metafile format)
+
+. exit, clear

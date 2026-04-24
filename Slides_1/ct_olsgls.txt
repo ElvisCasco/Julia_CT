@@ -1,0 +1,330 @@
+-------------------------------------------------------------------------------------------------------------------------------
+      name:  <unnamed>
+       log:  c:\Imbook\courses\2013_bgpe_germany\day1olsgls\ct_olsgls.txt
+  log type:  text
+ opened on:  23 May 2013, 14:30:57
+
+. 
+. * STATA Program 
+. * For A. Colin Cameron and Pravin Trivedi "Lectures in Microeconometrics"
+. * OLS and GLS
+. *    OLS with data
+. *    OLS simulation
+. *    FGLS with data
+. 
+. * To run you need file
+. *   mus10data.dta    
+. * in your directory
+. 
+. ********** SETUP **********
+. 
+. set more off
+
+. version 12.0
+
+. set mem 10m
+set memory ignored.
+    Memory no longer needs to be set in modern Statas; memory adjustments are performed on the fly automatically.
+
+. set scheme s1mono  /* Graphics scheme */
+
+. 
+. ********** DATA DESCRIPTION **********
+. 
+. * 2002 Medical Expenditure Panel Survey (MEPS)
+. * U.S. individuals aged 25-64 years working in private sector 
+. * but not self-employed
+. * and not receiving public insurance (Medicare and Medicaid) 
+. * Data due to Deb, Munkin and Trivedi (2006)
+. 
+. ******* OLS WITH DOCTOR VISITS DATA
+. 
+. * Read in data, select 2002 data, describe and summarize key variables
+. use mus10data.dta, clear
+
+. quietly keep if year02==1
+
+. describe docvis private chronic female income
+
+              storage  display     value
+variable name   type   format      label      variable label
+-------------------------------------------------------------------------------------------------------------------------------
+docvis          int    %8.0g                  number of doctor visits
+private         byte   %8.0g                  = 1 if private insurance
+chronic         byte   %8.0g                  = 1 if a chronic condition
+female          byte   %8.0g                  = 1 if female
+income          float  %9.0g                  Income in $ / 1000
+
+. summarize docvis private chronic female income
+
+    Variable |       Obs        Mean    Std. Dev.       Min        Max
+-------------+--------------------------------------------------------
+      docvis |      4412    3.957389    7.947601          0        134
+     private |      4412    .7853581    .4106202          0          1
+     chronic |      4412    .3263826    .4689423          0          1
+      female |      4412    .4718948    .4992661          0          1
+      income |      4412    34.34018    29.03987    -49.999    280.777
+
+. 
+. * OLS regression with default standard errors
+. regress docvis private chronic female income
+
+      Source |       SS       df       MS              Number of obs =    4412
+-------------+------------------------------           F(  4,  4407) =  162.29
+       Model |  35771.7188     4  8942.92971           Prob > F      =  0.0000
+    Residual |   242846.27  4407  55.1046676           R-squared     =  0.1284
+-------------+------------------------------           Adj R-squared =  0.1276
+       Total |  278617.989  4411  63.1643594           Root MSE      =  7.4233
+
+------------------------------------------------------------------------------
+      docvis |      Coef.   Std. Err.      t    P>|t|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+     private |   1.916263   .2881911     6.65   0.000     1.351264    2.481263
+     chronic |   4.826799   .2419767    19.95   0.000     4.352404    5.301195
+      female |   1.889675   .2286615     8.26   0.000     1.441384    2.337967
+      income |    .016018    .004071     3.93   0.000     .0080367    .0239993
+       _cons |  -.5647368   .2746696    -2.06   0.040    -1.103227   -.0262465
+------------------------------------------------------------------------------
+
+. 
+. * OLS regression with robust standard errors
+. regress docvis private chronic female income, vce(robust)
+
+Linear regression                                      Number of obs =    4412
+                                                       F(  4,  4407) =  107.01
+                                                       Prob > F      =  0.0000
+                                                       R-squared     =  0.1284
+                                                       Root MSE      =  7.4233
+
+------------------------------------------------------------------------------
+             |               Robust
+      docvis |      Coef.   Std. Err.      t    P>|t|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+     private |   1.916263   .2347443     8.16   0.000     1.456047     2.37648
+     chronic |   4.826799   .3001866    16.08   0.000     4.238283    5.415316
+      female |   1.889675   .2154463     8.77   0.000     1.467292    2.312058
+      income |    .016018    .005606     2.86   0.004     .0050275    .0270085
+       _cons |  -.5647368   .2069188    -2.73   0.006    -.9704017    -.159072
+------------------------------------------------------------------------------
+
+. 
+. * Comparison of standard errors
+. quietly regress docvis private chronic female income
+
+. estimates store DEFAULT
+
+. quietly regress docvis private chronic female income, vce(robust)
+
+. estimates store ROBUST
+
+. estimates table DEFAULT ROBUST, b(%9.4f) se(%9.3f) stats(N r2 F)
+
+--------------------------------------
+    Variable |  DEFAULT     ROBUST    
+-------------+------------------------
+     private |    1.9163      1.9163  
+             |     0.288       0.235  
+     chronic |    4.8268      4.8268  
+             |     0.242       0.300  
+      female |    1.8897      1.8897  
+             |     0.229       0.215  
+      income |    0.0160      0.0160  
+             |     0.004       0.006  
+       _cons |   -0.5647     -0.5647  
+             |     0.275       0.207  
+-------------+------------------------
+           N |      4412        4412  
+          r2 |    0.1284      0.1284  
+           F |  162.2899    107.0104  
+--------------------------------------
+                          legend: b/se
+
+. 
+. * Wald test of restrictions
+. quietly regress docvis private chronic female income, vce(robust) noheader
+
+. test (private = 0) (chronic = 0)
+
+ ( 1)  private = 0
+ ( 2)  chronic = 0
+
+       F(  2,  4407) =  165.11
+            Prob > F =    0.0000
+
+. 
+. ******* CONSISTENCY AND ASYMPTOTIC NORMAILITY FOR OLS
+. 
+. * Small sample: parameters differ from dgp values
+. clear all
+
+. quietly set obs 30
+
+. set seed 10101
+
+. quietly generate double x = rchi2(1)   
+
+. quietly generate y = 1 + 2*x + rchi2(1)-1     // demeaned chi^2 error 
+
+. regress y x, noheader
+------------------------------------------------------------------------------
+           y |      Coef.   Std. Err.      t    P>|t|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+           x |   2.713073   .5743189     4.72   0.000     1.536634    3.889512
+       _cons |   1.150439   .6148461     1.87   0.072    -.1090161    2.409894
+------------------------------------------------------------------------------
+
+. 
+. * Consistency: Large sample: parameters are very close to dgp values
+. clear all
+
+. quietly set obs 100000
+
+. set seed 10101
+
+. quietly generate double x = rchi2(1)   
+
+. quietly generate y = 1 + 2*x + rchi2(1)-1     // demeaned chi^2 error 
+
+. regress y x, noheader
+------------------------------------------------------------------------------
+           y |      Coef.   Std. Err.      t    P>|t|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+           x |   1.998675   .0031725   630.00   0.000     1.992457    2.004893
+       _cons |   1.005819   .0054945   183.06   0.000     .9950495    1.016588
+------------------------------------------------------------------------------
+
+. 
+. * Central limit theorem
+. * Write program to obtain betas for one sample of size numobs (= 150)
+. program chi2data, rclass
+  1.     version 10.1  
+  2.     drop _all
+  3.     set obs $numobs
+  4.     generate double x = rchi2(1)   
+  5.     generate y = 1 + 2*x + rchi2(1)-1         // demeaned chi^2 error 
+  6.     regress y x
+  7.     return scalar b2 =_b[x]
+  8.     return scalar se2 = _se[x]
+  9.     return scalar t2 = (_b[x]-2)/_se[x]
+ 10.     return scalar r2 = abs(return(t2))>invttail($numobs-2,.025)
+ 11.     return scalar p2 = 2*ttail($numobs-2,abs(return(t2)))
+ 12. end
+
+. * Run this program 1,000 times to get 1,000 betas etcetera
+. * Results differ from MUS (2008) as MUS did not reset the seed to 10101
+. * First define global macro numobs for sample size 
+. global numobs 150
+
+. set seed 10101 
+
+. quietly simulate b2f=r(b2) se2f=r(se2) t2f=r(t2) reject2f=r(r2) p2f=r(p2),  ///
+>    reps(1000) saving(chi2datares, replace) nolegend nodots: chi2data
+
+. * Summarize the 1,000 sample means 
+. summarize b2f se2f t2 reject2f p2f
+
+    Variable |       Obs        Mean    Std. Dev.       Min        Max
+-------------+--------------------------------------------------------
+         b2f |      1000    2.000506      .08427   1.719513    2.40565
+        se2f |      1000    .0839776    .0172588   .0415919    .145264
+         t2f |      1000    .0028714    .9932668  -2.824061   4.556576
+    reject2f |      1000        .046    .2095899          0          1
+         p2f |      1000    .5175818    .2890325   .0000108   .9997772
+
+. mean b2f se2f t2 reject2f p2f
+
+Mean estimation                     Number of obs    =    1000
+
+--------------------------------------------------------------
+             |       Mean   Std. Err.     [95% Conf. Interval]
+-------------+------------------------------------------------
+         b2f |   2.000506   .0026649      1.995277    2.005735
+        se2f |   .0839776   .0005458      .0829066    .0850486
+         t2f |   .0028714   .0314099     -.0587655    .0645082
+    reject2f |       .046   .0066278       .032994     .059006
+         p2f |   .5175818     .00914       .499646    .5355177
+--------------------------------------------------------------
+
+. 
+. * Draw histogram of the t-test statistic of H0: b2 = 2
+. quietly histogram t2f, normal   ///
+>    xtitle("t-statistic for slope coeff from many samples")
+
+. graph export ct_olsglsclt.wmf, replace
+(note: file ct_olsglsclt.wmf not found)
+(file c:\Imbook\courses\2013_bgpe_germany\day1olsgls\ct_olsglsclt.wmf written in Windows Metafile format)
+
+. 
+. ******* FGLS WITH DOCTOR VISITS DATA
+. 
+. * Read in data, select 2002 data, describe and summarize key variables
+. use mus10data.dta, clear
+
+. quietly keep if year02==1
+
+. 
+. * FGLS: sigmahat^2 = exp(x'ghat) where ghat from NLS of uhat^2 on exp(x'g)
+. quietly regress docvis private chronic female income
+
+. quietly predict uhat, resid
+
+. quietly generate uhatsq = uhat^2               // compute squared residual
+
+. quietly generate one = 1                       
+
+. quietly nl (uhatsq = exp({xb: private chronic female income one})), nolog 
+
+. quietly predict varu, yhat                     // compute sigmahat^2
+
+. regress docvis private chronic female income [aweight=1/varu], noheader 
+(sum of wgt is   1.6571e+02)
+------------------------------------------------------------------------------
+      docvis |      Coef.   Std. Err.      t    P>|t|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+     private |   1.604865    .179865     8.92   0.000     1.252239    1.957491
+     chronic |   4.616045   .2996693    15.40   0.000     4.028543    5.203548
+      female |   1.400162   .1638832     8.54   0.000     1.078868    1.721455
+      income |   .0128484   .0038374     3.35   0.001     .0053252    .0203717
+       _cons |   .0141631   .1607709     0.09   0.930    -.3010285    .3293548
+------------------------------------------------------------------------------
+
+. 
+. * WLS estimator is FGLS with robust estimate of VCE
+. regress docvis private chronic female income [aweight=1/varu], vce(robust) noheader
+(sum of wgt is   1.6571e+02)
+------------------------------------------------------------------------------
+             |               Robust
+      docvis |      Coef.   Std. Err.      t    P>|t|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+     private |   1.604865   .1779509     9.02   0.000     1.255992    1.953738
+     chronic |   4.616045   .2824225    16.34   0.000     4.062355    5.169735
+      female |   1.400162    .164476     8.51   0.000     1.077706    1.722618
+      income |   .0128484    .003111     4.13   0.000     .0067492    .0189476
+       _cons |   .0141631   .1645934     0.09   0.931    -.3085226    .3368488
+------------------------------------------------------------------------------
+
+. 
+. * Compare to OLS
+. regress docvis private chronic female income, vce(robust) noheader
+------------------------------------------------------------------------------
+             |               Robust
+      docvis |      Coef.   Std. Err.      t    P>|t|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+     private |   1.916263   .2347443     8.16   0.000     1.456047     2.37648
+     chronic |   4.826799   .3001866    16.08   0.000     4.238283    5.415316
+      female |   1.889675   .2154463     8.77   0.000     1.467292    2.312058
+      income |    .016018    .005606     2.86   0.004     .0050275    .0270085
+       _cons |  -.5647368   .2069188    -2.73   0.006    -.9704017    -.159072
+------------------------------------------------------------------------------
+
+. 
+. ********** CLOSE OUTPUT
+. * log close
+. * clear
+. * exit
+. 
+. 
+. 
+end of do-file
+
+. exit, clear

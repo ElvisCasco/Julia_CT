@@ -1,0 +1,803 @@
+---------------------------------------------------------------------------------
+      name:  <unnamed>
+       log:  c:\Users\ccameron\Dropbox\Desktop\TEACHING\240f\2022_seminar\ML_2022
+> _part3.txt
+  log type:  text
+ opened on:   2 May 2022, 20:08:24
+
+. 
+. ********** OVERVIEW OF ML_2022_part3.do **********
+. 
+. * To run you need files
+. *  mus203mepsmedexp.dta
+. *  mus228ajr.dta
+. * in your directory
+. 
+. * And Stata user-written commands 
+. *   none
+. * are used
+. 
+. * 2. PARTIALLING OUT ESTIMATOR
+. * 4. CROSSFIT PARTIALLING OUT ESTIMATOR
+. * 5. DOUBLE SELECTION ESTIMATOR APPLICATION
+. * 6. OTHER MODELS
+. 
+. ********** SETUP **********
+. 
+. set more off
+
+. version 16
+
+. clear all
+
+. set linesize 82
+
+. set scheme s1mono  /* Graphics scheme */
+
+. 
+. ********** DATA DESCRIPTION **********
+. 
+. * File mus203mepsmedexp.dta is aothurs' extract from MEPS 
+. * (Medical Expenditure Panel Survey)
+. * for individuals 65 years and older in U.S. Medicare in 2003
+. 
+. * mus228ajr.dta is from Acemoglu, Johnson and Robinson (2001), "The colonial 
+. * origins of comparative development: an empirical investigation," AER, 1369-140
+> 1.
+. 
+. ********* 2. PARTIALLING OUT ESTIMATOR 
+. 
+. * Data for inference on suppins example: 5 continuous and 13 binary variables
+. use mus203mepsmedexp.dta, clear
+(A.C.Cameron & P.K.Trivedi (2021): Microeconometrics using Stata, 2e)
+
+. keep if ltotexp != .
+(109 observations deleted)
+
+. describe ltotexp suppins
+
+Variable      Storage   Display    Value
+    name         type    format    label      Variable label
+----------------------------------------------------------------------------------
+ltotexp         float   %9.0g                 ln(totexp) if totexp > 0
+suppins         float   %9.0g                 =1 if has supp priv insurance
+
+. summarize ltotexp suppins
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+     ltotexp |      2,955    8.059866    1.367592   1.098612   11.74094
+     suppins |      2,955    .5915398    .4916322          0          1
+
+. 
+. * Continuous variables
+. global xlist2 income educyr age famsze totchr
+
+. describe $xlist2
+
+Variable      Storage   Display    Value
+    name         type    format    label      Variable label
+----------------------------------------------------------------------------------
+income          double  %12.0g                annual household income/1000
+educyr          double  %12.0g                Years of education
+age             double  %12.0g                Age
+famsze          double  %12.0g                Size of the family
+totchr          double  %12.0g                # of chronic problems
+
+. summarize $xlist2
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+      income |      2,955    22.68353    22.60988         -1     312.46
+      educyr |      2,955    11.82809    3.405095          0         17
+         age |      2,955    74.24535    6.375975         65         90
+      famsze |      2,955    1.890694    .9644483          1         13
+      totchr |      2,955    1.808799    1.294613          0          7
+
+. 
+. * Discrete binary variables
+. global dlist2 female white hisp marry northe mwest south ///
+>     msa phylim actlim injury priolist hvgg
+
+. describe $dlist2        
+
+Variable      Storage   Display    Value
+    name         type    format    label      Variable label
+----------------------------------------------------------------------------------
+female          double  %12.0g                =1 if female
+white           double  %12.0g                =1 if white
+hisp            double  %12.0g                =1 if Hispanic
+marry           double  %12.0g                =1 if married
+northe          double  %12.0g                =1 if northeast area
+mwest           double  %12.0g                =1 if Midwest area
+south           double  %12.0g                =1 if south area (West is excluded)
+msa             double  %12.0g                =1 if metropolitan statistical area
+phylim          double  %12.0g                =1 if has functional limitation
+actlim          double  %12.0g                =1 if has activity limitation
+injury          double  %12.0g                =1 if condition is caused by an
+                                                accident/injury
+priolist        double  %12.0g                =1 if has medical conditions that
+                                                are on the priority list
+hvgg            float   %9.0g                 =1 if health status is excellent,
+                                                good or very good
+
+.         
+. * OLS on small model and full model
+. global rlist2 c.($xlist2)##c.($xlist2) i.($dlist2) c.($xlist2)#i.($dlist2)
+
+. qui regress ltotexp suppins $xlist2 $dlist2, vce(robust)
+
+. estimates store OLSSMALL
+
+. qui regress ltotexp suppins $rlist2, vce(robust)
+
+. estimates store OLSFULL
+
+. estimates table OLSSMALL OLSFULL, keep(suppins) b(%9.4f) se stats(N df_m r2)
+
+--------------------------------------
+    Variable | OLSSMALL     OLSFULL   
+-------------+------------------------
+     suppins |    0.1706      0.1868  
+             |    0.0469      0.0478  
+-------------+------------------------
+           N |      2955        2955  
+        df_m |   19.0000     99.0000  
+          r2 |    0.2682      0.3028  
+--------------------------------------
+                          Legend: b/se
+
+. 
+. * Partialing-out partial linear model using default plugin lambda
+. poregress ltotexp suppins, controls($rlist2)
+
+Estimating lasso for ltotexp using plugin
+Estimating lasso for suppins using plugin
+
+Partialing-out linear model          Number of obs                =      2,955
+                                     Number of controls           =        176
+                                     Number of selected controls  =         21
+                                     Wald chi2(1)                 =      15.43
+                                     Prob > chi2                  =     0.0001
+
+------------------------------------------------------------------------------
+             |               Robust
+     ltotexp | Coefficient  std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+     suppins |   .1839193   .0468223     3.93   0.000     .0921493    .2756892
+------------------------------------------------------------------------------
+Note: Chi-squared test is a Wald test of the coefficients of the variables
+      of interest jointly equal to zero. Lassos select controls for model
+      estimation. Type lassoinfo to see number of selected variables in each
+      lasso.
+
+. 
+. * Lasso information
+. lassoinfo
+
+    Estimate: active
+     Command: poregress
+------------------------------------------------------
+            |                                   No. of
+            |           Selection             selected
+   Variable |    Model     method    lambda  variables
+------------+-----------------------------------------
+    ltotexp |   linear     plugin   .080387         12
+    suppins |   linear     plugin   .080387          9
+------------------------------------------------------
+
+. 
+. * Variables selected
+. lassoknots, for(ltotexp)
+
+----------------------------------------------------------------------------------
+       |              No. of           |
+       |             nonzero In-sample |       Variables (A)dded, (R)emoved,      
+    ID |   lambda      coef. R-squared |            or left (U)nchanged           
+-------+-------------------------------+------------------------------------------
+   * 1 |  .080387         12    0.2390 | A totchr   0.actlim c.age#c.totchr       
+       |                               |   0.hisp#c.totchr                        
+       |                               |   0.hvgg#c.totchr                        
+       |                               |   1.white#c.totchr                       
+       |                               |   c.educyr#c.totchr                      
+       |                               |   1.phylim#c.educyr                      
+       |                               |   0.phylim#c.famsze                      
+       |                               |   0.actlim#c.famsze                      
+       |                               |   0.female#c.totchr                      
+       |                               |   1.priolist#c.educyr                    
+----------------------------------------------------------------------------------
+* lambda selected by plugin assuming heteroskedastic errors.
+
+. lassoknots, for(suppins)
+
+----------------------------------------------------------------------------------
+       |              No. of           |
+       |             nonzero In-sample |       Variables (A)dded, (R)emoved,      
+    ID |   lambda      coef. R-squared |            or left (U)nchanged           
+-------+-------------------------------+------------------------------------------
+   * 1 |  .080387          9    0.0809 | A age      income   1.hvgg#c.income      
+       |                               |   0.hisp#c.educyr                        
+       |                               |   1.marry#c.income                       
+       |                               |   1.white#c.educyr                       
+       |                               |   0.marry#c.famsze                       
+       |                               |   c.income#c.totchr                      
+       |                               |   0.northe#c.income                      
+----------------------------------------------------------------------------------
+* lambda selected by plugin assuming heteroskedastic errors.
+
+.  
+. * Various postestimation options
+. lassocoef (., for(ltotexp))
+
+-----------------------------
+                  |  ltotexp 
+------------------+----------
+           totchr |     x    
+                  |
+c.educyr#c.totchr |     x    
+                  |
+   c.age#c.totchr |     x    
+                  |
+         0.actlim |     x    
+                  |
+  phylim#c.educyr |
+               1  |     x    
+                  |
+priolist#c.educyr |
+               1  |     x    
+                  |
+  phylim#c.famsze |
+               0  |     x    
+                  |
+  actlim#c.famsze |
+               0  |     x    
+                  |
+  female#c.totchr |
+               0  |     x    
+                  |
+   white#c.totchr |
+               1  |     x    
+                  |
+    hisp#c.totchr |
+               0  |     x    
+                  |
+    hvgg#c.totchr |
+               0  |     x    
+                  |
+            _cons |     x    
+-----------------------------
+Legend:
+  b - base level
+  e - empty cell
+  o - omitted
+  x - estimated
+
+. lassocoef (., for(suppins))
+
+-----------------------------
+                  |  suppins 
+------------------+----------
+           income |     x    
+              age |     x    
+                  |
+c.income#c.totchr |     x    
+                  |
+   marry#c.income |
+               1  |     x    
+                  |
+  northe#c.income |
+               0  |     x    
+                  |
+    hvgg#c.income |
+               1  |     x    
+                  |
+   white#c.educyr |
+               1  |     x    
+                  |
+    hisp#c.educyr |
+               0  |     x    
+                  |
+   marry#c.famsze |
+               0  |     x    
+                  |
+            _cons |     x    
+-----------------------------
+Legend:
+  b - base level
+  e - empty cell
+  o - omitted
+  x - estimated
+
+. // lassogof does not apply after po, xpo, ds 
+. 
+. * Partialing out done manually
+. qui lasso linear suppins $rlist2, selection(plugin) 
+
+. qui predict suppins_lasso, postselection
+
+. qui generate u_suppins = suppins - suppins_lasso
+
+. qui lasso linear ltotexp $rlist2, selection(plugin) 
+
+. qui predict ltotexp_lasso, postselection
+
+. qui generate u_ltotexp = ltotexp - ltotexp_lasso
+
+. regress u_ltotexp u_suppins, vce(robust) noconstant noheader
+------------------------------------------------------------------------------
+             |               Robust
+   u_ltotexp | Coefficient  std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+   u_suppins |   .1839193   .0468223     3.93   0.000     .0921117    .2757268
+------------------------------------------------------------------------------
+
+. 
+. * Cross validation instead
+. poregress ltotexp suppins, controls($rlist2) selection(cv) rseed(10101)
+
+Estimating lasso for ltotexp using cv
+Estimating lasso for suppins using cv
+
+Partialing-out linear model          Number of obs                =      2,955
+                                     Number of controls           =        176
+                                     Number of selected controls  =         73
+                                     Wald chi2(1)                 =      15.58
+                                     Prob > chi2                  =     0.0001
+
+------------------------------------------------------------------------------
+             |               Robust
+     ltotexp | Coefficient  std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+     suppins |   .1852675   .0469368     3.95   0.000     .0932731    .2772619
+------------------------------------------------------------------------------
+Note: Chi-squared test is a Wald test of the coefficients of the variables
+      of interest jointly equal to zero. Lassos select controls for model
+      estimation. Type lassoinfo to see number of selected variables in each
+      lasso.
+
+. lassoinfo
+
+    Estimate: active
+     Command: poregress
+-----------------------------------------------------------------
+            |                                              No. of
+            |           Selection  Selection             selected
+   Variable |    Model     method  criterion    lambda  variables
+------------+----------------------------------------------------
+    ltotexp |   linear         cv    CV min.  .0117693         40
+    suppins |   linear         cv    CV min.  .0020493         50
+-----------------------------------------------------------------
+
+. 
+. ********* 4. CROSSFIT PARTIALLING OUT ESTIMATOR 
+.  
+. * Crossfit partialing out (double/debiased) using default plugin
+. xporegress ltotexp suppins, controls($rlist2) rseed(10101) nolog
+
+Cross-fit partialing-out             Number of obs                =      2,955
+linear model                         Number of controls           =        176
+                                     Number of selected controls  =         31
+                                     Number of folds in cross-fit =         10
+                                     Number of resamples          =          1
+                                     Wald chi2(1)                 =      15.66
+                                     Prob > chi2                  =     0.0001
+
+------------------------------------------------------------------------------
+             |               Robust
+     ltotexp | Coefficient  std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+     suppins |   .1856171   .0469096     3.96   0.000      .093676    .2775582
+------------------------------------------------------------------------------
+Note: Chi-squared test is a Wald test of the coefficients of the variables
+      of interest jointly equal to zero. Lassos select controls for model
+      estimation. Type lassoinfo to see number of selected variables in each
+      lasso.
+
+. 
+. * Summarize the number of selected variables across the ten folds
+. lassoinfo
+
+    Estimate: active
+     Command: xporegress
+------------------------------------------------------------
+            |                      No. of selected variables
+            |           Selection  -------------------------
+   Variable |    Model     method      min   median      max
+------------+-----------------------------------------------
+    ltotexp |   linear     plugin       11       13       14
+    suppins |   linear     plugin        7        9       11
+------------------------------------------------------------
+
+. 
+. /* 
+> This takes a long time so is commented out
+> * Multiple sample splits for xporegress
+> . xporegress ltotexp suppins, controls($rlist2) rseed(10101) nolog resample(10)
+> */
+. 
+. ********* 5. DOUBLE SELECTION ESTIMATOR 
+. 
+. * Double selection partial linear model using default plugin lambda
+. dsregress ltotexp suppins, controls($rlist2)
+
+Estimating lasso for ltotexp using plugin
+Estimating lasso for suppins using plugin
+
+Double-selection linear model         Number of obs               =      2,955
+                                      Number of controls          =        176
+                                      Number of selected controls =         21
+                                      Wald chi2(1)                =      15.30
+                                      Prob > chi2                 =     0.0001
+
+------------------------------------------------------------------------------
+             |               Robust
+     ltotexp | Coefficient  std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+     suppins |   .1836224   .0469429     3.91   0.000      .091616    .2756289
+------------------------------------------------------------------------------
+Note: Chi-squared test is a Wald test of the coefficients of the variables
+      of interest jointly equal to zero. Lassos select controls for model
+      estimation. Type lassoinfo to see number of selected variables in each
+      lasso.
+
+. 
+. // Not included - do dsregress manually
+. qui lasso linear suppins $rlist2, selection(plugin) 
+
+. lassocoef
+
+-----------------------------
+                  |  active  
+------------------+----------
+           income |     x    
+              age |     x    
+                  |
+c.income#c.totchr |     x    
+                  |
+   marry#c.income |
+               1  |     x    
+                  |
+  northe#c.income |
+               0  |     x    
+                  |
+    hvgg#c.income |
+               1  |     x    
+                  |
+   white#c.educyr |
+               1  |     x    
+                  |
+    hisp#c.educyr |
+               0  |     x    
+                  |
+   marry#c.famsze |
+               0  |     x    
+                  |
+            _cons |     x    
+-----------------------------
+Legend:
+  b - base level
+  e - empty cell
+  o - omitted
+  x - estimated
+
+. qui lasso linear ltotexp $rlist2, selection(plugin) 
+
+. lassocoef
+
+-----------------------------
+                  |  active  
+------------------+----------
+           totchr |     x    
+                  |
+c.educyr#c.totchr |     x    
+                  |
+   c.age#c.totchr |     x    
+                  |
+         0.actlim |     x    
+                  |
+  phylim#c.educyr |
+               1  |     x    
+                  |
+priolist#c.educyr |
+               1  |     x    
+                  |
+  phylim#c.famsze |
+               0  |     x    
+                  |
+  actlim#c.famsze |
+               0  |     x    
+                  |
+  female#c.totchr |
+               0  |     x    
+                  |
+   white#c.totchr |
+               1  |     x    
+                  |
+    hisp#c.totchr |
+               0  |     x    
+                  |
+    hvgg#c.totchr |
+               0  |     x    
+                  |
+            _cons |     x    
+-----------------------------
+Legend:
+  b - base level
+  e - empty cell
+  o - omitted
+  x - estimated
+
+. regress ltotexp suppins income age c.income#c.totchr 1.marry#c.income   ///
+>     0.northe#c.income 1.hvgg#  c.income 1.white#c.educy 0.hisp#c.educyr ///
+>     0.marry#c.famsze ///
+>     totchr c.educyr#c.totchr c.age#c.totchr 0.actlim 1.phylim#c.educyr  /// 
+>     1.priolist#c.educyr 0.phylim#c.famsze 0.actlim#c.famsze             ///
+>     0.female#c.totchr 1.white#c.totchr 0.hisp#c.totchr 0.hvgg#c.totchr
+
+      Source |       SS           df       MS      Number of obs   =     2,955
+-------------+----------------------------------   F(22, 2932)     =     48.11
+       Model |  1465.52191        22  66.6146324   Prob > F        =    0.0000
+    Residual |  4059.36747     2,932  1.38450459   R-squared       =    0.2653
+-------------+----------------------------------   Adj R-squared   =    0.2597
+       Total |  5524.88938     2,954  1.87030785   Root MSE        =    1.1766
+
+---------------------------------------------------------------------------------
+        ltotexp | Coefficient  Std. err.      t    P>|t|     [95% conf. interval]
+----------------+----------------------------------------------------------------
+        suppins |   .1836224   .0466026     3.94   0.000     .0922453    .2749996
+         income |   .0004575   .0023329     0.20   0.845    -.0041168    .0050319
+            age |   .0041571   .0061836     0.67   0.501    -.0079676    .0162818
+                |
+       c.income#|
+       c.totchr |   .0009959   .0009204     1.08   0.279    -.0008089    .0028007
+                |
+ marry#c.income |
+             1  |   .0030251   .0017438     1.73   0.083    -.0003941    .0064444
+                |
+northe#c.income |
+             0  |     -.0049   .0017976    -2.73   0.006    -.0084246   -.0013753
+                |
+  hvgg#c.income |
+             1  |   .0006795   .0016827     0.40   0.686    -.0026199    .0039789
+                |
+ white#c.educyr |
+             1  |   .0229591   .0121159     1.89   0.058    -.0007975    .0467156
+                |
+  hisp#c.educyr |
+             0  |   .0120555   .0101438     1.19   0.235    -.0078342    .0319452
+                |
+ marry#c.famsze |
+             0  |  -.0193552   .0263716    -0.73   0.463     -.071064    .0323536
+                |
+         totchr |    .505258   .2402419     2.10   0.036     .0341981     .976318
+                |
+       c.educyr#|
+       c.totchr |  -.0151437   .0051052    -2.97   0.003    -.0251539   -.0051336
+                |
+ c.age#c.totchr |  -.0006333   .0027345    -0.23   0.817    -.0059951    .0047286
+                |
+       0.actlim |  -.2400464   .1016928    -2.36   0.018     -.439443   -.0406499
+                |
+phylim#c.educyr |
+             1  |   .0157747   .0078153     2.02   0.044     .0004508    .0310986
+                |
+       priolist#|
+       c.educyr |
+             1  |     .03668   .0049786     7.37   0.000     .0269181    .0464418
+                |
+phylim#c.famsze |
+             0  |  -.0437272   .0468658    -0.93   0.351    -.1356204     .048166
+                |
+actlim#c.famsze |
+             0  |  -.0678681   .0476059    -1.43   0.154    -.1612125    .0254762
+                |
+female#c.totchr |
+             0  |     .04801   .0209213     2.29   0.022     .0069881    .0890319
+                |
+ white#c.totchr |
+             1  |  -.0445682    .095657    -0.47   0.641    -.2321298    .1429935
+                |
+  hisp#c.totchr |
+             0  |   .0241159   .0489108     0.49   0.622    -.0717871    .1200188
+                |
+  hvgg#c.totchr |
+             0  |   .0608314   .0240594     2.53   0.012     .0136564    .1080064
+                |
+          _cons |   6.578916   .4875832    13.49   0.000     5.622876    7.534956
+---------------------------------------------------------------------------------
+
+. dsregress ltotexp suppins, controls($rlist2)
+
+Estimating lasso for ltotexp using plugin
+Estimating lasso for suppins using plugin
+
+Double-selection linear model         Number of obs               =      2,955
+                                      Number of controls          =        176
+                                      Number of selected controls =         21
+                                      Wald chi2(1)                =      15.30
+                                      Prob > chi2                 =     0.0001
+
+------------------------------------------------------------------------------
+             |               Robust
+     ltotexp | Coefficient  std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+     suppins |   .1836224   .0469429     3.91   0.000      .091616    .2756289
+------------------------------------------------------------------------------
+Note: Chi-squared test is a Wald test of the coefficients of the variables
+      of interest jointly equal to zero. Lassos select controls for model
+      estimation. Type lassoinfo to see number of selected variables in each
+      lasso.
+
+. 
+. ********* 6. OTHER MODELS 
+. 
+. *** LOGIT PARTIALLING-OUT ESTIMATOR
+. 
+. * Logit variant of partial linear model and partialing-out estimator
+. generate dy = totexp > 4000
+
+. qui logit dy suppins $rlist2, or vce(robust)
+
+. estimates store FULL
+
+. qui pologit dy suppins, controls($rlist2) selection(plugin) coef
+
+. estimates store PARTIALOUT
+
+. qui dslogit dy suppins, controls($rlist2) coef
+
+. estimates store DOUBSEL
+
+. estimates table FULL PARTIALOUT DOUBSEL, keep(suppins) b(%9.4f) se ///
+>     stats(N df_m k_controls_sel)
+
+--------------------------------------------------
+    Variable |   FULL      PARTIAL~T    DOUBSEL   
+-------------+------------------------------------
+     suppins |    0.2792      0.2632      0.2680  
+             |    0.0936      0.0892      0.0892  
+-------------+------------------------------------
+           N |      2955        2955        2955  
+        df_m |   99.0000                          
+k_controls~l |               19.0000     19.0000  
+--------------------------------------------------
+                                      Legend: b/se
+
+. 
+. tabulate dy
+
+         dy |      Freq.     Percent        Cum.
+------------+-----------------------------------
+          0 |      1,661       56.21       56.21
+          1 |      1,294       43.79      100.00
+------------+-----------------------------------
+      Total |      2,955      100.00
+
+.         
+. *** INSTRUMENTAL VARIAVBLES APPLICATION
+. 
+. * Read in Acemoglu-Johnson-Robinson data and define globals  
+. qui use mus228ajr.dta, clear
+
+. global xlist lat_abst edes1975 avelf temp* humid* steplow deslow ///
+>     stepmid desmid drystep  drywint goldm iron silv zinc oilres landlock
+
+. describe logpgp95 avexpr logem4
+
+Variable      Storage   Display    Value
+    name         type    format    label      Variable label
+----------------------------------------------------------------------------------
+logpgp95        float   %9.0g                 log PPP GDP pc in 1995, World Bank
+avexpr          float   %9.0g                 average protection against
+                                                expropriation risk
+logem4          float   %9.0g                 log settler mortality
+
+. summarize logpgp95 avexpr logem4, sep(0)
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+    logpgp95 |         64    8.062237    1.043359   6.109248   10.21574
+      avexpr |         64    6.515625    1.468647        3.5         10
+      logem4 |         64    4.657031    1.257984   2.145931   7.986165
+
+. correlate logpgp95 avexpr logem4
+(obs=64)
+
+             | logpgp95   avexpr   logem4
+-------------+---------------------------
+    logpgp95 |   1.0000
+      avexpr |   0.7349   1.0000
+      logem4 |  -0.6908  -0.5197   1.0000
+
+
+. 
+. * Partialling-out IV using plugin for lambda
+. poivregress logpgp95 (avexpr=logem4), controls($xlist) selection(plugin, hom)
+
+Estimating lasso for logpgp95 using plugin
+Estimating lasso for avexpr using plugin
+Estimating lasso for pred(avexpr) using plugin
+
+Partialing-out IV linear model     Number of obs                  =         64
+                                   Number of controls             =         24
+                                   Number of instruments          =          1
+                                   Number of selected controls    =          5
+                                   Number of selected instruments =          1
+                                   Wald chi2(1)                   =       8.74
+                                   Prob > chi2                    =     0.0031
+
+------------------------------------------------------------------------------
+             |               Robust
+    logpgp95 | Coefficient  std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+      avexpr |   .8798503   .2976286     2.96   0.003      .296509    1.463192
+------------------------------------------------------------------------------
+Endogenous: avexpr
+Note: Chi-squared test is a Wald test of the coefficients of the variables
+      of interest jointly equal to zero. Lassos select controls for model
+      estimation. Type lassoinfo to see number of selected variables in each
+      lasso.
+
+. 
+. // Not included 
+. // The following shows selected instrument is logem4
+. // and selected controls are edes1975 avelf temp2 iron zinc
+. lassocoef (., for(avexpr))       // chooses logem4 and edes1975 zinc
+
+------------------------
+             |  avexpr  
+-------------+----------
+    edes1975 |     x    
+        zinc |     x    
+      logem4 |     x    
+       _cons |     x    
+------------------------
+Legend:
+  b - base level
+  e - empty cell
+  o - omitted
+  x - estimated
+
+. lassocoef (., for(logpgp95))     // chooses edes1975 avelf
+
+------------------------
+             | logpgp95 
+-------------+----------
+    edes1975 |     x    
+       avelf |     x    
+       _cons |     x    
+------------------------
+Legend:
+  b - base level
+  e - empty cell
+  o - omitted
+  x - estimated
+
+. lassocoef (., for(pred(avexpr))) // chooses edes1975 avelf temp2 iron zinc  
+
+---------------------------
+             | pred(avexpr)
+-------------+-------------
+    edes1975 |      x      
+       avelf |      x      
+       temp2 |      x      
+        iron |      x      
+        zinc |      x      
+       _cons |      x      
+---------------------------
+Legend:
+  b - base level
+  e - empty cell
+  o - omitted
+  x - estimated
+
+. 
+. ********** CLOSE OUTPUT **********
+. 
+. * log close
+. * clear 
+. * exit
+. 
+end of do-file
+
+. exit, clear

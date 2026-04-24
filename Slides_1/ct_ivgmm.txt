@@ -1,0 +1,375 @@
+-------------------------------------------------------------------------------------------------------------------------------
+      name:  <unnamed>
+       log:  c:\Imbook\courses\2013_bgpe_germany\day2ivpanel\ct_ivgmm.txt
+  log type:  text
+ opened on:  23 May 2013, 14:42:00
+
+. 
+. ********** OVERVIEW OF ct_ivgmm.do **********
+. 
+. * STATA Program 
+. * For A. Colin Cameron and Pravin K. Trivedi "Lectures in Microeconometrics" 
+. * IV, 2SLS and linear GMM
+. 
+. * To run you need file
+. *   mus06data.dta    
+. * in your directory
+. 
+. * Stata add-on condivreg is used
+. 
+. ********** SETUP **********
+. 
+. set more off
+
+. version 12.0
+
+. set mem 10m
+set memory ignored.
+    Memory no longer needs to be set in modern Statas; memory adjustments are performed on the fly automatically.
+
+. set scheme s1mono  /* Graphics scheme */
+
+. 
+. ********** DATA DESCRIPTION **********
+. 
+. * The original data is from the Medical Expenditure Panel Survey (MEPS)
+. * for individuals over the age of 65 years
+. 
+. ********** INSTRUMENTAL VARIABLES EXAMPLE
+. 
+. * Read data, define global x2list (exogenous regressors), and summarize data
+. use mus06data.dta
+
+. global x2list totchr age female blhisp linc
+
+. keep if linc != .
+(302 observations deleted)
+
+. describe ldrugexp hi_empunion $x2list
+
+              storage  display     value
+variable name   type   format      label      variable label
+-------------------------------------------------------------------------------------------------------------------------------
+ldrugexp        float  %9.0g                  log(drugexp)
+hi_empunion     byte   %8.0g                  Insured thro emp/union
+totchr          byte   %8.0g                  Total chronic cond
+age             byte   %8.0g                  Age
+female          byte   %8.0g                  Female
+blhisp          float  %9.0g                  Black or Hispanic
+linc            float  %9.0g                  log(income)
+
+. summarize ldrugexp hi_empunion $x2list 
+
+    Variable |       Obs        Mean    Std. Dev.       Min        Max
+-------------+--------------------------------------------------------
+    ldrugexp |     10089    6.481361    1.362052          0   10.18017
+ hi_empunion |     10089    .3821984    .4859488          0          1
+      totchr |     10089    1.860938    1.292858          0          9
+         age |     10089    75.05174    6.682109         65         91
+      female |     10089    .5770641    .4940499          0          1
+-------------+--------------------------------------------------------
+      blhisp |     10089    .1635445      .36988          0          1
+        linc |     10089    2.743275    .9131433  -6.907755   5.744476
+
+. 
+. * Define the exogenous regressors using global x2list
+. global x2list totchr age female blhisp linc
+
+. 
+. * OLS 
+. regress ldrugexp hi_empunion $x2list, vce(robust)
+
+Linear regression                                      Number of obs =   10089
+                                                       F(  6, 10082) =  376.85
+                                                       Prob > F      =  0.0000
+                                                       R-squared     =  0.1770
+                                                       Root MSE      =   1.236
+
+------------------------------------------------------------------------------
+             |               Robust
+    ldrugexp |      Coef.   Std. Err.      t    P>|t|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+ hi_empunion |   .0738788   .0259848     2.84   0.004     .0229435    .1248141
+      totchr |   .4403807   .0093633    47.03   0.000     .4220268    .4587346
+         age |  -.0035295    .001937    -1.82   0.068    -.0073264    .0002675
+      female |   .0578055   .0253651     2.28   0.023     .0080848    .1075262
+      blhisp |  -.1513068   .0341264    -4.43   0.000    -.2182013   -.0844122
+        linc |   .0104815   .0137126     0.76   0.445    -.0163979     .037361
+       _cons |   5.861131   .1571037    37.31   0.000     5.553176    6.169085
+------------------------------------------------------------------------------
+
+. 
+. * Two available instruments for hi_empunion
+. describe ssiratio multlc
+
+              storage  display     value
+variable name   type   format      label      variable label
+-------------------------------------------------------------------------------------------------------------------------------
+ssiratio        float  %9.0g                  SSI/Income ratio
+multlc          byte   %8.0g                  Multiple locations
+
+. summarize ssiratio multlc 
+
+    Variable |       Obs        Mean    Std. Dev.       Min        Max
+-------------+--------------------------------------------------------
+    ssiratio |     10089    .5365438    .3678175          0    9.25062
+      multlc |     10089    .0620478    .2412543          0          1
+
+. correlate hi_empunion ssiratio multlc 
+(obs=10089)
+
+             | hi_emp~n ssiratio   multlc
+-------------+---------------------------
+ hi_empunion |   1.0000
+    ssiratio |  -0.2124   1.0000
+      multlc |   0.1198  -0.1904   1.0000
+
+
+. 
+. * IV estimator with ssiratio as single instrument for hi_empunion
+. ivregress 2sls ldrugexp (hi_empunion = ssiratio) $x2list, vce(robust)
+
+Instrumental variables (2SLS) regression               Number of obs =   10089
+                                                       Wald chi2(6)  = 2000.86
+                                                       Prob > chi2   =  0.0000
+                                                       R-squared     =  0.0640
+                                                       Root MSE      =  1.3177
+
+------------------------------------------------------------------------------
+             |               Robust
+    ldrugexp |      Coef.   Std. Err.      z    P>|z|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+ hi_empunion |  -.8975913   .2211268    -4.06   0.000    -1.330992   -.4641908
+      totchr |   .4502655   .0101969    44.16   0.000       .43028     .470251
+         age |  -.0132176   .0029977    -4.41   0.000    -.0190931   -.0073421
+      female |   -.020406   .0326114    -0.63   0.531    -.0843232    .0435113
+      blhisp |  -.2174244   .0394944    -5.51   0.000     -.294832   -.1400167
+        linc |   .0870018   .0226356     3.84   0.000     .0426368    .1313668
+       _cons |    6.78717   .2688453    25.25   0.000     6.260243    7.314097
+------------------------------------------------------------------------------
+Instrumented:  hi_empunion
+Instruments:   totchr age female blhisp linc ssiratio
+
+. 
+. * 2SLS estimator with ssiratio and multlc as instruments for hi_empunion
+. ivregress 2sls ldrugexp (hi_empunion = ssiratio multlc) $x2list, vce(robust)
+
+Instrumental variables (2SLS) regression               Number of obs =   10089
+                                                       Wald chi2(6)  = 1955.36
+                                                       Prob > chi2   =  0.0000
+                                                       R-squared     =  0.0414
+                                                       Root MSE      =  1.3335
+
+------------------------------------------------------------------------------
+             |               Robust
+    ldrugexp |      Coef.   Std. Err.      z    P>|z|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+ hi_empunion |  -.9899269   .2045907    -4.84   0.000    -1.390917   -.5889365
+      totchr |   .4512051   .0103088    43.77   0.000     .4310001      .47141
+         age |  -.0141384      .0029    -4.88   0.000    -.0198223   -.0084546
+      female |  -.0278398   .0321743    -0.87   0.387    -.0909002    .0352207
+      blhisp |  -.2237087   .0395848    -5.65   0.000    -.3012934   -.1461239
+        linc |   .0942748   .0218841     4.31   0.000     .0513828    .1371668
+       _cons |   6.875188   .2578855    26.66   0.000     6.369741    7.380634
+------------------------------------------------------------------------------
+Instrumented:  hi_empunion
+Instruments:   totchr age female blhisp linc ssiratio multlc
+
+. 
+. * Robust version of Hausman test using augmented regression
+. quietly ivregress 2sls ldrugexp (hi_empunion = ssiratio) $x2list, vce(robust)
+
+. estat endogenous
+
+  Tests of endogeneity
+  Ho: variables are exogenous
+
+  Robust score chi2(1)            =   24.935  (p = 0.0000)
+  Robust regression F(1,10081)    =  26.4333  (p = 0.0000)
+
+. 
+. * Robust Hausman-Wu test of endogeneity implemented manually
+. quietly regress hi_empunion ssiratio $x2list
+
+. quietly predict v1hat, resid
+
+. quietly regress ldrugexp hi_empunion v1hat $x2list, vce(robust)
+
+. test v1hat 
+
+ ( 1)  v1hat = 0
+
+       F(  1, 10081) =   26.43
+            Prob > F =    0.0000
+
+. 
+. * Weak instrument tests - just-identified model
+. quietly ivregress 2sls ldrugexp (hi_empunion = ssiratio) $x2list, vce(robust)
+
+. estat firststage, forcenonrobust all  
+
+  First-stage regression summary statistics
+  --------------------------------------------------------------------------
+               |            Adjusted      Partial       Robust
+      Variable |   R-sq.       R-sq.        R-sq.    F(1,10082)   Prob > F
+  -------------+------------------------------------------------------------
+   hi_empunion |  0.0761      0.0755       0.0179       65.7602    0.0000
+  --------------------------------------------------------------------------
+
+
+  Shea's partial R-squared
+  --------------------------------------------------
+               |     Shea's             Shea's
+      Variable |  Partial R-sq.   Adj. Partial R-sq.
+  -------------+------------------------------------
+   hi_empunion |     0.0179             0.0174
+  --------------------------------------------------
+
+
+  Minimum eigenvalue statistic = 183.98      
+
+  Critical Values                      # of endogenous regressors:    1
+  Ho: Instruments are weak             # of excluded instruments:     1
+  ---------------------------------------------------------------------
+                                     |    5%     10%     20%     30%
+  2SLS relative bias                 |         (not available)
+  -----------------------------------+---------------------------------
+                                     |   10%     15%     20%     25%
+  2SLS Size of nominal 5% Wald test  |  16.38    8.96    6.66    5.53
+  LIML Size of nominal 5% Wald test  |  16.38    8.96    6.66    5.53
+  ---------------------------------------------------------------------
+
+
+. 
+. * Conditional test and confidence intervals when weak instruments 
+. condivreg ldrugexp (hi_empunion = ssiratio) $x2list, lm ar 2sls test(0)
+
+Instrumental variables (2SLS) regression
+
+First-stage results                                    Number of obs =   10089
+-----------------------                                F(  6, 10082) =  319.62
+F(  1, 10082) =  183.98                                Prob > F      =  0.0000
+Prob > F      =  0.0000                                R-squared     =  0.0640
+R-squared     =  0.0761                                Adj R-squared =  0.0634
+Adj R-squared =  0.0755                                Root MSE      =   1.318
+
+------------------------------------------------------------------------------
+    ldrugexp |      Coef.   Std. Err.      t    P>|t|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+ hi_empunion |  -.8975913   .2079906    -4.32   0.000    -1.305294   -.4898882
+      totchr |   .4502655   .0104225    43.20   0.000     .4298354    .4706957
+         age |  -.0132176   .0028759    -4.60   0.000    -.0188549   -.0075802
+      female |   -.020406   .0315518    -0.65   0.518    -.0822538    .0414418
+      blhisp |  -.2174244   .0386879    -5.62   0.000    -.2932603   -.1415884
+        linc |   .0870018   .0220221     3.95   0.000     .0438342    .1301694
+       _cons |    6.78717   .2555229    26.56   0.000     6.286294    7.288046
+------------------------------------------------------------------------------
+Instrumented:  hi_empunion
+Instruments:   totchr age female blhisp linc ssiratio
+Confidence set and p-value for hi_empunion are based on normal approximation
+------------------------------------------------------------------------------
+
+
+
+------------------------------------------------------------------------------
+               Coverage-corrected confidence sets and p-values
+                     for Ho: _b[hi_empunion] = 0        
+                 LIML estimate of _b[hi_empunion] = -.8975913
+
+------------------------------------------------------------------------------
+ Test                             Confidence Set                      p-value
+------------------------------------------------------------------------------
+ Conditional LR               [-1.331227, -.5061496]                   0.0000
+ Anderson-Rubin               [-1.331227, -.5061496]                   0.0000
+ Score (LM)                   [-1.331227, -.5061496]                   0.0000
+------------------------------------------------------------------------------
+
+. 
+. * GMM estimator with ssiratio and multlc as instruments for hi_empunion
+. ivregress gmm ldrugexp (hi_empunion = ssiratio multlc) $x2list, vce(robust)
+
+Instrumental variables (GMM) regression                Number of obs =   10089
+                                                       Wald chi2(6)  = 1952.65
+                                                       Prob > chi2   =  0.0000
+                                                       R-squared     =  0.0406
+GMM weight matrix: Robust                              Root MSE      =  1.3341
+
+------------------------------------------------------------------------------
+             |               Robust
+    ldrugexp |      Coef.   Std. Err.      z    P>|z|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+ hi_empunion |  -.9932795   .2046731    -4.85   0.000    -1.394431   -.5921275
+      totchr |   .4509508   .0103104    43.74   0.000     .4307428    .4711588
+         age |  -.0141509   .0029014    -4.88   0.000    -.0198375   -.0084644
+      female |  -.0281716   .0321881    -0.88   0.381    -.0912592     .034916
+      blhisp |  -.2231048   .0395972    -5.63   0.000    -.3007139   -.1454957
+        linc |   .0944632   .0218959     4.31   0.000     .0515481    .1373783
+       _cons |   6.877821   .2579974    26.66   0.000     6.372155    7.383486
+------------------------------------------------------------------------------
+Instrumented:  hi_empunion
+Instruments:   totchr age female blhisp linc ssiratio multlc
+
+. 
+. * Test of overidentifying restrictions following ivregress gmm
+. quietly ivregress gmm ldrugexp (hi_empunion = ssiratio multlc) $x2list, wmatrix(robust) 
+
+. estat overid
+
+  Test of overidentifying restriction:
+
+  Hansen's J chi2(1) = 1.04754 (p = 0.3061)
+
+. 
+. * Compare estimators 
+. quietly regress ldrugexp hi_empunion $x2list, vce(robust)
+
+. estimates store OLS
+
+. quietly ivregress 2sls ldrugexp (hi_empunion = ssiratio multlc) $x2list, vce(robust)
+
+. estimates store IV
+
+. quietly ivregress 2sls ldrugexp (hi_empunion = ssiratio) $x2list, vce(robust)
+
+. estimates store TWOSLS
+
+. quietly ivregress gmm ldrugexp (hi_empunion = ssiratio multlc) $x2list, vce(robust)
+
+. estimates store GMM
+
+. estimates table OLS IV TWOSLS GMM, b(%9.4f) se(%9.3f) stats(N r2 F)
+
+--------------------------------------------------------------
+    Variable |    OLS         IV        TWOSLS        GMM     
+-------------+------------------------------------------------
+ hi_empunion |    0.0739     -0.9899     -0.8976     -0.9933  
+             |     0.026       0.205       0.221       0.205  
+      totchr |    0.4404      0.4512      0.4503      0.4510  
+             |     0.009       0.010       0.010       0.010  
+         age |   -0.0035     -0.0141     -0.0132     -0.0142  
+             |     0.002       0.003       0.003       0.003  
+      female |    0.0578     -0.0278     -0.0204     -0.0282  
+             |     0.025       0.032       0.033       0.032  
+      blhisp |   -0.1513     -0.2237     -0.2174     -0.2231  
+             |     0.034       0.040       0.039       0.040  
+        linc |    0.0105      0.0943      0.0870      0.0945  
+             |     0.014       0.022       0.023       0.022  
+       _cons |    5.8611      6.8752      6.7872      6.8778  
+             |     0.157       0.258       0.269       0.258  
+-------------+------------------------------------------------
+           N |     10089       10089       10089       10089  
+          r2 |    0.1770      0.0414      0.0640      0.0406  
+           F |  376.8458                                      
+--------------------------------------------------------------
+                                                  legend: b/se
+
+. 
+. * CLOSE OUTPUT           
+. * log close
+. * clear
+. * exit
+. 
+. 
+end of do-file
+
+. exit, clear

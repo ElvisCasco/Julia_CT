@@ -1,0 +1,1001 @@
+-------------------------------------------------------------------------------------------------------------------------------
+      name:  <unnamed>
+       log:  c:\Imbook\courses\2013_bgpe_germany\day5ldv\ct_ldv.txt
+  log type:  text
+ opened on:  23 May 2013, 16:40:32
+
+. 
+. ********** OVERVIEW OF ct_ldv.do **********
+. 
+. * STATA Program 
+. * For A. Colin Cameron  "Lectures in Microeconometrics"
+. * Brief summary: Binary models, multinomial models, censored models
+. 
+. * BINARY CHOICE: GENERATED DATA EXAMPLE
+. * BINARY CHOICE: EXAMPLE: PRIVATE HEALTH INSURANCE
+. * MULTINOMIAL CHOICE: EXAMPLE: FISHING MODE CHOICE
+. * CENSORED DATA: SIMULATED DATA TOBIT EXAMPLE
+. * CENSORED DATA: EXAMPLE: AMBULATORY EXPENDITURE
+. 
+. * To run you need files 
+. *   mus14data.dta 
+. *   mus15data.dta 
+. *   mus16data.dta 
+. * in your directory
+. 
+. ********** SETUP **********
+. 
+. set more off
+
+. version 12
+
+. set mem 10m
+set memory ignored.
+    Memory no longer needs to be set in modern Statas; memory adjustments are performed on the fly automatically.
+
+. set scheme s1mono  /* Graphics scheme */
+
+.  
+. ********** BINARY CHOICE: GENERATED DATA EXAMPLE
+. 
+. * Generated data example with one regressor
+. set seed 10101
+
+. quietly set obs 200
+
+. quietly generate x = rnormal(0,1)
+
+. quietly generate y = 1 + 1*x + rnormal(0,1) > 0
+
+. summarize y x
+
+    Variable |       Obs        Mean    Std. Dev.       Min        Max
+-------------+--------------------------------------------------------
+           y |       200         .71    .4549007          0          1
+           x |       200   -.0271965    .9346599  -2.464683   3.595515
+
+. quietly probit y x
+
+. quietly predict probit
+
+. quietly logit y x
+
+. quietly predict plogit
+
+. quietly regress y x
+
+. quietly predict pols
+
+. quietly sort x
+
+. graph twoway (scatter y x, msize(small) jitter(3))                  ///
+>   (line plogit x, clstyle(p1)) (line probit x, clstyle(p2))         ///
+>   (line pols x, clstyle(p3)), scale (1.2) plotregion(style(none))   ///
+>   xti("Regressor x", size(medlarge)) xsca(titlegap(*5))             /// 
+>   yti("Predicted Pr[y=1|x]", size(medlarge)) yscale(titlegap(*5))   ///
+>   legend(pos(4) ring(0) col(1)) legend(size(small))                 ///
+>   legend( label(1 "Data (jittered)") label(2 "Logit")               ///
+>           label(3 "Probit") label(4 "OLS"))
+
+. graph export ct_binarygraph.eps, replace
+(file ct_binarygraph.eps written in EPS format)
+
+. 
+. ********** BINARY CHOICE: EXAMPLE: PRIVATE HEALTH INSURANCE
+. 
+. * Data Set comes from the 2000 Health and Retirement Survey
+. * Medicare benificiaries (mostly elderly)
+. 
+. * Describe and summarize dependent variable and regressors
+. use mus14data.dta, clear
+
+. label variable ins "1 if have private health insurance"
+
+. label variable retire "1 if retired"
+
+. label variable age "age in years"
+
+. label variable hstatusg "1 if health status good of better"
+
+. label variable hhincome "household annual income in $000's"
+
+. label variable educyear "years of education"
+
+. label variable married "1 if married"
+
+. label variable hisp "1 if hispanic"
+
+. 
+. describe ins retire age hstatusg hhincome educyear married hisp
+
+              storage  display     value
+variable name   type   format      label      variable label
+-------------------------------------------------------------------------------------------------------------------------------
+ins             float  %9.0g                  1 if have private health insurance
+retire          double %12.0g                 1 if retired
+age             double %12.0g                 age in years
+hstatusg        float  %9.0g                  1 if health status good of better
+hhincome        float  %9.0g                  household annual income in $000's
+educyear        double %12.0g                 years of education
+married         double %12.0g                 1 if married
+hisp            double %12.0g                 1 if hispanic
+
+. summarize ins retire age hstatusg hhincome educyear married hisp
+
+    Variable |       Obs        Mean    Std. Dev.       Min        Max
+-------------+--------------------------------------------------------
+         ins |      3206    .3870867    .4871597          0          1
+      retire |      3206    .6247661    .4842588          0          1
+         age |      3206    66.91391    3.675794         52         86
+    hstatusg |      3206    .7046163    .4562862          0          1
+    hhincome |      3206    45.26391    64.33936          0   1312.124
+-------------+--------------------------------------------------------
+    educyear |      3206    11.89863    3.304611          0         17
+     married |      3206    .7330006     .442461          0          1
+        hisp |      3206    .0726762    .2596448          0          1
+
+. 
+. bysort ins: summarize retire age hstatusg hhincome educyear married hisp
+
+-------------------------------------------------------------------------------------------------------------------------------
+-> ins = 0
+
+    Variable |       Obs        Mean    Std. Dev.       Min        Max
+-------------+--------------------------------------------------------
+      retire |      1965    .5938931      .49123          0          1
+         age |      1965     66.8229    3.851651         52         86
+    hstatusg |      1965     .653944    .4758324          0          1
+    hhincome |      1965    37.65601    58.98152          0   1197.704
+    educyear |      1965    11.29313    3.475632          0         17
+-------------+--------------------------------------------------------
+     married |      1965    .6814249    .4660424          0          1
+        hisp |      1965    .1007634    .3010917          0          1
+
+-------------------------------------------------------------------------------------------------------------------------------
+-> ins = 1
+
+    Variable |       Obs        Mean    Std. Dev.       Min        Max
+-------------+--------------------------------------------------------
+      retire |      1241    .6736503     .469066          0          1
+         age |      1241    67.05802    3.375173         53         82
+    hstatusg |      1241    .7848509    .4110914          0          1
+    hhincome |      1241    57.31028     70.3737       .124   1312.124
+    educyear |      1241    12.85737    2.755311          2         17
+-------------+--------------------------------------------------------
+     married |      1241    .8146656    .3887253          0          1
+        hisp |      1241    .0282031    .1656193          0          1
+
+
+. 
+. * Logit regression
+. logit ins retire age hstatusg hhincome educyear married hisp
+
+Iteration 0:   log likelihood = -2139.7712  
+Iteration 1:   log likelihood = -1996.7434  
+Iteration 2:   log likelihood = -1994.8864  
+Iteration 3:   log likelihood = -1994.8784  
+Iteration 4:   log likelihood = -1994.8784  
+
+Logistic regression                               Number of obs   =       3206
+                                                  LR chi2(7)      =     289.79
+                                                  Prob > chi2     =     0.0000
+Log likelihood = -1994.8784                       Pseudo R2       =     0.0677
+
+------------------------------------------------------------------------------
+         ins |      Coef.   Std. Err.      z    P>|z|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+      retire |   .1969297   .0842067     2.34   0.019     .0318875    .3619718
+         age |  -.0145955   .0112871    -1.29   0.196    -.0367178    .0075267
+    hstatusg |   .3122654   .0916739     3.41   0.001     .1325878     .491943
+    hhincome |   .0023036    .000762     3.02   0.003       .00081    .0037972
+    educyear |   .1142626   .0142012     8.05   0.000     .0864288    .1420963
+     married |    .578636   .0933198     6.20   0.000     .3957327    .7615394
+        hisp |  -.8103059   .1957522    -4.14   0.000    -1.193973   -.4266387
+       _cons |  -1.715578   .7486219    -2.29   0.022     -3.18285   -.2483064
+------------------------------------------------------------------------------
+
+. 
+. * Average marginal effect
+. margins, dydx(*)
+
+Average marginal effects                          Number of obs   =       3206
+Model VCE    : OIM
+
+Expression   : Pr(ins), predict()
+dy/dx w.r.t. : retire age hstatusg hhincome educyear married hisp
+
+------------------------------------------------------------------------------
+             |            Delta-method
+             |      dy/dx   Std. Err.      z    P>|z|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+      retire |   .0427616    .018228     2.35   0.019     .0070354    .0784878
+         age |  -.0031693   .0024486    -1.29   0.196    -.0079686      .00163
+    hstatusg |   .0678058   .0197778     3.43   0.001     .0290419    .1065696
+    hhincome |   .0005002   .0001646     3.04   0.002     .0001777    .0008228
+    educyear |   .0248111   .0029705     8.35   0.000     .0189891    .0306332
+     married |   .1256459   .0198205     6.34   0.000     .0867985    .1644933
+        hisp |   -.175951   .0421962    -4.17   0.000     -.258654   -.0932481
+------------------------------------------------------------------------------
+
+. 
+. * Logit, probit and OLS
+. logit ins retire age hstatusg hhincome educyear married hisp
+
+Iteration 0:   log likelihood = -2139.7712  
+Iteration 1:   log likelihood = -1996.7434  
+Iteration 2:   log likelihood = -1994.8864  
+Iteration 3:   log likelihood = -1994.8784  
+Iteration 4:   log likelihood = -1994.8784  
+
+Logistic regression                               Number of obs   =       3206
+                                                  LR chi2(7)      =     289.79
+                                                  Prob > chi2     =     0.0000
+Log likelihood = -1994.8784                       Pseudo R2       =     0.0677
+
+------------------------------------------------------------------------------
+         ins |      Coef.   Std. Err.      z    P>|z|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+      retire |   .1969297   .0842067     2.34   0.019     .0318875    .3619718
+         age |  -.0145955   .0112871    -1.29   0.196    -.0367178    .0075267
+    hstatusg |   .3122654   .0916739     3.41   0.001     .1325878     .491943
+    hhincome |   .0023036    .000762     3.02   0.003       .00081    .0037972
+    educyear |   .1142626   .0142012     8.05   0.000     .0864288    .1420963
+     married |    .578636   .0933198     6.20   0.000     .3957327    .7615394
+        hisp |  -.8103059   .1957522    -4.14   0.000    -1.193973   -.4266387
+       _cons |  -1.715578   .7486219    -2.29   0.022     -3.18285   -.2483064
+------------------------------------------------------------------------------
+
+. probit ins retire age hstatusg hhincome educyear married hisp
+
+Iteration 0:   log likelihood = -2139.7712  
+Iteration 1:   log likelihood = -1994.4552  
+Iteration 2:   log likelihood =  -1993.624  
+Iteration 3:   log likelihood = -1993.6237  
+Iteration 4:   log likelihood = -1993.6237  
+
+Probit regression                                 Number of obs   =       3206
+                                                  LR chi2(7)      =     292.30
+                                                  Prob > chi2     =     0.0000
+Log likelihood = -1993.6237                       Pseudo R2       =     0.0683
+
+------------------------------------------------------------------------------
+         ins |      Coef.   Std. Err.      z    P>|z|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+      retire |   .1183567   .0512678     2.31   0.021     .0178736    .2188397
+         age |  -.0088696    .006899    -1.29   0.199    -.0223914    .0046521
+    hstatusg |   .1977357   .0554868     3.56   0.000     .0889835    .3064878
+    hhincome |    .001233   .0003866     3.19   0.001     .0004754    .0019907
+    educyear |   .0707477   .0084782     8.34   0.000     .0541308    .0873647
+     married |    .362329   .0560031     6.47   0.000      .252565    .4720931
+        hisp |  -.4731099   .1104393    -4.28   0.000     -.689567   -.2566529
+       _cons |  -1.069319   .4580794    -2.33   0.020    -1.967139   -.1715002
+------------------------------------------------------------------------------
+
+. regress ins retire age hstatusg hhincome educyear married hisp, vce(robust)
+
+Linear regression                                      Number of obs =    3206
+                                                       F(  7,  3198) =   58.98
+                                                       Prob > F      =  0.0000
+                                                       R-squared     =  0.0826
+                                                       Root MSE      =  .46711
+
+------------------------------------------------------------------------------
+             |               Robust
+         ins |      Coef.   Std. Err.      t    P>|t|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+      retire |   .0408508   .0182217     2.24   0.025     .0051234    .0765782
+         age |  -.0028955   .0023254    -1.25   0.213    -.0074549    .0016638
+    hstatusg |   .0655583   .0190126     3.45   0.001     .0282801    .1028365
+    hhincome |   .0004921   .0001874     2.63   0.009     .0001247    .0008595
+    educyear |   .0233686   .0027081     8.63   0.000     .0180589    .0286784
+     married |   .1234699   .0186521     6.62   0.000     .0868987    .1600411
+        hisp |  -.1210059   .0269459    -4.49   0.000    -.1738389    -.068173
+       _cons |   .1270857   .1538816     0.83   0.409    -.1746309    .4288023
+------------------------------------------------------------------------------
+
+. 
+. * Comparison of coefficient estimates from logit, probit and OLS 
+. * Estimation of several models
+. quietly logit ins retire age hstatusg hhincome educyear married hisp
+
+. estimates store blogit
+
+. quietly probit ins retire age hstatusg hhincome educyear married hisp
+
+. estimates store bprobit
+
+. quietly regress ins retire age hstatusg hhincome educyear married hisp
+
+. estimates store bols
+
+. quietly logit ins retire age hstatusg hhincome educyear married hisp, vce(robust)
+
+. estimates store blogitr
+
+. quietly probit ins retire age hstatusg hhincome educyear married hisp, vce(robust)
+
+. estimates store bprobitr
+
+. quietly regress ins retire age hstatusg hhincome educyear married hisp, vce(robust)
+
+. estimates store bolsr
+
+. * Compare coefficient estimates across models with default and robust standard errors
+. estimates table blogit bprobit bols blogitr bprobitr bolsr, /// 
+>   stats(N ll) b(%7.3f) t(%7.2f) stfmt(%8.2f)
+
+--------------------------------------------------------------------------------
+    Variable |  blogit    bprobit      bols     blogitr    bprobitr    bolsr    
+-------------+------------------------------------------------------------------
+ins          |
+      retire |    0.197      0.118                 0.197      0.118             
+             |     2.34       2.31                  2.32       2.30             
+         age |   -0.015     -0.009                -0.015     -0.009             
+             |    -1.29      -1.29                 -1.32      -1.32             
+    hstatusg |    0.312      0.198                 0.312      0.198             
+             |     3.41       3.56                  3.40       3.57             
+    hhincome |    0.002      0.001                 0.002      0.001             
+             |     3.02       3.19                  2.01       2.21             
+    educyear |    0.114      0.071                 0.114      0.071             
+             |     8.05       8.34                  7.96       8.33             
+     married |    0.579      0.362                 0.579      0.362             
+             |     6.20       6.47                  6.15       6.46             
+        hisp |   -0.810     -0.473                -0.810     -0.473             
+             |    -4.14      -4.28                 -4.18      -4.36             
+       _cons |   -1.716     -1.069                -1.716     -1.069             
+             |    -2.29      -2.33                 -2.36      -2.40             
+-------------+------------------------------------------------------------------
+_            |
+      retire |                          0.041                            0.041  
+             |                           2.24                             2.24  
+         age |                         -0.003                           -0.003  
+             |                          -1.20                            -1.25  
+    hstatusg |                          0.066                            0.066  
+             |                           3.37                             3.45  
+    hhincome |                          0.000                            0.000  
+             |                           3.58                             2.63  
+    educyear |                          0.023                            0.023  
+             |                           8.15                             8.63  
+     married |                          0.123                            0.123  
+             |                           6.38                             6.62  
+        hisp |                         -0.121                           -0.121  
+             |                          -3.59                            -4.49  
+       _cons |                          0.127                            0.127  
+             |                           0.79                             0.83  
+-------------+------------------------------------------------------------------
+Statistics   |                                                                  
+           N |     3206       3206       3206       3206       3206       3206  
+          ll | -1994.88   -1993.62   -2104.75   -1994.88   -1993.62   -2104.75  
+--------------------------------------------------------------------------------
+                                                                     legend: b/t
+
+. 
+. * Comparison of predicted probabilities from logit, probit and OLS
+. quietly logit ins retire age hstatusg hhincome educyear married hisp
+
+. predict plogit, p
+
+. quietly probit ins retire age hstatusg hhincome educyear married hisp
+
+. predict pprobit, p
+
+. quietly regress ins retire age hstatusg hhincome educyear married hisp
+
+. quietly predict pOLS
+
+. summarize ins plogit pprobit pOLS
+
+    Variable |       Obs        Mean    Std. Dev.       Min        Max
+-------------+--------------------------------------------------------
+         ins |      3206    .3870867    .4871597          0          1
+      plogit |      3206    .3870867    .1418287   .0340215   .9649615
+     pprobit |      3206    .3861139    .1421416   .0206445   .9647618
+        pOLS |      3206    .3870867    .1400249  -.1557328   1.197223
+
+. 
+. * Marginal effects for logit: AME differs from MEM
+. quietly logit ins retire age hstatusg hhincome educyear married hisp
+
+. margins, dydx(*) 
+
+Average marginal effects                          Number of obs   =       3206
+Model VCE    : OIM
+
+Expression   : Pr(ins), predict()
+dy/dx w.r.t. : retire age hstatusg hhincome educyear married hisp
+
+------------------------------------------------------------------------------
+             |            Delta-method
+             |      dy/dx   Std. Err.      z    P>|z|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+      retire |   .0427616    .018228     2.35   0.019     .0070354    .0784878
+         age |  -.0031693   .0024486    -1.29   0.196    -.0079686      .00163
+    hstatusg |   .0678058   .0197778     3.43   0.001     .0290419    .1065696
+    hhincome |   .0005002   .0001646     3.04   0.002     .0001777    .0008228
+    educyear |   .0248111   .0029705     8.35   0.000     .0189891    .0306332
+     married |   .1256459   .0198205     6.34   0.000     .0867985    .1644933
+        hisp |   -.175951   .0421962    -4.17   0.000     -.258654   -.0932481
+------------------------------------------------------------------------------
+
+. margins, dydx(*) atmean
+
+Conditional marginal effects                      Number of obs   =       3206
+Model VCE    : OIM
+
+Expression   : Pr(ins), predict()
+dy/dx w.r.t. : retire age hstatusg hhincome educyear married hisp
+at           : retire          =    .6247661 (mean)
+               age             =    66.91391 (mean)
+               hstatusg        =    .7046163 (mean)
+               hhincome        =    45.26391 (mean)
+               educyear        =    11.89863 (mean)
+               married         =    .7330006 (mean)
+               hisp            =    .0726762 (mean)
+
+------------------------------------------------------------------------------
+             |            Delta-method
+             |      dy/dx   Std. Err.      z    P>|z|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+      retire |   .0460479   .0196856     2.34   0.019     .0074648     .084631
+         age |  -.0034129   .0026389    -1.29   0.196     -.008585    .0017592
+    hstatusg |   .0730168    .021412     3.41   0.001     .0310499    .1149836
+    hhincome |   .0005386   .0001785     3.02   0.003     .0001888    .0008885
+    educyear |   .0267179   .0033025     8.09   0.000     .0202452    .0331907
+     married |    .135302   .0217469     6.22   0.000     .0926789    .1779251
+        hisp |  -.1894732    .045563    -4.16   0.000    -.2787749   -.1001714
+------------------------------------------------------------------------------
+
+. 
+. * Old Stata comamnds superceded by margins
+. * margeff
+. * mfx
+. 
+. ********** MULTINOMIAL CHOICE: EXAMPLE: FISHING MODE CHOICE
+. 
+. * Data Set comes from :
+. * J. A. Herriges and C. L. Kling, 
+. * "Nonlinear Income Effects in Random Utility Models", 
+. * Review of Economics and Statistics, 81(1999): 62-72
+. 
+. * Read in data and summarize
+. use mus15data.dta, clear
+
+. describe
+
+Contains data from mus15data.dta
+  obs:         1,182                          
+ vars:            16                          12 May 2008 20:46
+ size:        75,648                          
+-------------------------------------------------------------------------------------------------------------------------------
+              storage  display     value
+variable name   type   format      label      variable label
+-------------------------------------------------------------------------------------------------------------------------------
+mode            float  %9.0g       modetype   Fishing mode
+price           float  %9.0g                  price for chosen alternative
+crate           float  %9.0g                  catch rate for chosen alternative
+dbeach          float  %9.0g                  1 if beach mode chosen
+dpier           float  %9.0g                  1 if pier mode chosen
+dprivate        float  %9.0g                  1 if private boat mode chosen
+dcharter        float  %9.0g                  1 if charter boat mode chosen
+pbeach          float  %9.0g                  price for beach mode
+ppier           float  %9.0g                  price for pier mode
+pprivate        float  %9.0g                  price for private boat mode
+pcharter        float  %9.0g                  price for charter boat mode
+qbeach          float  %9.0g                  catch rate for beach mode
+qpier           float  %9.0g                  catch rate for pier mode
+qprivate        float  %9.0g                  catch rate for private boat mode
+qcharter        float  %9.0g                  catch rate for charter boat mode
+income          float  %9.0g                  monthly income in thousands $
+-------------------------------------------------------------------------------------------------------------------------------
+Sorted by:  
+
+. list mode d* p* income in 1/2, clean
+
+          mode   dbeach   dpier   dprivate   dcharter    price   pbeach    ppier   pprivate   pcharter     income  
+  1.   charter        0       0          0          1   182.93   157.93   157.93     157.93     182.93   7.083332  
+  2.   charter        0       0          0          1   34.534   15.114   15.114     10.534     34.534       1.25  
+
+. summarize d* p* q* income, separator(4)
+
+    Variable |       Obs        Mean    Std. Dev.       Min        Max
+-------------+--------------------------------------------------------
+      dbeach |      1182    .1133672    .3171753          0          1
+       dpier |      1182    .1505922    .3578023          0          1
+    dprivate |      1182    .3536379    .4783008          0          1
+    dcharter |      1182    .3824027    .4861799          0          1
+-------------+--------------------------------------------------------
+       price |      1182    52.08197    53.82997       1.29     666.11
+      pbeach |      1182     103.422     103.641       1.29    843.186
+       ppier |      1182     103.422     103.641       1.29    843.186
+    pprivate |      1182    55.25657    62.71344       2.29     666.11
+-------------+--------------------------------------------------------
+    pcharter |      1182    84.37924    63.54465      27.29     691.11
+      qbeach |      1182    .2410113    .1907524      .0678      .5333
+       qpier |      1182    .1622237    .1603898      .0014      .4522
+    qprivate |      1182    .1712146    .2097885      .0002      .7369
+-------------+--------------------------------------------------------
+    qcharter |      1182    .6293679    .7061142      .0021     2.3101
+      income |      1182    4.099337    2.461964   .4166667       12.5
+
+. preserve
+
+. bysort mode: summarize
+
+-------------------------------------------------------------------------------------------------------------------------------
+-> mode = beach
+
+    Variable |       Obs        Mean    Std. Dev.       Min        Max
+-------------+--------------------------------------------------------
+        mode |       134           1           0          1          1
+       price |       134    35.69949    43.09414       1.29     306.82
+       crate |       134    .2791948    .1938734      .0678      .5333
+      dbeach |       134           1           0          1          1
+       dpier |       134           0           0          0          0
+-------------+--------------------------------------------------------
+    dprivate |       134           0           0          0          0
+    dcharter |       134           0           0          0          0
+      pbeach |       134    35.69949    43.09414       1.29     306.82
+       ppier |       134    35.69949    43.09414       1.29     306.82
+    pprivate |       134    97.80913    75.43844       2.29    392.946
+-------------+--------------------------------------------------------
+    pcharter |       134    125.0032    78.37641      27.29    427.946
+      qbeach |       134    .2791948    .1938734      .0678      .5333
+       qpier |       134    .2190015    .1677117      .0025      .4522
+    qprivate |       134    .1593985    .0948855      .0008      .2601
+    qcharter |       134    .5176089    .3629096      .0027     1.0266
+-------------+--------------------------------------------------------
+      income |       134    4.051617     2.50542   .4166667       12.5
+
+-------------------------------------------------------------------------------------------------------------------------------
+-> mode = pier
+
+    Variable |       Obs        Mean    Std. Dev.       Min        Max
+-------------+--------------------------------------------------------
+        mode |       178           2           0          2          2
+       price |       178    30.57133    35.58442       1.29    224.296
+       crate |       178    .2025348    .1702942      .0014      .4522
+      dbeach |       178           0           0          0          0
+       dpier |       178           1           0          1          1
+-------------+--------------------------------------------------------
+    dprivate |       178           0           0          0          0
+    dcharter |       178           0           0          0          0
+      pbeach |       178    30.57133    35.58442       1.29    224.296
+       ppier |       178    30.57133    35.58442       1.29    224.296
+    pprivate |       178    82.42908    69.30802       2.29    494.058
+-------------+--------------------------------------------------------
+    pcharter |       178    109.7633    72.37726      27.29    529.058
+      qbeach |       178    .2614444    .1949684      .0678      .5333
+       qpier |       178    .2025348    .1702942      .0014      .4522
+    qprivate |       178    .1501489    .0968393      .0014      .2601
+    qcharter |       178    .4980798    .3756255      .0029     1.0266
+-------------+--------------------------------------------------------
+      income |       178    3.387172    2.340324   .4166667       12.5
+
+-------------------------------------------------------------------------------------------------------------------------------
+-> mode = private
+
+    Variable |       Obs        Mean    Std. Dev.       Min        Max
+-------------+--------------------------------------------------------
+        mode |       418           3           0          3          3
+       price |       418    41.60681    55.90806       2.29     666.11
+       crate |       418    .1775411    .2435798      .0002      .7369
+      dbeach |       418           0           0          0          0
+       dpier |       418           0           0          0          0
+-------------+--------------------------------------------------------
+    dprivate |       418           1           0          1          1
+    dcharter |       418           0           0          0          0
+      pbeach |       418    137.5271    115.3058       2.29    843.186
+       ppier |       418    137.5271    115.3058       2.29    843.186
+    pprivate |       418    41.60681    55.90806       2.29     666.11
+-------------+--------------------------------------------------------
+    pcharter |       418    70.58409    56.39575      27.29     691.11
+      qbeach |       418    .2082868    .1729351      .0678      .5333
+       qpier |       418    .1297646    .1368029      .0025      .4522
+    qprivate |       418    .1775411    .2435798      .0002      .7369
+    qcharter |       418    .6539167    .8064379      .0021     2.3101
+-------------+--------------------------------------------------------
+      income |       418    4.654107    2.777898   .4166667       12.5
+
+-------------------------------------------------------------------------------------------------------------------------------
+-> mode = charter
+
+    Variable |       Obs        Mean    Std. Dev.       Min        Max
+-------------+--------------------------------------------------------
+        mode |       452           4           0          4          4
+       price |       452    75.09694    52.51942      27.29    387.208
+       crate |       452    .6914998    .7714728      .0029     2.3101
+      dbeach |       452           0           0          0          0
+       dpier |       452           0           0          0          0
+-------------+--------------------------------------------------------
+    dprivate |       452           0           0          0          0
+    dcharter |       452           1           0          1          1
+      pbeach |       452    120.6483    99.78664       4.29    578.048
+       ppier |       452    120.6483    99.78664       4.29    578.048
+    pprivate |       452    44.56376    52.23744       2.29    362.208
+-------------+--------------------------------------------------------
+    pcharter |       452    75.09694    52.51942      27.29    387.208
+      qbeach |       452    .2519077    .1997956      .0678      .5333
+       qpier |       452    .1595341    .1667353      .0014      .4522
+    qprivate |       452    .1771628    .2318749      .0014      .7369
+    qcharter |       452    .6914998    .7714728      .0029     2.3101
+-------------+--------------------------------------------------------
+      income |       452      3.8809    2.050028   .4166667       12.5
+
+
+. restore
+
+. 
+. * Multinomial logit with base outcome alternative 1
+. mlogit mode income, baseoutcome(1)
+
+Iteration 0:   log likelihood = -1497.7229  
+Iteration 1:   log likelihood = -1477.5265  
+Iteration 2:   log likelihood = -1477.1514  
+Iteration 3:   log likelihood = -1477.1506  
+Iteration 4:   log likelihood = -1477.1506  
+
+Multinomial logistic regression                   Number of obs   =       1182
+                                                  LR chi2(3)      =      41.14
+                                                  Prob > chi2     =     0.0000
+Log likelihood = -1477.1506                       Pseudo R2       =     0.0137
+
+------------------------------------------------------------------------------
+        mode |      Coef.   Std. Err.      z    P>|z|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+beach        |  (base outcome)
+-------------+----------------------------------------------------------------
+pier         |
+      income |  -.1434029   .0532884    -2.69   0.007    -.2478463   -.0389595
+       _cons |   .8141503    .228632     3.56   0.000     .3660399    1.262261
+-------------+----------------------------------------------------------------
+private      |
+      income |   .0919064   .0406637     2.26   0.024     .0122069    .1716058
+       _cons |   .7389208   .1967309     3.76   0.000     .3533352    1.124506
+-------------+----------------------------------------------------------------
+charter      |
+      income |  -.0316399   .0418463    -0.76   0.450    -.1136571    .0503774
+       _cons |   1.341291   .1945167     6.90   0.000     .9600457    1.722537
+------------------------------------------------------------------------------
+
+. 
+. * Compare average predicted probabilities to sample average frequencies
+. predict pmlogit1 pmlogit2 pmlogit3 pmlogit4, pr
+
+. summarize pmlogit* dbeach dpier dprivate dcharter, separator(4)
+
+    Variable |       Obs        Mean    Std. Dev.       Min        Max
+-------------+--------------------------------------------------------
+    pmlogit1 |      1182    .1133672    .0036716   .0947395   .1153659
+    pmlogit2 |      1182    .1505922    .0444575   .0356142   .2342903
+    pmlogit3 |      1182    .3536379    .0797714   .2396973    .625706
+    pmlogit4 |      1182    .3824027    .0346281   .2439403   .4158273
+-------------+--------------------------------------------------------
+      dbeach |      1182    .1133672    .3171753          0          1
+       dpier |      1182    .1505922    .3578023          0          1
+    dprivate |      1182    .3536379    .4783008          0          1
+    dcharter |      1182    .3824027    .4861799          0          1
+
+. 
+. * AME of income change for outcome 3
+. margins, dydx(*) predict(outcome(3))
+
+Average marginal effects                          Number of obs   =       1182
+Model VCE    : OIM
+
+Expression   : Pr(mode==private), predict(outcome(3))
+dy/dx w.r.t. : income
+
+------------------------------------------------------------------------------
+             |            Delta-method
+             |      dy/dx   Std. Err.      z    P>|z|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+      income |   .0317562   .0052589     6.04   0.000      .021449    .0420633
+------------------------------------------------------------------------------
+
+. * MEM of income change for outcome 3
+. margins, dydx(*) predict(outcome(3)) atmean
+
+Conditional marginal effects                      Number of obs   =       1182
+Model VCE    : OIM
+
+Expression   : Pr(mode==private), predict(outcome(3))
+dy/dx w.r.t. : income
+at           : income          =    4.099337 (mean)
+
+------------------------------------------------------------------------------
+             |            Delta-method
+             |      dy/dx   Std. Err.      z    P>|z|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+      income |   .0325985    .005692     5.73   0.000     .0214424    .0437547
+------------------------------------------------------------------------------
+
+. 
+. 
+. ********** CENSORED DATA: SIMULATED DATA TOBIT EXAMPLE
+. 
+. * Generate x, y*, ycensored, ytruncated and binary dy
+. * y* = -2500 + 1000*x + e  where e ~ N(0,1000^2) x ~ N(2.75, 0.6^2)
+. clear
+
+. set seed 10101
+
+. set obs 200 
+obs was 0, now 200
+
+. generate e = rnormal(0,1000)
+
+. generate x = rnormal(2.75,0.6)
+
+. generate w = exp(x)   // not necessary
+
+. generate ystar = -2500 + 1000*x + e
+
+. generate ytruncated = ystar
+
+. replace ytruncated = . if (ystar < 0)
+(92 real changes made, 92 to missing)
+
+. generate ycensored = ystar
+
+. replace ycensored = 0 if (ystar < 0)
+(92 real changes made)
+
+. generate dy = ycensored
+
+. replace dy = 1 if (ycensored>0)
+(108 real changes made)
+
+. summarize
+
+    Variable |       Obs        Mean    Std. Dev.       Min        Max
+-------------+--------------------------------------------------------
+           e |       200   -27.19653    934.6599  -2464.683   3595.514
+           x |       200     2.64958    .5794449   1.490819   5.395306
+           w |       200    17.30719      17.542   4.440732   220.3695
+       ystar |       200    122.3835    1120.674  -2699.694   4128.092
+  ytruncated |       108    911.4255    779.7081   1.302608   4128.092
+-------------+--------------------------------------------------------
+   ycensored |       200    492.1698    730.9355          0   4128.092
+          dy |       200         .54    .4996481          0          1
+
+. 
+. * Compare various OLS estimates
+. quietly regress ystar x      // In practice not possible as y* not observed
+
+. estimates store COMPLETE  
+
+. quietly regress ycensored x  // Inconsistent  
+
+. estimates store CENSORED
+
+. quietly regress ytruncated x if dy==1  // Inconsistent 
+
+. estimates store TRUNCATED
+
+. estimates table COMPLETE CENSORED TRUNCATED, keep(_cons x) stats(N) b(%10.0f) se 
+
+-----------------------------------------------------
+    Variable |  COMPLETE     CENSORED    TRUNCATED   
+-------------+---------------------------------------
+       _cons |      -2711        -1202         -782  
+             |        311          210          346  
+           x |       1069          639          590  
+             |        115           77          118  
+-------------+---------------------------------------
+           N |        200          200          108  
+-----------------------------------------------------
+                                         legend: b/se
+
+. 
+. * Compute the theoretical (using d.g.p. betas) censored and truncated means
+. generate xb = -2500 + 1000*x
+
+. generate sigma = 1000
+
+. generate PHIxb = normal(xb/sigma)
+
+. generate phixb = normalden(xb/sigma)
+
+. generate lamda = phixb/PHIxb
+
+. generate Eytruncated = xb + sigma*lamda
+
+. generate Eycensored = PHIxb*Eytruncated
+
+. summarize
+
+    Variable |       Obs        Mean    Std. Dev.       Min        Max
+-------------+--------------------------------------------------------
+           e |       200   -27.19653    934.6599  -2464.683   3595.514
+           x |       200     2.64958    .5794449   1.490819   5.395306
+           w |       200    17.30719      17.542   4.440732   220.3695
+       ystar |       200    122.3835    1120.674  -2699.694   4128.092
+  ytruncated |       108    911.4255    779.7081   1.302608   4128.092
+-------------+--------------------------------------------------------
+   ycensored |       200    492.1698    730.9355          0   4128.092
+          dy |       200         .54    .4996481          0          1
+_est_COMPL~E |       200           1           0          1          1
+_est_CENSO~D |       200           1           0          1          1
+_est_TRUNC~D |       200         .54    .4996481          0          1
+-------------+--------------------------------------------------------
+          xb |       200      149.58    579.4449  -1009.181   2895.306
+       sigma |       200        1000           0       1000       1000
+       PHIxb |       200    .5477326    .1930304   .1564439   .9981061
+       phixb |       200    .3463258     .066726   .0060341   .3989421
+       lamda |       200      .74479    .3222767   .0060455   1.532493
+-------------+--------------------------------------------------------
+ Eytruncated |       200      894.37    275.5898   523.3123   2901.351
+  Eycensored |       200    537.3294    360.2821   81.86904   2895.856
+
+. 
+. * Plot with scatterplot of data plus conditional means 
+. sort x
+
+. graph twoway (scatter ystar x, msize(small)) /// 
+>   (scatter Eytruncated x, c(l) msize(vtiny) clstyle(p3) clwidth(medthick)) ///
+>   (scatter Eycensored x, c(l) msize(vtiny) clstyle(p2) clwidth(medthick))  ///
+>   (scatter xb x, c(l) msize(vtiny) clstyle(p1) clwidth(medthick)),         ///
+>   scale (1.2) plotregion(style(none))                                      ///
+>   title("Tobit: Censored and Truncated Means") ///
+>   xtitle("x (natural logarithm of wage)", size(medlarge)) xscale(titlegap(*5)) /// 
+>   ytitle("Different Conditional Means", size(medlarge)) yscale(titlegap(*5)) ///
+>   legend(pos(5) ring(0) col(1)) legend(size(small)) ///
+>   legend( label(1 "Actual Latent Variable") label(2 "Truncated Mean") ///
+>           label(3 "Censored Mean") label(4 "Uncensored Mean"))
+
+. graph export ct_censoredcondmeans.wmf, replace
+(file c:\Imbook\courses\2013_bgpe_germany\day5ldv\ct_censoredcondmeans.wmf written in Windows Metafile format)
+
+. 
+. ********** CENSORED DATA: EXAMPLE: AMBULATORY EXPENDITURE
+. 
+. /*  Subset of data in P. Deb, M. Munkin and P.K. Trivedi (2006)
+>     "Bayesian Analysis of Two-Part Model with Endogeneity", Journal of Applied Econometrics, 21, 1081-1100
+>     Only the data for year 2001 are used
+>     ambexp   Ambulatory medical expenditures (excluding dental and outpatient mental) 
+>     lambexp  Ln(ambexp) given ambexp > 0 ; missing otherwise
+>     dambexp  1 if ambexp > 0 and 0 otherwise
+>     lnambexp  ln(ambexp) if ambexp>0 and 0 if ambexp=0  
+>     age     age in years/10 
+>     female   1 for females, zero otherwise
+>     educ     years of schooling of decision maker
+>     blhisp   either black or hispanic 
+>     totchr     number of chronic diseases
+>     ins either PPO or HMO type insurance  */
+. 
+. * Raw data summary
+. use mus16data.dta, clear
+
+. summarize ambexp dambexp age female educ blhisp totchr ins
+
+    Variable |       Obs        Mean    Std. Dev.       Min        Max
+-------------+--------------------------------------------------------
+      ambexp |      3328    1386.519    2530.406          0      49960
+     dambexp |      3328    .8419471    .3648454          0          1
+         age |      3328    4.056881    1.121212        2.1        6.4
+      female |      3328    .5084135    .5000043          0          1
+        educ |      3328    13.40565    2.574199          0         17
+-------------+--------------------------------------------------------
+      blhisp |      3328    .3085938    .4619824          0          1
+      totchr |      3328    .4831731    .7720426          0          5
+         ins |      3328    .3650841    .4815261          0          1
+
+. 
+. * Tobit on censored data
+. tobit ambexp age female educ blhisp totchr ins, ll(0)
+
+Tobit regression                                  Number of obs   =       3328
+                                                  LR chi2(6)      =     694.07
+                                                  Prob > chi2     =     0.0000
+Log likelihood = -26359.424                       Pseudo R2       =     0.0130
+
+------------------------------------------------------------------------------
+      ambexp |      Coef.   Std. Err.      t    P>|t|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+         age |   314.1479   42.63358     7.37   0.000     230.5572    397.7387
+      female |   684.9918   92.85445     7.38   0.000     502.9341    867.0495
+        educ |    70.8656   18.57361     3.82   0.000     34.44873    107.2825
+      blhisp |   -530.311   104.2667    -5.09   0.000    -734.7443   -325.8776
+      totchr |   1244.578   60.51364    20.57   0.000      1125.93    1363.226
+         ins |  -167.4714   96.46068    -1.74   0.083    -356.5998    21.65696
+       _cons |  -1882.591   317.4299    -5.93   0.000    -2504.969   -1260.214
+-------------+----------------------------------------------------------------
+      /sigma |   2575.907   34.79296                      2507.689    2644.125
+------------------------------------------------------------------------------
+  Obs. summary:        526  left-censored observations at ambexp<=0
+                      2802     uncensored observations
+                         0 right-censored observations
+
+. 
+. * Set censoring point for data in logs (see MUS p.532 for explanation)
+. use mus16data.dta, clear
+
+. generate y = ambexp
+
+. generate dy = ambexp > 0
+
+. quietly generate lny = ln(y)                // Zero values will become missing
+
+. quietly summarize lny            
+
+. scalar gamma = r(min)               // This could be negative
+
+. quietly replace lny = gamma - 0.0000001 if lny == .
+
+. 
+. * Now do tobit on lny
+. tobit lny age female educ blhisp totchr ins, ll
+
+Tobit regression                                  Number of obs   =       3328
+                                                  LR chi2(6)      =     831.03
+                                                  Prob > chi2     =     0.0000
+Log likelihood =   -7494.29                       Pseudo R2       =     0.0525
+
+------------------------------------------------------------------------------
+         lny |      Coef.   Std. Err.      t    P>|t|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+         age |   .3630699   .0453222     8.01   0.000     .2742077    .4519321
+      female |   1.341809   .0986074    13.61   0.000     1.148471    1.535146
+        educ |    .138446   .0196568     7.04   0.000     .0999054    .1769866
+      blhisp |  -.8731611   .1102504    -7.92   0.000    -1.089327   -.6569955
+      totchr |   1.161268   .0649655    17.88   0.000     1.033891    1.288644
+         ins |   .2612202    .102613     2.55   0.011     .0600292    .4624112
+       _cons |   .9237178   .3350343     2.76   0.006     .2668234    1.580612
+-------------+----------------------------------------------------------------
+      /sigma |   2.781234   .0392269                      2.704323    2.858146
+------------------------------------------------------------------------------
+  Obs. summary:        526  left-censored observations at lny<=-1.000e-07
+                      2802     uncensored observations
+                         0 right-censored observations
+
+. 
+. * Heckman 2-step without exclusion restrictions
+. global xlist age female educ blhisp totchr ins
+
+. heckman lny $xlist, select(dy = $xlist) twostep
+
+Heckman selection model -- two-step estimates   Number of obs      =      3328
+(regression model with sample selection)        Censored obs       =       526
+                                                Uncensored obs     =      2802
+
+                                                Wald chi2(6)       =    189.46
+                                                Prob > chi2        =    0.0000
+
+------------------------------------------------------------------------------
+             |      Coef.   Std. Err.      z    P>|z|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+lny          |
+         age |    .202124   .0242974     8.32   0.000     .1545019    .2497462
+      female |   .2891575    .073694     3.92   0.000     .1447199    .4335951
+        educ |   .0119928   .0116839     1.03   0.305    -.0109072    .0348928
+      blhisp |  -.1810582   .0658522    -2.75   0.006    -.3101261   -.0519904
+      totchr |   .4983315   .0494699    10.07   0.000     .4013724    .5952907
+         ins |  -.0474019   .0531541    -0.89   0.373     -.151582    .0567782
+       _cons |   5.302572   .2941363    18.03   0.000     4.726076    5.879069
+-------------+----------------------------------------------------------------
+dy           |
+         age |    .097315   .0270155     3.60   0.000     .0443656    .1502645
+      female |   .6442089   .0601499    10.71   0.000     .5263172    .7621006
+        educ |   .0701674   .0113435     6.19   0.000     .0479345    .0924003
+      blhisp |  -.3744867   .0617541    -6.06   0.000    -.4955224   -.2534509
+      totchr |   .7935208   .0711156    11.16   0.000     .6541367    .9329048
+         ins |   .1812415   .0625916     2.90   0.004     .0585642    .3039187
+       _cons |  -.7177087   .1924667    -3.73   0.000    -1.094937   -.3404809
+-------------+----------------------------------------------------------------
+mills        |
+      lambda |  -.4801696   .2906565    -1.65   0.099    -1.049846    .0895067
+-------------+----------------------------------------------------------------
+         rho |   -0.37130
+       sigma |  1.2932083
+------------------------------------------------------------------------------
+
+. 
+. ********** CLOSE OUTPUT
+. * log close
+. * clear
+. * exit
+. 
+. 
+end of do-file
+
+. exit, clear

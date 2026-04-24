@@ -1,0 +1,509 @@
+-------------------------------------------------------------------------------------------------------------------------------
+      name:  <unnamed>
+       log:  c:\Imbook\courses\2013_bgpe_germany\day3panelextra\ct_panel.txt
+  log type:  text
+ opened on:  23 May 2013, 15:06:01
+
+. 
+. * STATA Program 
+. * For A. Colin Cameron and Pravin Trivedi "Lectures in Microeconometrics"
+. * Binary models
+. 
+. * To run you need files
+. *   mus08psidextract.dta    
+. * in your directory
+. * Stata add-on
+. *   xtscc
+. * is used
+. 
+. ********** SETUP **********
+. 
+. set more off
+
+. version 12.0
+
+. set mem 10m
+set memory ignored.
+    Memory no longer needs to be set in modern Statas; memory adjustments are performed on the fly automatically.
+
+. set scheme s1mono  /* Graphics scheme */
+
+. 
+. ********** DATA DESCRIPTION **********
+. 
+. * Source: The Panel Study of Income Dynamics
+. * Same as Stata website file psidextract.dta
+. *  Data due to  Baltagi and Khanti-Akom (1990) 
+. * This is corrected version of data in Cornwell and Rupert (1988).
+. * 595 individuals for years 1976-82
+. 
+. ******* 8.3: PANEL DATA SUMMARY
+. 
+. * Read in data set
+. use mus08psidextract.dta, clear
+(PSID wage data 1976-82 from Baltagi and Khanti-Akom (1990))
+
+. drop tdum*
+
+. 
+. * Describe dataset
+. describe
+
+Contains data from mus08psidextract.dta
+  obs:         4,165                          PSID wage data 1976-82 from Baltagi and Khanti-Akom (1990)
+ vars:            15                          16 Aug 2007 16:29
+ size:       249,900                          (_dta has notes)
+-------------------------------------------------------------------------------------------------------------------------------
+              storage  display     value
+variable name   type   format      label      variable label
+-------------------------------------------------------------------------------------------------------------------------------
+exp             float  %9.0g                  years of full-time work experience
+wks             float  %9.0g                  weeks worked
+occ             float  %9.0g                  occupation; occ==1 if in a blue-collar occupation
+ind             float  %9.0g                  industry; ind==1 if working in a manufacturing industry
+south           float  %9.0g                  residence; south==1 if in the South area
+smsa            float  %9.0g                  smsa==1 if in the Standard metropolitan statistical area
+ms              float  %9.0g                  marital status
+fem             float  %9.0g                  female or male
+union           float  %9.0g                  if wage set be a union contract
+ed              float  %9.0g                  years of education
+blk             float  %9.0g                  black
+lwage           float  %9.0g                  log wage
+id              float  %9.0g                  
+t               float  %9.0g                  
+exp2            float  %9.0g                  
+-------------------------------------------------------------------------------------------------------------------------------
+Sorted by:  id  t
+     Note:  dataset has changed since last saved
+
+. 
+. * Summarize dataset 
+. summarize
+
+    Variable |       Obs        Mean    Std. Dev.       Min        Max
+-------------+--------------------------------------------------------
+         exp |      4165    19.85378    10.96637          1         51
+         wks |      4165    46.81152    5.129098          5         52
+         occ |      4165    .5111645    .4999354          0          1
+         ind |      4165    .3954382    .4890033          0          1
+       south |      4165    .2902761    .4539442          0          1
+-------------+--------------------------------------------------------
+        smsa |      4165    .6537815     .475821          0          1
+          ms |      4165    .8144058    .3888256          0          1
+         fem |      4165     .112605    .3161473          0          1
+       union |      4165    .3639856    .4812023          0          1
+          ed |      4165    12.84538    2.787995          4         17
+-------------+--------------------------------------------------------
+         blk |      4165    .0722689    .2589637          0          1
+       lwage |      4165    6.676346    .4615122    4.60517      8.537
+          id |      4165         298    171.7821          1        595
+           t |      4165           4     2.00024          1          7
+        exp2 |      4165     514.405    496.9962          1       2601
+
+. 
+. * Organization of data set
+. list id t exp wks occ in 1/3, clean
+
+       id   t   exp   wks   occ  
+  1.    1   1     3    32     0  
+  2.    1   2     4    43     0  
+  3.    1   3     5    40     0  
+
+. 
+. * Declare individual identifier and time identifier
+. xtset id t
+       panel variable:  id (strongly balanced)
+        time variable:  t, 1 to 7
+                delta:  1 unit
+
+. 
+. * Panel description of data set
+. xtdescribe
+
+      id:  1, 2, ..., 595                                    n =        595
+       t:  1, 2, ..., 7                                      T =          7
+           Delta(t) = 1 unit
+           Span(t)  = 7 periods
+           (id*t uniquely identifies each observation)
+
+Distribution of T_i:   min      5%     25%       50%       75%     95%     max
+                         7       7       7         7         7       7       7
+
+     Freq.  Percent    Cum. |  Pattern
+ ---------------------------+---------
+      595    100.00  100.00 |  1111111
+ ---------------------------+---------
+      595    100.00         |  XXXXXXX
+
+. 
+. * Panel summary statistics: within and between variation
+. xtsum lwage exp ed t 
+
+Variable         |      Mean   Std. Dev.       Min        Max |    Observations
+-----------------+--------------------------------------------+----------------
+lwage    overall |  6.676346   .4615122    4.60517      8.537 |     N =    4165
+         between |             .3942387     5.3364   7.813596 |     n =     595
+         within  |             .2404023   4.781808   8.621092 |     T =       7
+                 |                                            |
+exp      overall |  19.85378   10.96637          1         51 |     N =    4165
+         between |             10.79018          4         48 |     n =     595
+         within  |              2.00024   16.85378   22.85378 |     T =       7
+                 |                                            |
+ed       overall |  12.84538   2.787995          4         17 |     N =    4165
+         between |             2.790006          4         17 |     n =     595
+         within  |                    0   12.84538   12.84538 |     T =       7
+                 |                                            |
+t        overall |         4    2.00024          1          7 |     N =    4165
+         between |                    0          4          4 |     n =     595
+         within  |              2.00024          1          7 |     T =       7
+
+. 
+. * Panel tabulation for a variable
+. xttab south
+
+                  Overall             Between            Within
+    south |    Freq.  Percent      Freq.  Percent        Percent
+----------+-----------------------------------------------------
+        0 |    2956     70.97       428     71.93          98.66
+        1 |    1209     29.03       182     30.59          94.90
+----------+-----------------------------------------------------
+    Total |    4165    100.00       610    102.52          97.54
+                               (n = 595)
+
+. 
+. * Transition probabilities for a variable
+. xttrans south, freq
+
+residence; |
+  south==1 |  residence; south==1
+ if in the | if in the South area
+South area |         0          1 |     Total
+-----------+----------------------+----------
+         0 |     2,527          8 |     2,535 
+           |     99.68       0.32 |    100.00 
+-----------+----------------------+----------
+         1 |         8      1,027 |     1,035 
+           |      0.77      99.23 |    100.00 
+-----------+----------------------+----------
+     Total |     2,535      1,035 |     3,570 
+           |     71.01      28.99 |    100.00 
+
+
+. 
+. * Simple time series plot for each of 10 individuals
+. * xtline lwage if id<=10, overlay
+. 
+. * First-order autocorrelation in a variable
+. sort id t  
+
+. correlate lwage L.lwage L2.lwage L3.lwage L4.lwage L5.lwage L6.lwage
+(obs=595)
+
+             |                 L.      L2.      L3.      L4.      L5.      L6.
+             |    lwage    lwage    lwage    lwage    lwage    lwage    lwage
+-------------+---------------------------------------------------------------
+       lwage |
+         --. |   1.0000
+         L1. |   0.9238   1.0000
+         L2. |   0.9083   0.9271   1.0000
+         L3. |   0.8753   0.8843   0.9067   1.0000
+         L4. |   0.8471   0.8551   0.8833   0.8990   1.0000
+         L5. |   0.8261   0.8347   0.8721   0.8641   0.8667   1.0000
+         L6. |   0.8033   0.8163   0.8518   0.8465   0.8594   0.9418   1.0000
+
+
+. 
+. * Pooled OLS with incorrect default standard errors
+. regress lwage exp exp2 wks ed, noheader
+------------------------------------------------------------------------------
+       lwage |      Coef.   Std. Err.      t    P>|t|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+         exp |    .044675   .0023929    18.67   0.000     .0399838    .0493663
+        exp2 |  -.0007156   .0000528   -13.56   0.000    -.0008191   -.0006121
+         wks |    .005827   .0011827     4.93   0.000     .0035084    .0081456
+          ed |   .0760407   .0022266    34.15   0.000     .0716754     .080406
+       _cons |   4.907961   .0673297    72.89   0.000     4.775959    5.039963
+------------------------------------------------------------------------------
+
+. 
+. * Pooled OLS with cluster-robust standard errors
+. regress lwage exp exp2 wks ed, noheader vce(cluster id)
+                                   (Std. Err. adjusted for 595 clusters in id)
+------------------------------------------------------------------------------
+             |               Robust
+       lwage |      Coef.   Std. Err.      t    P>|t|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+         exp |    .044675   .0054385     8.21   0.000     .0339941     .055356
+        exp2 |  -.0007156   .0001285    -5.57   0.000    -.0009679   -.0004633
+         wks |    .005827   .0019284     3.02   0.003     .0020396    .0096144
+          ed |   .0760407   .0052122    14.59   0.000     .0658042    .0862772
+       _cons |   4.907961   .1399887    35.06   0.000     4.633028    5.182894
+------------------------------------------------------------------------------
+
+. 
+. * Pooled feasible GLS estimator with AR(2) error
+. xtgee lwage exp exp2 wks ed, corr(ar 2) vce(robust)
+
+Iteration 1: tolerance = .02245275
+Iteration 2: tolerance = .02001357
+Iteration 3: tolerance = .00991542
+Iteration 4: tolerance = .0055136
+Iteration 5: tolerance = .00323279
+Iteration 6: tolerance = .00194929
+Iteration 7: tolerance = .00119421
+Iteration 8: tolerance = .00073853
+Iteration 9: tolerance = .00045933
+Iteration 10: tolerance = .00028668
+Iteration 11: tolerance = .00017931
+Iteration 12: tolerance = .00011231
+Iteration 13: tolerance = .0000704
+Iteration 14: tolerance = .00004415
+Iteration 15: tolerance = .0000277
+Iteration 16: tolerance = .00001738
+Iteration 17: tolerance = .00001091
+Iteration 18: tolerance = 6.847e-06
+Iteration 19: tolerance = 4.298e-06
+Iteration 20: tolerance = 2.698e-06
+Iteration 21: tolerance = 1.693e-06
+Iteration 22: tolerance = 1.063e-06
+Iteration 23: tolerance = 6.673e-07
+
+GEE population-averaged model                   Number of obs      =      4165
+Group and time vars:                  id t      Number of groups   =       595
+Link:                             identity      Obs per group: min =         7
+Family:                           Gaussian                     avg =       7.0
+Correlation:                         AR(2)                     max =         7
+                                                Wald chi2(4)       =    873.28
+Scale parameter:                  .1966639      Prob > chi2        =    0.0000
+
+                                     (Std. Err. adjusted for clustering on id)
+------------------------------------------------------------------------------
+             |               Robust
+       lwage |      Coef.   Std. Err.      z    P>|z|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+         exp |   .0718915    .003999    17.98   0.000     .0640535    .0797294
+        exp2 |  -.0008966   .0000933    -9.61   0.000    -.0010794   -.0007137
+         wks |   .0002964   .0010553     0.28   0.779     -.001772    .0023647
+          ed |   .0905069   .0060161    15.04   0.000     .0787156    .1022982
+       _cons |   4.526381   .1056897    42.83   0.000     4.319233    4.733529
+------------------------------------------------------------------------------
+
+. 
+. * Within or FE estimator with cluster-robust standard errors
+. xtreg lwage exp exp2 wks ed, fe vce(robust)
+note: ed omitted because of collinearity
+
+Fixed-effects (within) regression               Number of obs      =      4165
+Group variable: id                              Number of groups   =       595
+
+R-sq:  within  = 0.6566                         Obs per group: min =         7
+       between = 0.0276                                        avg =       7.0
+       overall = 0.0476                                        max =         7
+
+                                                F(3,594)           =   1059.72
+corr(u_i, Xb)  = -0.9107                        Prob > F           =    0.0000
+
+                                   (Std. Err. adjusted for 595 clusters in id)
+------------------------------------------------------------------------------
+             |               Robust
+       lwage |      Coef.   Std. Err.      t    P>|t|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+         exp |   .1137879   .0040289    28.24   0.000     .1058753    .1217004
+        exp2 |  -.0004244   .0000822    -5.16   0.000    -.0005858   -.0002629
+         wks |   .0008359   .0008697     0.96   0.337    -.0008721    .0025439
+          ed |          0  (omitted)
+       _cons |   4.596396   .0600887    76.49   0.000     4.478384    4.714408
+-------------+----------------------------------------------------------------
+     sigma_u |  1.0362039
+     sigma_e |  .15220316
+         rho |  .97888036   (fraction of variance due to u_i)
+------------------------------------------------------------------------------
+
+. 
+. * Between estimator with default standard errors
+. xtreg lwage exp exp2 wks ed, be
+
+Between regression (regression on group means)  Number of obs      =      4165
+Group variable: id                              Number of groups   =       595
+
+R-sq:  within  = 0.1357                         Obs per group: min =         7
+       between = 0.3264                                        avg =       7.0
+       overall = 0.2723                                        max =         7
+
+                                                F(4,590)           =     71.48
+sd(u_i + avg(e_i.))=   .324656                  Prob > F           =    0.0000
+
+------------------------------------------------------------------------------
+       lwage |      Coef.   Std. Err.      t    P>|t|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+         exp |    .038153   .0056967     6.70   0.000     .0269647    .0493412
+        exp2 |  -.0006313   .0001257    -5.02   0.000    -.0008781   -.0003844
+         wks |   .0130903   .0040659     3.22   0.001     .0051048    .0210757
+          ed |   .0737838   .0048985    15.06   0.000     .0641632    .0834044
+       _cons |   4.683039   .2100989    22.29   0.000     4.270407    5.095672
+------------------------------------------------------------------------------
+
+. 
+. * Random effects estimator with cluster-robust standard errors
+. xtreg lwage exp exp2 wks ed, re vce(robust) theta
+
+Random-effects GLS regression                   Number of obs      =      4165
+Group variable: id                              Number of groups   =       595
+
+R-sq:  within  = 0.6340                         Obs per group: min =         7
+       between = 0.1716                                        avg =       7.0
+       overall = 0.1830                                        max =         7
+
+                                                Wald chi2(4)       =   1598.50
+corr(u_i, X)   = 0 (assumed)                    Prob > chi2        =    0.0000
+theta          = .82280511
+
+                                   (Std. Err. adjusted for 595 clusters in id)
+------------------------------------------------------------------------------
+             |               Robust
+       lwage |      Coef.   Std. Err.      z    P>|z|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+         exp |   .0888609   .0039992    22.22   0.000     .0810227    .0966992
+        exp2 |  -.0007726   .0000896    -8.62   0.000    -.0009481    -.000597
+         wks |   .0009658   .0009259     1.04   0.297     -.000849    .0027806
+          ed |   .1117099   .0083954    13.31   0.000     .0952552    .1281647
+       _cons |   3.829366   .1333931    28.71   0.000     3.567921    4.090812
+-------------+----------------------------------------------------------------
+     sigma_u |  .31951859
+     sigma_e |  .15220316
+         rho |  .81505521   (fraction of variance due to u_i)
+------------------------------------------------------------------------------
+
+. 
+. * First difference estimator with cluster-robust standard errors
+. global xlist exp exp2 wks ed
+
+. regress D.(lwage $xlist), vce(cluster id)
+note: _delete omitted because of collinearity
+note: _delete omitted because of collinearity
+
+Linear regression                                      Number of obs =    3570
+                                                       F(  2,   594) =   22.66
+                                                       Prob > F      =  0.0000
+                                                       R-squared     =  0.0041
+                                                       Root MSE      =  .18156
+
+                                   (Std. Err. adjusted for 595 clusters in id)
+------------------------------------------------------------------------------
+             |               Robust
+     D.lwage |      Coef.   Std. Err.      t    P>|t|     [95% Conf. Interval]
+-------------+----------------------------------------------------------------
+         exp |
+         D1. |          0  (omitted)
+             |
+        exp2 |
+         D1. |  -.0005321   .0000808    -6.58   0.000    -.0006908   -.0003734
+             |
+         wks |
+         D1. |  -.0002683   .0011783    -0.23   0.820    -.0025824    .0020459
+             |
+          ed |
+         D1. |          0  (omitted)
+             |
+       _cons |   .1170654   .0040974    28.57   0.000     .1090182    .1251126
+------------------------------------------------------------------------------
+
+. 
+. * Compare various estimators all with cluster-robust se's except BE 
+. global xlist exp exp2 wks ed 
+
+. quietly regress lwage $xlist, vce(cluster id)
+
+. estimates store OLS
+
+. quietly xtgee lwage exp exp2 wks ed, corr(ar 2) vce(robust)
+
+. estimates store PFGLS
+
+. quietly xtreg lwage $xlist, be
+
+. estimates store BE
+
+. quietly xtreg lwage $xlist, re vce(robust)
+
+. estimates store RE
+
+. quietly xtreg lwage $xlist, fe vce(robust)
+
+. estimates store FE
+
+. estimates table OLS PFGLS BE RE FE,  b(%9.4f) se stats(N)
+
+--------------------------------------------------------------------------
+    Variable |    OLS        PFGLS        BE          RE          FE      
+-------------+------------------------------------------------------------
+         exp |    0.0447      0.0719      0.0382      0.0889      0.1138  
+             |    0.0054      0.0040      0.0057      0.0040      0.0040  
+        exp2 |   -0.0007     -0.0009     -0.0006     -0.0008     -0.0004  
+             |    0.0001      0.0001      0.0001      0.0001      0.0001  
+         wks |    0.0058      0.0003      0.0131      0.0010      0.0008  
+             |    0.0019      0.0011      0.0041      0.0009      0.0009  
+          ed |    0.0760      0.0905      0.0738      0.1117   (omitted)  
+             |    0.0052      0.0060      0.0049      0.0084              
+       _cons |    4.9080      4.5264      4.6830      3.8294      4.5964  
+             |    0.1400      0.1057      0.2101      0.1334      0.0601  
+-------------+------------------------------------------------------------
+           N |      4165        4165        4165        4165        4165  
+--------------------------------------------------------------------------
+                                                              legend: b/se
+
+. 
+. /*
+> 
+> * Panel IV example: FE with wks instrumented by external instrument ms
+> xtivreg lwage exp exp2 (wks = ms), fe 
+> 
+> * use mus08psidextract.dta, clear
+> * Hausman-taylor example
+> xthtaylor lwage occ south smsa ind exp exp2 wks ms union fem blk ed,  ///
+>   endog(exp exp2 wks ms union ed)
+> 
+> * Optimal or two-step GMM for a dynamic panel model
+> xtabond lwage occ south smsa ind, lags(2) maxldep(3)     ///
+>   pre(wks,lag(1,2)) endogenous(ms,lag(0,2))              ///
+>   endogenous(union,lag(0,2)) twostep vce(robust) artests(3)
+> 
+> * Test whether error is serially correlated
+> estat abond
+> 
+> * Test of overidentifying restrictions (first estimate with no vce(robust)
+> quietly xtabond lwage occ south smsa ind, lags(2) maxldep(3)     ///
+>   pre(wks,lag(1,2)) endogenous(ms,lag(0,2))              ///
+>   endogenous(union,lag(0,2)) twostep artests(3)
+> estat sargan
+> 
+> * Arellano/Bover or Blundell/Bond for a dynamic panel model
+> xtdpdsys lwage occ south smsa ind, lags(2) maxldep(3)     ///
+>   pre(wks,lag(1,2)) endogenous(ms,lag(0,2))              ///
+>   endogenous(union,lag(0,2)) twostep vce(robust) artests(3)
+> estat abond
+> 
+> * Use of xtdpd to exactly reproduce the previous xtdpdsys command
+> xtdpd L(0/2).lwage L(0/1).wks occ south smsa ind ms union, ///
+>   div(occ south smsa ind) dgmmiv(lwage, lag(2 4))          ///
+>   dgmmiv(ms union, lag (2 3)) dgmmiv(L.wks, lag(1 2))      ///
+>   lgmmiv(lwage wks ms union) twostep vce(robust) artests(3)
+> 
+> * Previous command if model error is MA(1)
+> xtdpd L(0/2).lwage L(0/1).wks occ south smsa ind ms union, ///
+>   div(occ south smsa ind) dgmmiv(lwage, lag(3 4))          ///
+>   dgmmiv(ms union, lag (2 3)) dgmmiv(L.wks, lag(1 2))      ///
+>   lgmmiv(L.lwage wks ms union) twostep vce(robust) artests(3)
+> 
+> * Random slopes model estimated using xtmixed
+> * xtmixed lwage exp exp2 wks ed || id: exp wks, covar(unstructured) mle
+> 
+> ********** CLOSE OUTPUT
+> * log close
+> * clear
+> * exit
+> 
+
+end of do-file
+
+. exit, clear

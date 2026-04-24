@@ -1,0 +1,86 @@
+-------------------------------------------------------------------------------
+      name:  <unnamed>
+       log:  c:\EC\BSE\DSDM\Term 2\24DM021_Causal Inference and Machine Learnin
+> g\References\Cameron & Trivedi\musr/mus01p2template.txt
+  log type:  text
+ opened on:  18 Apr 2026, 01:08:27
+
+. * 3. Stata version
+. version 10.1 // so will still run in a later version o f Stata
+
+. * 4. Program explanation
+. *This illustrative program creates 100 uniform variates
+. * 5. Change Stata default settings - two examples are given
+. set more off // scroll screen output by at full speed
+
+. set mem 20m // set aside 20 mb for memory space
+
+. * 6. Set program parameters using global macros
+. global numobs 100
+
+. local seed 10101
+
+. local xlist xvar
+
+. * 7. Generate data and summarize
+. set obs $numobs
+Number of observations (_N) was 100, now 100.
+
+. set seed `seed'
+
+. generate xvar = runiform()
+
+. generate yvar = xvar^2
+
+. summarize
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+       x1var |        100    .4469959    .2816956   .0118525   .9623631
+       x2var |        100    .4876633    .3166218   .0044416   .9960508
+       x3var |        100    .4877392    .3131568   .0046009   .9991023
+       x4var |        100    .5130724    .2896722   .0139891   .9896932
+         sum |        100    1.935471    .5911068   .4193314   3.349523
+-------------+---------------------------------------------------------
+        xvar |        100    .5319284    .2847927   .0019951   .9983786
+        yvar |        100    .3632437    .2984326   3.98e-06   .9967598
+
+. * 8. Demonstrate use of results stored in r ()
+. summarize xvar
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+        xvar |        100    .5319284    .2847927   .0019951   .9983786
+
+. display "Sample range = " r(max)-r(min)
+Sample range = .99638346
+
+. regress yvar `xlist'
+
+      Source |       SS           df       MS      Number of obs   =       100
+-------------+----------------------------------   F(1, 98)        =   1436.25
+       Model |  8.25394585         1  8.25394585   Prob > F        =    0.0000
+    Residual |  .563192674        98  .005746864   R-squared       =    0.9361
+-------------+----------------------------------   Adj R-squared   =    0.9355
+       Total |  8.81713852        99  .089062005   Root MSE        =    .07581
+
+------------------------------------------------------------------------------
+        yvar | Coefficient  Std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+        xvar |   1.013875   .0267528    37.90   0.000     .9607849    1.066965
+       _cons |  -.1760652   .0161238   -10.92   0.000    -.2080624    -.144068
+------------------------------------------------------------------------------
+
+. scalar r2 = e(mss) / ( e(mss)+e(rss) )
+
+. display "r-squared = " r2
+r-squared = .93612523
+
+. * 9. Close output file and exit Stata
+. log close
+      name:  <unnamed>
+       log:  c:\EC\BSE\DSDM\Term 2\24DM021_Causal Inference and Machine Learnin
+> g\References\Cameron & Trivedi\musr/mus01p2template.txt
+  log type:  text
+ closed on:  18 Apr 2026, 01:08:29
+-------------------------------------------------------------------------------

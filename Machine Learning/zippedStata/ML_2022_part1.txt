@@ -1,0 +1,601 @@
+---------------------------------------------------------------------------------
+      name:  <unnamed>
+       log:  c:\Users\ccameron\Dropbox\Desktop\TEACHING\240f\2022_seminar\ML_2022
+> _part1.txt
+  log type:  text
+ opened on:   2 May 2022, 20:18:48
+
+. 
+. ********** OVERVIEW OF ML_2022_part1.do **********
+. 
+. * To run you need files
+. *  none as data is generated
+. * in your directory
+. 
+. * And Stata user-written commands 
+. *   crossfold, loocv, vselect
+. * are used
+. 
+. * 2.1 GENERATED DATA SAMPLE
+. * 2.3 MSE, INFORMATION CRITERIA AND RELATED PENALTY MEASURES
+. * 2.4 SPLIT SAMPLE COMMAND
+. * 2.5 SINGLE SPLIT CROSS VALIDATION
+. * 2.6 K-FOLD CROSS VALIDATION
+. * 2.7 LEAVE-ONE-OUT CROSS VALIDATION
+. * 2.8 BEST SUBSETS AND STEPWISE SELECTION
+. * 2.9 SELECTION USING STATISTICAL SIGNIFICANCE
+. 
+. ********** SETUP **********
+. 
+. set more off
+
+. version 16
+
+. clear all
+
+. set linesize 82
+
+. set scheme s1mono  /* Graphics scheme */
+
+. 
+. ********** DATA DESCRIPTION **********
+. 
+. * Data are generated
+. * But are nonetheless saved in case want to use a different program than Stata 
+. 
+. ********** 2.1 GENERATED DATA
+. 
+. * Generate three correlated variables (rho = 0.5) and y linear only in x1
+. clear
+
+. quietly set obs 40
+
+. set seed 12345
+
+. matrix MU = (0,0,0)
+
+. scalar rho = 0.5
+
+. matrix SIGMA = (1,rho,rho \ rho,1,rho \ rho,rho,1)
+
+. drawnorm x1 x2 x3, means(MU) cov(SIGMA)
+
+. generate y = 2 + 1*x1 + rnormal(0,3)
+
+. saveold ML_2022_part1, version(11) replace
+(saving in Stata 12 format, which Stata 11 can read)
+(file ML_2022_part1.dta not found)
+file ML_2022_part1.dta saved
+
+. 
+. * Summarize data
+. summarize
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+          x1 |         40    .3337951    .8986718  -1.099225   2.754746
+          x2 |         40    .1257017    .9422221  -2.081086   2.770161
+          x3 |         40    .0712341    1.034616  -1.676141   2.931045
+           y |         40    3.107987    3.400129  -3.542646   10.60979
+
+. correlate
+(obs=40)
+
+             |       x1       x2       x3        y
+-------------+------------------------------------
+          x1 |   1.0000
+          x2 |   0.5077   1.0000
+          x3 |   0.4281   0.2786   1.0000
+           y |   0.4740   0.3370   0.2046   1.0000
+
+
+. 
+. * OLS regression of y on x1-x3
+. regress y x1 x2 x3, vce(robust)
+
+Linear regression                               Number of obs     =         40
+                                                F(3, 36)          =       4.91
+                                                Prob > F          =     0.0058
+                                                R-squared         =     0.2373
+                                                Root MSE          =     3.0907
+
+------------------------------------------------------------------------------
+             |               Robust
+           y | Coefficient  std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+          x1 |   1.555582   .5006152     3.11   0.004     .5402873    2.570877
+          x2 |   .4707111   .5251826     0.90   0.376    -.5944086    1.535831
+          x3 |  -.0256025   .6009393    -0.04   0.966    -1.244364    1.193159
+       _cons |   2.531396   .5377607     4.71   0.000     1.440766    3.622025
+------------------------------------------------------------------------------
+
+. 
+. regress y x1 
+
+      Source |       SS           df       MS      Number of obs   =        40
+-------------+----------------------------------   F(1, 38)        =     11.01
+       Model |  101.318018         1  101.318018   Prob > F        =    0.0020
+    Residual |  349.556297        38  9.19884993   R-squared       =    0.2247
+-------------+----------------------------------   Adj R-squared   =    0.2043
+       Total |  450.874315        39  11.5608799   Root MSE        =     3.033
+
+------------------------------------------------------------------------------
+           y | Coefficient  Std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+          x1 |   1.793535   .5404224     3.32   0.002     .6995073    2.887563
+       _cons |   2.509313   .5123592     4.90   0.000     1.472097     3.54653
+------------------------------------------------------------------------------
+
+. di e(rss) "  " e(rss)/e(N)  "  " e(N)
+349.5563  8.7389074  40
+
+. 
+. regress y x1 x3 
+
+      Source |       SS           df       MS      Number of obs   =        40
+-------------+----------------------------------   F(2, 37)        =      5.36
+       Model |  101.319472         2  50.6597361   Prob > F        =    0.0090
+    Residual |  349.554843        37  9.44742819   R-squared       =    0.2247
+-------------+----------------------------------   Adj R-squared   =    0.1828
+       Total |  450.874315        39  11.5608799   Root MSE        =    3.0737
+
+------------------------------------------------------------------------------
+           y | Coefficient  Std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+          x1 |   1.790316   .6060196     2.95   0.005     .5624039    3.018229
+          x3 |   .0065313   .5263913     0.01   0.990    -1.060039    1.073101
+       _cons |   2.509923   .5215524     4.81   0.000     1.453157    3.566688
+------------------------------------------------------------------------------
+
+. di e(rss) "  " e(rss)/e(N)  "  " e(N)
+349.55484  8.7388711  40
+
+. 
+. 
+. *********** 2.3 MSE, INFORMATION CRITERIA AND RELATED PENALTY MEASURES2.4 MODEL 
+> SELECTION BASED ON PENALIZED GOODNESS-OF-FIT
+. 
+. * Regressor lists for all possible models
+. global xlist1
+
+. global xlist2 x1
+
+. global xlist3 x2
+
+. global xlist4 x3
+
+. global xlist5 x1 x2
+
+. global xlist6 x2 x3
+
+. global xlist7 x1 x3
+
+. global xlist8 x1 x2 x3
+
+. 
+. * Full sample estimates with AIC, BIC, Cp, R2adj penalties
+. quietly regress y $xlist8
+
+. scalar s2full = e(rmse)^2  // Needed for Mallows Cp
+
+. forvalues k = 1/8 {
+  2.     quietly regress y ${xlist`k'}
+  3.     scalar mse`k' = e(rss)/e(N)
+  4.     scalar r2adj`k' = e(r2_a)
+  5.     scalar aic`k' = -2*e(ll) + 2*e(rank)
+  6.     scalar bic`k' = -2*e(ll) + e(rank)*ln(e(N))
+  7.     scalar cp`k' =  e(rss)/s2full - e(N) + 2*e(rank)
+  8.     display "Model " "${xlist`k'}" _col(15) " MSE=" %8.5f mse`k'  ///
+>      " R2adj=" %6.3f r2adj`k' "  AIC=" %7.2f aic`k'  ///
+>      " BIC=" %7.2f bic`k' " Cp=" %6.3f cp`k'
+  9. }
+Model          MSE=11.27186 R2adj= 0.000  AIC= 212.41 BIC= 214.10 Cp= 9.199
+Model x1       MSE= 8.73891 R2adj= 0.204  AIC= 204.23 BIC= 207.60 Cp= 0.593
+Model x2       MSE= 9.99158 R2adj= 0.090  AIC= 209.58 BIC= 212.96 Cp= 5.838
+Model x3       MSE=10.80016 R2adj= 0.017  AIC= 212.70 BIC= 216.08 Cp= 9.224
+Model x1 x2    MSE= 8.59796 R2adj= 0.196  AIC= 205.58 BIC= 210.64 Cp= 2.002
+Model x2 x3    MSE= 9.84189 R2adj= 0.080  AIC= 210.98 BIC= 216.05 Cp= 7.211
+Model x1 x3    MSE= 8.73887 R2adj= 0.183  AIC= 206.23 BIC= 211.29 Cp= 2.592
+Model x1 x2 x3 MSE= 8.59740 R2adj= 0.174  AIC= 207.57 BIC= 214.33 Cp= 4.000
+
+. 
+. ********** 2.4 SPLITSAMPLE COMMAND
+. 
+. * Split sample into five equal size parts using splitsample command
+. splitsample, nsplit(5) generate(snum) rseed(10101)
+
+. tabulate snum
+
+       snum |      Freq.     Percent        Cum.
+------------+-----------------------------------
+          1 |          8       20.00       20.00
+          2 |          8       20.00       40.00
+          3 |          8       20.00       60.00
+          4 |          8       20.00       80.00
+          5 |          8       20.00      100.00
+------------+-----------------------------------
+      Total |         40      100.00
+
+. 
+. ********** 2.5 SINGLE SPLIT CROSS VALIDATION
+. 
+. * Split into training group with 32 observations (dtrain = 1) 
+. * and validation sample with 8 observations (dtrain = 0)
+. splitsample, split(1 4) values(0 1) generate(dtrain) rseed(10101)
+
+. tabulate dtrain
+
+     dtrain |      Freq.     Percent        Cum.
+------------+-----------------------------------
+          0 |          8       20.00       20.00
+          1 |         32       80.00      100.00
+------------+-----------------------------------
+      Total |         40      100.00
+
+. 
+. * Single split validation - training and test MSE for the 8 possible models
+. forvalues k = 1/8 {
+  2.     qui reg y ${xlist`k'} if dtrain==1
+  3.     qui predict y`k'hat
+  4.     qui gen y`k'errorsq = (y`k'hat - y)^2
+  5.     qui sum y`k'errorsq if dtrain == 1
+  6.     scalar mse`k'train = r(mean)
+  7.     qui sum y`k'errorsq if dtrain == 0
+  8.     qui scalar mse`k'test = r(mean)
+  9.     display "Model " "${xlist`k'}" _col(16)  ///
+>         " Training MSE = " %7.3f mse`k'train " Test MSE = " %7.3f mse`k'test 
+ 10. }
+Model           Training MSE =  10.124 Test MSE =  16.280
+Model x1        Training MSE =   7.478 Test MSE =  13.871
+Model x2        Training MSE =   8.840 Test MSE =  14.803
+Model x3        Training MSE =   9.658 Test MSE =  15.565
+Model x1 x2     Training MSE =   7.288 Test MSE =  13.973
+Model x2 x3     Training MSE =   8.668 Test MSE =  14.674
+Model x1 x3     Training MSE =   7.474 Test MSE =  13.892
+Model x1 x2 x3  Training MSE =   7.288 Test MSE =  13.980
+
+. drop y*hat y*errorsq 
+
+. 
+. ********** 2.6 K-FOLD CROSS VALIDATION
+. 
+. * Five-fold cross validation example for model with all regressors
+. splitsample, nsplit(5) generate(foldnum) rseed(10101)
+
+. matrix allmses = J(5,1,.)
+
+. capture drop y*hat y*errorsq
+
+. forvalues i = 1/5 {
+  2.     qui reg y x1 x2 x3 if foldnum != `i'
+  3.     qui predict y`i'hat
+  4.     qui gen y`i'errorsq = (y`i'hat - y)^2
+  5.     qui sum y`i'errorsq if foldnum ==`i'
+  6.     matrix allmses[`i',1] = r(mean)
+  7. }
+
+. matrix list allmses
+
+allmses[5,1]
+           c1
+r1  13.980321
+r2  6.4997357
+r3  9.3623792
+r4   6.413401
+r5   12.23958
+
+. 
+. * Compute the average MSE over the five folds and standard deviation 
+. svmat allmses, names(vallmses) 
+
+. qui sum vallmses
+
+. display "CV5 = " %5.3f r(mean) " with st. dev. = " %5.3f r(sd)
+CV5 = 9.699 with st. dev. = 3.389
+
+. 
+. * Five-fold cross validation measure for one model with ll regressors 
+. set seed 10101
+
+. crossfold regress y x1 x2 x3, k(5)
+
+             |      RMSE 
+-------------+-----------
+        est1 |  3.739027 
+        est2 |  2.549458 
+        est3 |  3.059801 
+        est4 |  2.532469 
+        est5 |  3.498511 
+
+. drop _est*  // Drop variables created 
+
+. 
+. * Five-fold cross validation measure for all possible models
+. forvalues k = 1/8 {
+  2.     set seed 10101
+  3.     qui crossfold regress y ${xlist`k'}, k(5)  
+  4.     matrix RMSEs`k' = r(est)
+  5.     svmat RMSEs`k', names(rmse`k') 
+  6.     qui generate mse`k' = rmse`k'^2
+  7.     qui sum mse`k'
+  8.     scalar cv`k' = r(mean)
+  9.     scalar sdcv`k' = r(sd)
+ 10.     display "Model " "${xlist`k'}" _col(16) "  CV5 = " %7.3f cv`k' ///
+>         " with st. dev. = " %7.3f sdcv`k'
+ 11. }
+Model            CV5 =  11.960 with st. dev. =   3.561
+Model x1         CV5 =   9.138 with st. dev. =   3.069
+Model x2         CV5 =  10.407 with st. dev. =   4.139
+Model x3         CV5 =  11.776 with st. dev. =   3.272
+Model x1 x2      CV5 =   9.173 with st. dev. =   3.367
+Model x2 x3      CV5 =  10.872 with st. dev. =   4.221
+Model x1 x3      CV5 =   9.639 with st. dev. =   2.985
+Model x1 x2 x3   CV5 =   9.699 with st. dev. =   3.389
+
+. 
+. ********** 2.7 LEAVE-ONE-OUT CROSS VALIDATION
+. 
+. * Leave-one-out cross validation (loocv sets same seed each time)
+. loocv regress y x1 
+
+
+ Leave-One-Out Cross-Validation Results 
+-----------------------------------------
+         Method          |    Value
+-------------------------+---------------
+Root Mean Squared Errors |   3.0989007
+Mean Absolute Errors     |   2.5242994
+Pseudo-R2                |   .15585569
+-----------------------------------------
+
+. display "LOOCV MSE = " r(rmse)^2
+LOOCV MSE = 9.6031853
+
+. 
+. * Not included
+. loocv regress y x1 x2
+
+
+ Leave-One-Out Cross-Validation Results 
+-----------------------------------------
+         Method          |    Value
+-------------------------+---------------
+Root Mean Squared Errors |   3.1393877
+Mean Absolute Errors     |   2.5526339
+Pseudo-R2                |   .14064699
+-----------------------------------------
+
+. loocv regress y x1 x2 x3
+
+
+ Leave-One-Out Cross-Validation Results 
+-----------------------------------------
+         Method          |    Value
+-------------------------+---------------
+Root Mean Squared Errors |   3.2559
+Mean Absolute Errors     |   2.6421057
+Pseudo-R2                |   .0938996
+-----------------------------------------
+
+. 
+. ********** 2.8 BEST SUBSETS SELECTION AND STEPWISE REGRESSION
+. 
+. * Best subset selection with user-written add-on vselect
+. vselect y x1 x2 x3, best
+
+Response :             y
+Selected predictors:   x1 x2 x3
+
+Optimal models: 
+
+   # Preds     R2ADJ         C       AIC      AICC       BIC
+         1  .2043123  .5925225  204.2265  204.8932  207.6042
+         2  .1959877  2.002325  205.5761  206.7189  210.6427
+         3  .1737073         4  207.5735  209.3382   214.329
+
+predictors for each model:
+
+1  :  x1
+2  :  x1 x2
+3  :  x1 x2 x3
+
+. 
+. * Best subset selection with user-written add-on vselect
+. vselect y x1 x2 x3, best
+
+Response :             y
+Selected predictors:   x1 x2 x3
+
+Optimal models: 
+
+   # Preds     R2ADJ         C       AIC      AICC       BIC
+         1  .2043123  .5925225  204.2265  204.8932  207.6042
+         2  .1959877  2.002325  205.5761  206.7189  210.6427
+         3  .1737073         4  207.5735  209.3382   214.329
+
+predictors for each model:
+
+1  :  x1
+2  :  x1 x2
+3  :  x1 x2 x3
+
+. * Stepwise forwards using AIC
+. vselect y x1 x2 x3, forward aic
+FORWARD variable selection
+Information Criteria: AIC
+
+------------------------------------------------------------------------------
+Stage 0 reg y  : AIC  212.4074
+------------------------------------------------------------------------------
+AIC   204.2265  :              add         x1
+AIC   209.5848  :              add         x2
+AIC   212.6975  :              add         x3
+------------------------------------------------------------------------------
+Stage 1 reg y x1 : AIC  204.2265
+------------------------------------------------------------------------------
+AIC   205.5761  :              add         x2
+AIC   206.2263  :              add         x3
+
+Final Model
+
+      Source |       SS           df       MS      Number of obs   =        40
+-------------+----------------------------------   F(1, 38)        =     11.01
+       Model |  101.318018         1  101.318018   Prob > F        =    0.0020
+    Residual |  349.556297        38  9.19884993   R-squared       =    0.2247
+-------------+----------------------------------   Adj R-squared   =    0.2043
+       Total |  450.874315        39  11.5608799   Root MSE        =     3.033
+
+------------------------------------------------------------------------------
+           y | Coefficient  Std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+          x1 |   1.793535   .5404224     3.32   0.002     .6995073    2.887563
+       _cons |   2.509313   .5123592     4.90   0.000     1.472097     3.54653
+------------------------------------------------------------------------------
+
+. 
+. * Not included
+. * Stepwise backwards using AIC
+. vselect y x1 x2 x3, backward aic
+BACKWARD variable selection
+Information Criteria: AIC
+
+------------------------------------------------------------------------------
+Stage 0 reg y x1 x2 x3 : AIC  207.5735
+------------------------------------------------------------------------------
+AIC   210.981   :              remove         x1
+AIC   206.2263  :              remove         x2
+AIC   205.5761  :              remove         x3
+------------------------------------------------------------------------------
+Stage 1 reg y x1 x2  : AIC  205.5761
+------------------------------------------------------------------------------
+AIC   209.5848  :              remove         x1
+AIC   204.2265  :              remove         x2
+------------------------------------------------------------------------------
+Stage 2 reg y x1  : AIC  204.2265
+------------------------------------------------------------------------------
+AIC   212.4074  :              remove         x1
+
+Final Model
+
+      Source |       SS           df       MS      Number of obs   =        40
+-------------+----------------------------------   F(1, 38)        =     11.01
+       Model |  101.318018         1  101.318018   Prob > F        =    0.0020
+    Residual |  349.556297        38  9.19884993   R-squared       =    0.2247
+-------------+----------------------------------   Adj R-squared   =    0.2043
+       Total |  450.874315        39  11.5608799   Root MSE        =     3.033
+
+------------------------------------------------------------------------------
+           y | Coefficient  Std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+          x1 |   1.793535   .5404224     3.32   0.002     .6995073    2.887563
+       _cons |   2.509313   .5123592     4.90   0.000     1.472097     3.54653
+------------------------------------------------------------------------------
+
+. 
+. * Not included
+. * Best subsets with x1 always included
+. vselect y x2 x3, fix(x1) best
+
+Response :             y
+Fixed predictors :     x1
+Selected predictors:   x2 x3
+
+Optimal models: 
+
+   # Preds     R2ADJ         C       AIC      AICC       BIC
+         1  .1959877  2.002325  205.5761  206.7189  210.6427
+         2  .1737073         4  207.5735  209.3382   214.329
+
+predictors for each model:
+
+1  :  x2
+2  :  x2 x3
+
+. 
+. * Not included
+. * Add-on command gvselect for OLS regression with x1 always included
+. * Problem here
+. * gvselect <xlist> x2 x3: regress y <xlist> x1
+. 
+. ********** 2.9 SELECTION USING STATISTICAL SIGNIFICANCE
+. 
+. * This is old school use same p = 0.05 regardless of number of regressors.
+. * Recent work says reduce p-value with number of potential regressors
+. 
+. * Stepwise forward using statistical significance at five percent
+. stepwise, pe(.05): regress y x1 x2 x3
+
+Wald test, begin with empty model:
+p = 0.0020 <  0.0500, adding x1
+
+      Source |       SS           df       MS      Number of obs   =        40
+-------------+----------------------------------   F(1, 38)        =     11.01
+       Model |  101.318018         1  101.318018   Prob > F        =    0.0020
+    Residual |  349.556297        38  9.19884993   R-squared       =    0.2247
+-------------+----------------------------------   Adj R-squared   =    0.2043
+       Total |  450.874315        39  11.5608799   Root MSE        =     3.033
+
+------------------------------------------------------------------------------
+           y | Coefficient  Std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+          x1 |   1.793535   .5404224     3.32   0.002     .6995073    2.887563
+       _cons |   2.509313   .5123592     4.90   0.000     1.472097     3.54653
+------------------------------------------------------------------------------
+
+. 
+. * Stepwise backward using statistical significance at five percent
+. stepwise, pr(.05): regress y x1 x2 x3
+
+Wald test, begin with full model:
+p = 0.9618 >= 0.0500, removing x3
+p = 0.4410 >= 0.0500, removing x2
+
+      Source |       SS           df       MS      Number of obs   =        40
+-------------+----------------------------------   F(1, 38)        =     11.01
+       Model |  101.318018         1  101.318018   Prob > F        =    0.0020
+    Residual |  349.556297        38  9.19884993   R-squared       =    0.2247
+-------------+----------------------------------   Adj R-squared   =    0.2043
+       Total |  450.874315        39  11.5608799   Root MSE        =     3.033
+
+------------------------------------------------------------------------------
+           y | Coefficient  Std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+          x1 |   1.793535   .5404224     3.32   0.002     .6995073    2.887563
+       _cons |   2.509313   .5123592     4.90   0.000     1.472097     3.54653
+------------------------------------------------------------------------------
+
+. 
+. * Not included
+. * Stepwise forward in specified order (hierarchical) testing at five percent
+. stepwise, pe(.05): regress y x1 x2 x3
+
+Wald test, begin with empty model:
+p = 0.0020 <  0.0500, adding x1
+
+      Source |       SS           df       MS      Number of obs   =        40
+-------------+----------------------------------   F(1, 38)        =     11.01
+       Model |  101.318018         1  101.318018   Prob > F        =    0.0020
+    Residual |  349.556297        38  9.19884993   R-squared       =    0.2247
+-------------+----------------------------------   Adj R-squared   =    0.2043
+       Total |  450.874315        39  11.5608799   Root MSE        =     3.033
+
+------------------------------------------------------------------------------
+           y | Coefficient  Std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+          x1 |   1.793535   .5404224     3.32   0.002     .6995073    2.887563
+       _cons |   2.509313   .5123592     4.90   0.000     1.472097     3.54653
+------------------------------------------------------------------------------
+
+. 
+. ********** CLOSE OUTPUT **********
+. 
+. * log close
+. * clear 
+. * exit
+. 
+. 
+. 
+. 
+end of do-file
+
+. exit, clear

@@ -1,0 +1,311 @@
+-----------------------------------------------------------------------------------------------------------------------------------------------
+      name:  <unnamed>
+       log:  C:\EC\BSE\DSDM\Term 2\24DM021_Causal Inference and Machine Learning\References\Cameron & Trivedi\nhh2017cameron\nonparametric2017.
+> txt
+  log type:  text
+ opened on:  16 Mar 2026, 04:50:41
+
+. 
+. ********** OVERVIEW OF nonparametric2017.do **********
+. 
+. * STATA Program by A. Colin Cameron
+. * Kernel density
+. * Nonparametric 
+. 
+. * To run you need files
+. *   nonparametric.dta  
+. * in your directory
+. 
+. * And you need Stata addons 
+. *    semipar
+. *    sls
+. *    gam
+. 
+. * Also it uses npregress which is Stata 15
+. * This is commented out
+. 
+. ********** SETUP **********
+. 
+. clear all
+
+. set more off
+
+. version 14
+
+. set scheme s1mono  /* Graphics scheme */
+
+. set linesize 82
+
+. 
+. ********** DATA DESCRIPTION **********
+. 
+. * The original data are from the PSID Individual Level Final Release 1993 data
+. * From www.isr.umich.edu/src/psid  then choose Data Center 
+. * 4856 observations on 9 variables for Females 30 to 50 years 
+. * See mma09p1np.do for further description
+. 
+. ******* OLS WITH DOCTOR VISITS DATA
+. 
+. * Read in data, select, describe and summarize key variables
+. use nonparametric.dta, clear
+(PSID 1993 women 30 to 50 years with earnings - MMA ch.9)
+
+. describe 
+
+Contains data from nonparametric.dta
+ Observations:         3,504                  PSID 1993 women 30 to 50 years
+                                                with earnings - MMA ch.9
+    Variables:            10                  7 Nov 2009 14:25
+----------------------------------------------------------------------------------
+Variable      Storage   Display    Value
+    name         type    format    label      Variable label
+----------------------------------------------------------------------------------
+intnum          float   %9.0g                 1968 interview number
+persnum         float   %9.0g                 1968 person number
+age             float   %9.0g                 age in years 1992
+educatn         float   %9.0g                 years of completed schooling 1992
+earnings        float   %9.0g                 total labor income 1992
+hours           float   %9.0g                 annual work hours 1992
+sex             byte    %8.0g                 sex : 2=female 1=male
+married         byte    %8.0g                 last known marital status
+hwage           float   %9.0g                 earnings divided by hours
+lnhwage         float   %9.0g                 natural log of hwage
+----------------------------------------------------------------------------------
+Sorted by: 
+
+. 
+. * Work with age 36 and nonmissing education data
+. keep if age == 36
+(3,327 observations deleted)
+
+. drop if educatn == .
+(0 observations deleted)
+
+. summarize
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+      intnum |        177    4699.853    2765.081         14       9240
+     persnum |        177    59.53672    79.73001          1        188
+         age |        177          36           0         36         36
+     educatn |        177    12.58757    2.841347          3         17
+    earnings |        177    17470.55    13513.56         87      70000
+-------------+---------------------------------------------------------
+       hours |        177    1506.401    698.4145          8       3160
+         sex |        177           2           0          2          2
+     married |        177    .7457627    .4366669          0          1
+       hwage |        177    12.71631    16.58889   .6837607        175
+     lnhwage |        177    2.198163    .8281614  -.3801473   5.164786
+
+. 
+. ******* KERNEL DENSITY ESTIMATE
+. 
+. * Histogram
+. histogram lnhwage
+(bin=13, start=-.38014728, width=.42653332)
+
+. histogram lnhwage, bin(30) scale(1.1)
+(bin=30, start=-.38014728, width=.1848311)
+
+. graph export nonparametricfig1.wmf, replace
+(file nonparametricfig1.wmf not found)
+file C:\EC\BSE\DSDM\Term 2\24DM021_Causal Inference and Machine
+    Learning\References\Cameron & Trivedi\nhh2017cameron\nonparametricfig1.wmf
+    saved as Windows Metafile format
+
+. 
+. * Kernel density 
+. kdensity lnhwage
+
+. kdensity lnhwage, bw(0.21)
+
+. graph twoway (kdensity lnhwage, bw(0.21))  ///
+>   (kdensity lnhwage, bw(0.07) clstyle(p2)) ///
+>   (kdensity lnhwage, bw(0.63) clstyle(p3)), legend( label(1 "Default") ///
+>   label(2 "Half default") label(3 "Twice default") ) scale(1.1)
+
+. graph export nonparametricfig2.wmf, replace
+(file nonparametricfig2.wmf not found)
+file C:\EC\BSE\DSDM\Term 2\24DM021_Causal Inference and Machine
+    Learning\References\Cameron & Trivedi\nhh2017cameron\nonparametricfig2.wmf
+    saved as Windows Metafile format
+
+. 
+. * Histogram and kernel density
+. histogram lnhwage, kdensity  
+(bin=13, start=-.38014728, width=.42653332)
+
+. 
+. * Kernel density and normal density with data mean and standard deviation
+. kdensity lnhwage, normal
+
+. 
+. ******* NONPARAMETRIC REGRESSION 
+. 
+. * OLS 
+. regress lnhwage educatn
+
+      Source |       SS           df       MS      Number of obs   =       177
+-------------+----------------------------------   F(1, 175)       =     25.19
+       Model |   15.189945         1   15.189945   Prob > F        =    0.0000
+    Residual |  105.519895       175  .602970827   R-squared       =    0.1258
+-------------+----------------------------------   Adj R-squared   =    0.1208
+       Total |   120.70984       176  .685851362   Root MSE        =    .77651
+
+------------------------------------------------------------------------------
+     lnhwage | Coefficient  Std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+     educatn |   .1033945      .0206     5.02   0.000     .0627381     .144051
+       _cons |   .8966776   .2657917     3.37   0.001     .3721077    1.421247
+------------------------------------------------------------------------------
+
+. 
+. * Kernel (local constant) regression
+. lpoly lnhwage educatn, ci msize(small) scale(1.1)
+
+. graph export nonparametricfig3.wmf, replace
+(file nonparametricfig3.wmf not found)
+file C:\EC\BSE\DSDM\Term 2\24DM021_Causal Inference and Machine
+    Learning\References\Cameron & Trivedi\nhh2017cameron\nonparametricfig3.wmf
+    saved as Windows Metafile format
+
+. 
+. * Local linear regression
+. lpoly lnhwage educatn, degree(1) ci 
+
+. 
+. * Lowess regression
+. lowess lnhwage educatn 
+
+. 
+. * Kernel for different bandwidths - default, halfdefault, twicedefault
+. graph twoway (lpoly lnhwage educatn, bw(1.5))   ///
+>   (lpoly lnhwage educatn, bw(0.75) clstyle(p2)) ///
+>   (lpoly lnhwage educatn, bw(3.0) clstyle(p3)), scale(1.1) ///
+>   legend(label(1 "Default") label(2 "Half default") label(3 "Twice default")) //
+> /
+>   legend(pos(11) ring(0) col(1)) 
+
+. 
+. * Compare kernel, local linear, lowess with default bandwidths
+. graph twoway (lpoly lnhwage educ)                ///
+>   (lpoly lnhwage educ, degree(1) clstyle(p2))    ///
+>   (lowess lnhwage educ, clstyle(p3)), scale(1.1) ///
+>   legend( label(1 "Kernel") label(2 "Local linear") label(3 "lowess") ) ///
+>   legend(pos(11) ring(0) col(1))   
+
+. graph export nonparametricfig5.wmf, replace
+(file nonparametricfig5.wmf not found)
+file C:\EC\BSE\DSDM\Term 2\24DM021_Causal Inference and Machine
+    Learning\References\Cameron & Trivedi\nhh2017cameron\nonparametricfig5.wmf
+    saved as Windows Metafile format
+
+. 
+. * OLS 
+. regress lnhwage educatn
+
+      Source |       SS           df       MS      Number of obs   =       177
+-------------+----------------------------------   F(1, 175)       =     25.19
+       Model |   15.189945         1   15.189945   Prob > F        =    0.0000
+    Residual |  105.519895       175  .602970827   R-squared       =    0.1258
+-------------+----------------------------------   Adj R-squared   =    0.1208
+       Total |   120.70984       176  .685851362   Root MSE        =    .77651
+
+------------------------------------------------------------------------------
+     lnhwage | Coefficient  Std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+     educatn |   .1033945      .0206     5.02   0.000     .0627381     .144051
+       _cons |   .8966776   .2657917     3.37   0.001     .3721077    1.421247
+------------------------------------------------------------------------------
+
+. regress lnhwage educatn, vce(robust)
+
+Linear regression                               Number of obs     =        177
+                                                F(1, 175)         =      20.57
+                                                Prob > F          =     0.0000
+                                                R-squared         =     0.1258
+                                                Root MSE          =     .77651
+
+------------------------------------------------------------------------------
+             |               Robust
+     lnhwage | Coefficient  std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+     educatn |   .1033945   .0227962     4.54   0.000     .0584037    .1483853
+       _cons |   .8966776   .3018738     2.97   0.003     .3008956     1.49246
+------------------------------------------------------------------------------
+
+. 
+. /*
+> 
+> ******** NPREGRESS COMMAND
+> 
+> version 15
+> 
+> * npregress command - local linear
+> npregress kernel lnhwage educatn
+> 
+> * npregress with bootstrap standard errors
+> npregress kernel lnhwage educatn, vce(bootstrap, seed(10101) reps(50))
+> 
+> * 50 reps chosen to speed up program - should increase from 50 reps.
+> 
+> * Compute and plot predictions at various values with bootstrap st. errors
+> margins, at(educatn = (10(1)16)) vce(bootstrap, seed(10101) reps(50))
+> marginsplot, legend(off) scale(1.1)   ///
+>   addplot(scatter lnhwage educatn if lnhwage<50000, msize(tiny))
+> graph export nonparametricfig11.wmf, replace
+> 
+> * Partial effects of channging hours
+> margins, at(educatn = (10(1)16)) contrast(atcontrast(ar)) ///
+>     vce(bootstrap, seed(10101) reps(50))
+> marginsplot, legend(off)
+> graph export nonparametricfig13.wmf, replace
+> 
+> version 14
+> 
+> */
+. 
+. ******* SEMIPARAMETRIC REGRESSION  
+. 
+. * OLS 
+. regress lnhwage educatn hours, vce(robust) noheader
+------------------------------------------------------------------------------
+             |               Robust
+     lnhwage | Coefficient  std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+     educatn |   .1071543   .0239147     4.48   0.000     .0599542    .1543545
+       hours |   .0001365   .0001023     1.33   0.184    -.0000655    .0003384
+       _cons |   .6437424   .3946326     1.63   0.105    -.1351406    1.422626
+------------------------------------------------------------------------------
+
+. 
+. * Partial linear model - Robinson differencing estimator
+. semipar lnhwage educatn, nonpar(hours) robust ci title("Partial linear")
+
+                                                       Number of obs =     176
+                                                       R-squared     =  0.1298
+                                                       Adj R-squared =  0.1248
+                                                       Root MSE      =  0.6365
+------------------------------------------------------------------------------
+     lnhwage | Coefficient  Std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+     educatn |   .1023295   .0256881     3.98   0.000     .0516312    .1530278
+------------------------------------------------------------------------------
+
+. graph export nonparametricfig16.wmf, replace
+(file nonparametricfig16.wmf not found)
+file C:\EC\BSE\DSDM\Term 2\24DM021_Causal Inference and Machine
+    Learning\References\Cameron & Trivedi\nhh2017cameron\nonparametricfig16.wmf
+    saved as Windows Metafile format
+
+. 
+. * Single index model - Ichimura semiparametric least squares
+. sls lnhwage hours educatn, trim(1,99)
+command sls is unrecognized
+r(199);
+
+end of do-file
+
+r(199);
+
+. exit, clear

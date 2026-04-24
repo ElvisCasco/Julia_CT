@@ -1,0 +1,457 @@
+---------------------------------------------------------------------------------------------------------------
+      name:  <unnamed>
+       log:  c:\Users\ccameron\Dropbox\Desktop\Teaching_Old\E240F_ECONOMETRICS\E240F_machine_learning\2022_semi
+> nar\ML_2022_part6.txt
+  log type:  text
+ opened on:  12 Mar 2022, 20:27:12
+
+. 
+. ********** OVERVIEW OF ML_2022_part6.do **********
+. 
+. * To run you need files
+. *    mus203mepsmedexp.dta
+. * in your directory
+. 
+. * Stata user-written command
+. *    svmachines (for support vector machines) 
+. * are used
+. 
+. *  1. CLASSIFICATION
+. *       LOGIT
+. *       K NEAREST NEIGHBORS
+. *       LINEAR DISCRIMINANT ANALYSIS
+. *       QUADRATIC DISCRIMINANT ANALYSIS
+. *       SUPPORT VECTOR MACHINES
+. *  2. UNSUPERVISED LEARNING
+. *       CLUSTER ANALYSIS
+.  
+. ************ SETUP ***********
+. 
+. set more off
+
+. * version 17
+. clear all
+
+. set linesize 82
+
+. set scheme s1mono  /* Graphics scheme */
+
+. 
+. ************ DATA DESCRIPTION ***********
+. 
+. **************** CATEGORICAL DATA
+. 
+. * Data for 65-90 year olds on supplementary insurance indicator and regressors
+. use mus203mepsmedexp.dta, clear
+(A.C.Cameron & P.K.Trivedi (2021): Microeconometrics using Stata, 2e)
+
+. global xlist income educyr age female white hisp marry ///
+>    totchr phylim actlim hvgg 
+
+. describe suppins $xlist
+
+Variable      Storage   Display    Value
+    name         type    format    label      Variable label
+----------------------------------------------------------------------------------
+suppins         float   %9.0g                 =1 if has supp priv insurance
+income          double  %12.0g                annual household income/1000
+educyr          double  %12.0g                Years of education
+age             double  %12.0g                Age
+female          double  %12.0g                =1 if female
+white           double  %12.0g                =1 if white
+hisp            double  %12.0g                =1 if Hispanic
+marry           double  %12.0g                =1 if married
+totchr          double  %12.0g                # of chronic problems
+phylim          double  %12.0g                =1 if has functional limitation
+actlim          double  %12.0g                =1 if has activity limitation
+hvgg            float   %9.0g                 =1 if health status is excellent,
+                                                good or very good
+
+. 
+. * Summary statistics   
+. summarize suppins $xlist  
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+     suppins |      3,064    .5812663    .4934321          0          1
+      income |      3,064    22.47472    22.53491         -1     312.46
+      educyr |      3,064    11.77546    3.435878          0         17
+         age |      3,064    74.17167    6.372938         65         90
+      female |      3,064    .5796345    .4936982          0          1
+-------------+---------------------------------------------------------
+       white |      3,064    .9742167    .1585141          0          1
+        hisp |      3,064    .0848564    .2787134          0          1
+       marry |      3,064    .5558094    .4969567          0          1
+      totchr |      3,064    1.754243    1.307197          0          7
+      phylim |      3,064    .4255875    .4945125          0          1
+-------------+---------------------------------------------------------
+      actlim |      3,064    .2836162    .4508263          0          1
+        hvgg |      3,064    .6054178    .4888406          0          1
+
+. 
+. * logit model
+. logit suppins $xlist, nolog
+
+Logistic regression                                     Number of obs =  3,064
+                                                        LR chi2(11)   = 345.23
+                                                        Prob > chi2   = 0.0000
+Log likelihood = -1910.5353                             Pseudo R2     = 0.0829
+
+------------------------------------------------------------------------------
+     suppins | Coefficient  Std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+      income |   .0180677   .0025194     7.17   0.000     .0131298    .0230056
+      educyr |   .0776402   .0131951     5.88   0.000     .0517782    .1035022
+         age |  -.0265837    .006569    -4.05   0.000    -.0394586   -.0137088
+      female |  -.0946782   .0842343    -1.12   0.261    -.2597744     .070418
+       white |   .7438788   .2441096     3.05   0.002     .2654327    1.222325
+        hisp |  -.9319462   .1545418    -6.03   0.000    -1.234843   -.6290498
+       marry |   .3739621   .0859813     4.35   0.000      .205442    .5424823
+      totchr |   .0981018   .0321459     3.05   0.002     .0350971    .1611065
+      phylim |   .2318278   .1021466     2.27   0.023     .0316242    .4320315
+      actlim |  -.1836227   .1102917    -1.66   0.096    -.3997904    .0325449
+        hvgg |     .17946   .0811102     2.21   0.027     .0204868    .3384331
+       _cons |  -.1028233    .577563    -0.18   0.859    -1.234826    1.029179
+------------------------------------------------------------------------------
+
+. 
+. * Classification table
+. estat classification
+
+Logistic model for suppins
+
+              -------- True --------
+Classified |         D            ~D  |      Total
+-----------+--------------------------+-----------
+     +     |      1434           737  |       2171
+     -     |       347           546  |        893
+-----------+--------------------------+-----------
+   Total   |      1781          1283  |       3064
+
+Classified + if predicted Pr(D) >= .5
+True D defined as suppins != 0
+--------------------------------------------------
+Sensitivity                     Pr( +| D)   80.52%
+Specificity                     Pr( -|~D)   42.56%
+Positive predictive value       Pr( D| +)   66.05%
+Negative predictive value       Pr(~D| -)   61.14%
+--------------------------------------------------
+False + rate for true ~D        Pr( +|~D)   57.44%
+False - rate for true D         Pr( -| D)   19.48%
+False + rate for classified +   Pr(~D| +)   33.95%
+False - rate for classified -   Pr( D| -)   38.86%
+--------------------------------------------------
+Correctly classified                        64.62%
+--------------------------------------------------
+
+. 
+. * Classification table manually
+. predict ph_logit
+(option pr assumed; Pr(suppins))
+
+. generate yh_logit = ph_logit >= 0.5
+
+. generate err_logit = (suppins==0 & yh_logit==1) | (suppins==1 & yh_logit==0)
+
+. summarize suppins ph_logit yh_logit err_logit
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+     suppins |      3,064    .5812663    .4934321          0          1
+    ph_logit |      3,064    .5812663    .1609388   .0900691   .9954118
+    yh_logit |      3,064    .7085509    .4545041          0          1
+   err_logit |      3,064    .3537859    .4782218          0          1
+
+. tabulate suppins yh_logit 
+
+ =1 if has |
+ supp priv |       yh_logit
+ insurance |         0          1 |     Total
+-----------+----------------------+----------
+         0 |       546        737 |     1,283 
+         1 |       347      1,434 |     1,781 
+-----------+----------------------+----------
+     Total |       893      2,171 |     3,064 
+
+. 
+. * K-nearest neighbors 
+. discrim knn $xlist, group(suppins) k(11) notable
+
+Kth-nearest-neighbor discriminant analysis
+
+. predict yh_knn  
+(option classification assumed; group classification)
+
+. estat classtable, nototals nopercents looclass
+
+Leave-one-out classification table
+
+    +--------+
+    | Key    |
+    |--------|
+    | Number |
+    +--------+
+                 | LOO Classified
+    True suppins |      0       1
+    -------------+---------------
+               0 |    759     524
+                 |               
+               1 |    711   1,070
+    -------------+---------------
+          Priors | 0.5000  0.5000
+
+. 
+. * K-nn classification table with leave-one out cross validation not as good
+. estat classtable, nototals nopercents  // without LOOCV
+
+Resubstitution classification table
+
+    +--------+
+    | Key    |
+    |--------|
+    | Number |
+    +--------+
+                 | Classified    
+    True suppins |      0       1
+    -------------+---------------
+               0 |    889     394
+                 |               
+               1 |    584   1,197
+    -------------+---------------
+          Priors | 0.5000  0.5000
+
+. 
+. * Linear discriminant analysis
+. discrim lda $xlist, group(suppins) notable
+
+. predict yh_lda
+(option classification assumed; group classification)
+
+. estat classtable, nototals nopercents
+
+Resubstitution classification table
+
+    +--------+
+    | Key    |
+    |--------|
+    | Number |
+    +--------+
+                 | Classified    
+    True suppins |      0       1
+    -------------+---------------
+               0 |    770     513
+                 |               
+               1 |    638   1,143
+    -------------+---------------
+          Priors | 0.5000  0.5000
+
+. 
+. * Quadratic discriminant analysis
+. discrim qda $xlist, group(suppins) notable
+
+. predict yh_qda
+(option classification assumed; group classification)
+
+. estat classtable, nototals nopercents
+
+Resubstitution classification table
+
+    +--------+
+    | Key    |
+    |--------|
+    | Number |
+    +--------+
+                 | Classified    
+    True suppins |      0       1
+    -------------+---------------
+               0 |    468     815
+                 |               
+               1 |    292   1,489
+    -------------+---------------
+          Priors | 0.5000  0.5000
+
+. 
+. * Support vector machines - need y to be byte not float and matsize > n
+. * set matsize 3200     // Newer versions of Stata do this automatically
+. global xlistshort income educyr age female marry totchr
+
+. generate byte ins = suppins
+
+. svmachines ins income
+command svmachines is unrecognized
+r(199);
+
+end of do-file
+
+r(199);
+
+. search svmachines
+
+. do "C:\Users\ccameron\AppData\Local\Temp\STD4a08_000000.tmp"
+
+. 
+. * Support vector machines - need y to be byte not float and matsize > n
+. * set matsize 3200     // Newer versions of Stata do this automatically
+. global xlistshort income educyr age female marry totchr
+
+. generate byte ins = suppins
+variable ins already defined
+r(110);
+
+end of do-file
+
+r(110);
+
+. do "C:\Users\ccameron\AppData\Local\Temp\STD4a08_000000.tmp"
+
+. svmachines ins income
+
+. svmachines ins $xlist
+
+. predict yh_svm
+
+. tabulate ins yh_svm
+
+           |        yh_svm
+       ins |         0          1 |     Total
+-----------+----------------------+----------
+         0 |       820        463 |     1,283 
+         1 |       224      1,557 |     1,781 
+-----------+----------------------+----------
+     Total |     1,044      2,020 |     3,064 
+
+. 
+. * Compare various in-sample predictions
+. correlate suppins yh_logit yh_knn yh_lda yh_qda yh_svm
+(obs=3,064)
+
+             |  suppins yh_logit   yh_knn   yh_lda   yh_qda   yh_svm
+-------------+------------------------------------------------------
+     suppins |   1.0000
+    yh_logit |   0.2505   1.0000
+      yh_knn |   0.3604   0.3575   1.0000
+      yh_lda |   0.2395   0.6955   0.3776   1.0000
+      yh_qda |   0.2294   0.6926   0.2762   0.5850   1.0000
+      yh_svm |   0.5344   0.3966   0.6011   0.3941   0.3206   1.0000
+
+
+. 
+end of do-file
+
+. do "C:\Users\ccameron\AppData\Local\Temp\STD4a08_000000.tmp"
+
+. 
+. * Cluster analysis
+. * Generated data: y = 1 + 1*x1 + 1*x2 + f(z) + u where f(z) = z + z^2
+. clear
+
+. set obs 200
+Number of observations (_N) was 0, now 200.
+
+. set seed 10101
+
+. generate x1 = rnormal()
+
+. generate x2 = rnormal() + 0.5*x1
+
+. generate z = rnormal() + 0.5*x1
+
+. generate zsq = z^2
+
+. generate y = 1 + x1 + x2 + z + zsq + 2*rnormal()
+
+. summarize
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+          x1 |        200    .0301211    1.014172  -3.170636   3.093716
+          x2 |        200    .0226274    1.158216  -4.001105   3.049917
+           z |        200    .0664539    1.146429  -3.386704    2.77135
+         zsq |        200    1.312145    1.658477   .0000183   11.46977
+           y |        200    2.164401    3.604061  -5.468721   14.83116
+
+. 
+. * k-means clustering with defaults and three clusters
+. use machlearn_part2_spline.dta, replace
+file machlearn_part2_spline.dta not found
+r(601);
+
+end of do-file
+
+r(601);
+
+. do "C:\Users\ccameron\AppData\Local\Temp\STD4a08_000000.tmp"
+
+. 
+. * Generated data: y = 1 + 1*x1 + 1*x2 + f(z) + u where f(z) = z + z^2
+. clear
+
+. set obs 200
+Number of observations (_N) was 0, now 200.
+
+. set seed 10101
+
+. generate x1 = rnormal()
+
+. generate x2 = rnormal() + 0.5*x1
+
+. generate z = rnormal() + 0.5*x1
+
+. generate zsq = z^2
+
+. generate y = 1 + x1 + x2 + z + zsq + 2*rnormal()
+
+. summarize
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+          x1 |        200    .0301211    1.014172  -3.170636   3.093716
+          x2 |        200    .0226274    1.158216  -4.001105   3.049917
+           z |        200    .0664539    1.146429  -3.386704    2.77135
+         zsq |        200    1.312145    1.658477   .0000183   11.46977
+           y |        200    2.164401    3.604061  -5.468721   14.83116
+
+. 
+. // Not included - estimate same model as DGP
+. reg y x1 x2 z zsq
+
+      Source |       SS           df       MS      Number of obs   =       200
+-------------+----------------------------------   F(4, 195)       =    106.50
+       Model |  1773.19125         4  443.297813   Prob > F        =    0.0000
+    Residual |   811.67079       195  4.16241431   R-squared       =    0.6860
+-------------+----------------------------------   Adj R-squared   =    0.6795
+       Total |  2584.86204       199  12.9892565   Root MSE        =    2.0402
+
+------------------------------------------------------------------------------
+           y | Coefficient  Std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+          x1 |    .879966   .1777269     4.95   0.000     .5294523     1.23048
+          x2 |   .9949839   .1435271     6.93   0.000     .7119191    1.278049
+           z |   1.078095   .1416119     7.61   0.000     .7988069    1.357382
+         zsq |   1.065932   .0880125    12.11   0.000     .8923536    1.239511
+       _cons |     .64508   .1849103     3.49   0.001     .2803992    1.009761
+------------------------------------------------------------------------------
+
+. 
+. graph matrix x1 x2 z     // matrix plot of the three variables
+
+. cluster kmeans x1 x2 z, k(3) name(myclusters)
+
+. tabstat x1 x2 z, by(myclusters) stat(mean)
+
+Summary statistics: Mean
+Group variable: myclusters (Cluster ID)
+
+myclusters |        x1        x2         z
+-----------+------------------------------
+         1 | -1.273527 -1.290055 -1.053787
+         2 |  .0421595  .0154885 -.1614553
+         3 |   .893342  .9248023  1.216088
+-----------+------------------------------
+     Total |  .0301211  .0226274  .0664539
+------------------------------------------
+
+. 
+end of do-file
+
+. exit, clear

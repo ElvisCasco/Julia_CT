@@ -1,0 +1,382 @@
+---------------------------------------------------------------------------------
+      name:  <unnamed>
+       log:  c:\Users\ccameron\Dropbox\Desktop\TEACHING\240f\2022_seminar\ML_2022
+> _part5.txt
+  log type:  text
+ opened on:   2 May 2022, 20:14:52
+
+. 
+. ********** OVERVIEW OF ML_2022_part5.do **********
+. 
+. * MACHINE LEARNING AND CAUSAL ANALYSIS
+. 
+. 
+. ********** SETUP **********
+. 
+. set more off
+
+. * version 15
+. clear all
+
+. set linesize 82
+
+. set scheme s1mono  /* Graphics scheme */
+
+. 
+. ********** PROGRAM AND DATA DESCRIPTION **********
+. 
+. 
+. * Data for inference on suppins example: 5 continuous and 13 binary variables
+. use mus203mepsmedexp.dta, clear
+(A.C.Cameron & P.K.Trivedi (2021): Microeconometrics using Stata, 2e)
+
+. keep if ltotexp != .
+(109 observations deleted)
+
+. describe ltotexp suppins
+
+Variable      Storage   Display    Value
+    name         type    format    label      Variable label
+----------------------------------------------------------------------------------
+ltotexp         float   %9.0g                 ln(totexp) if totexp > 0
+suppins         float   %9.0g                 =1 if has supp priv insurance
+
+. summarize ltotexp suppins
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+     ltotexp |      2,955    8.059866    1.367592   1.098612   11.74094
+     suppins |      2,955    .5915398    .4916322          0          1
+
+. 
+. * Continuous variables
+. global xlist2 income educyr age famsze totchr
+
+. describe $xlist2
+
+Variable      Storage   Display    Value
+    name         type    format    label      Variable label
+----------------------------------------------------------------------------------
+income          double  %12.0g                annual household income/1000
+educyr          double  %12.0g                Years of education
+age             double  %12.0g                Age
+famsze          double  %12.0g                Size of the family
+totchr          double  %12.0g                # of chronic problems
+
+. summarize $xlist2
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+      income |      2,955    22.68353    22.60988         -1     312.46
+      educyr |      2,955    11.82809    3.405095          0         17
+         age |      2,955    74.24535    6.375975         65         90
+      famsze |      2,955    1.890694    .9644483          1         13
+      totchr |      2,955    1.808799    1.294613          0          7
+
+. 
+. * Discrete binary variables
+. global dlist2 female white hisp marry northe mwest south ///
+>     msa phylim actlim injury priolist hvgg
+
+. describe $dlist2        
+
+Variable      Storage   Display    Value
+    name         type    format    label      Variable label
+----------------------------------------------------------------------------------
+female          double  %12.0g                =1 if female
+white           double  %12.0g                =1 if white
+hisp            double  %12.0g                =1 if Hispanic
+marry           double  %12.0g                =1 if married
+northe          double  %12.0g                =1 if northeast area
+mwest           double  %12.0g                =1 if Midwest area
+south           double  %12.0g                =1 if south area (West is excluded)
+msa             double  %12.0g                =1 if metropolitan statistical area
+phylim          double  %12.0g                =1 if has functional limitation
+actlim          double  %12.0g                =1 if has activity limitation
+injury          double  %12.0g                =1 if condition is caused by an
+                                                accident/injury
+priolist        double  %12.0g                =1 if has medical conditions that
+                                                are on the priority list
+hvgg            float   %9.0g                 =1 if health status is excellent,
+                                                good or very good
+
+.         
+. * OLS on small model and full model
+. global rlist2 c.($xlist2)##c.($xlist2) i.($dlist2) c.($xlist2)#i.($dlist2)
+
+. qui regress ltotexp suppins $xlist2 $dlist2, vce(robust)
+
+. estimates store OLSSMALL
+
+. qui regress ltotexp suppins $rlist2, vce(robust)
+
+. estimates store OLSFULL
+
+. estimates table OLSSMALL OLSFULL, keep(suppins) b(%9.4f) se stats(N df_m r2)
+
+--------------------------------------
+    Variable | OLSSMALL     OLSFULL   
+-------------+------------------------
+     suppins |    0.1706      0.1868  
+             |    0.0469      0.0478  
+-------------+------------------------
+           N |      2955        2955  
+        df_m |   19.0000     99.0000  
+          r2 |    0.2682      0.3028  
+--------------------------------------
+                          Legend: b/se
+
+. 
+. * Partialing-out partial linear model using default plugin lambda
+. poregress ltotexp suppins, controls($rlist2)
+
+Estimating lasso for ltotexp using plugin
+Estimating lasso for suppins using plugin
+
+Partialing-out linear model          Number of obs                =      2,955
+                                     Number of controls           =        176
+                                     Number of selected controls  =         21
+                                     Wald chi2(1)                 =      15.43
+                                     Prob > chi2                  =     0.0001
+
+------------------------------------------------------------------------------
+             |               Robust
+     ltotexp | Coefficient  std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+     suppins |   .1839193   .0468223     3.93   0.000     .0921493    .2756892
+------------------------------------------------------------------------------
+Note: Chi-squared test is a Wald test of the coefficients of the variables
+      of interest jointly equal to zero. Lassos select controls for model
+      estimation. Type lassoinfo to see number of selected variables in each
+      lasso.
+
+. estimates store POREG
+
+. estimates table POREG
+
+---------------------------
+    Variable |   POREG     
+-------------+-------------
+     suppins |  .18391927  
+---------------------------
+
+. 
+. * Standard heterogeneous effects estimates of ATE
+. teffects ra (ltotexp $rlist2) (suppins), vce(robust)
+
+Iteration 0:   EE criterion =  1.328e-24  
+Iteration 1:   EE criterion =  1.153e-29  
+
+Treatment-effects estimation                    Number of obs     =      2,955
+Estimator      : regression adjustment
+Outcome model  : linear
+Treatment model: none
+---------------------------------------------------------------------------------
+                |               Robust
+        ltotexp | Coefficient  std. err.      z    P>|z|     [95% conf. interval]
+----------------+----------------------------------------------------------------
+ATE             |
+        suppins |
+      (1 vs 0)  |    .174505   .0496169     3.52   0.000     .0772577    .2717522
+----------------+----------------------------------------------------------------
+POmean          |
+        suppins |
+             0  |   7.964414   .0420369   189.46   0.000     7.882023    8.046805
+---------------------------------------------------------------------------------
+
+. estimates store RA
+
+. teffects ipw (ltotexp) (suppins $rlist2), vce(robust)
+
+Iteration 0:   EE criterion =  8.424e-16  
+Iteration 1:   EE criterion =  3.092e-28  
+
+Treatment-effects estimation                    Number of obs     =      2,955
+Estimator      : inverse-probability weights
+Outcome model  : weighted mean
+Treatment model: logit
+---------------------------------------------------------------------------------
+                |               Robust
+        ltotexp | Coefficient  std. err.      z    P>|z|     [95% conf. interval]
+----------------+----------------------------------------------------------------
+ATE             |
+        suppins |
+      (1 vs 0)  |   .1867405   .0481591     3.88   0.000     .0923504    .2811307
+----------------+----------------------------------------------------------------
+POmean          |
+        suppins |
+             0  |   7.955711   .0412653   192.79   0.000     7.874832    8.036589
+---------------------------------------------------------------------------------
+
+. estimates store IPW
+
+. teffects aipw (ltotexp $rlist2) (suppins $rlist2), vce(robust)
+
+Iteration 0:   EE criterion =  8.424e-16  
+Iteration 1:   EE criterion =  3.034e-28  
+
+Treatment-effects estimation                    Number of obs     =      2,955
+Estimator      : augmented IPW
+Outcome model  : linear by ML
+Treatment model: logit
+---------------------------------------------------------------------------------
+                |               Robust
+        ltotexp | Coefficient  std. err.      z    P>|z|     [95% conf. interval]
+----------------+----------------------------------------------------------------
+ATE             |
+        suppins |
+      (1 vs 0)  |   .1713354   .0483878     3.54   0.000     .0764971    .2661737
+----------------+----------------------------------------------------------------
+POmean          |
+        suppins |
+             0  |   7.963022   .0404804   196.71   0.000     7.883682    8.042362
+---------------------------------------------------------------------------------
+
+. estimates store AIPW
+
+. estimates table RA IPW AIPW, keep(ATE: POmean:)
+
+-----------------------------------------------------
+    Variable |     RA          IPW          AIPW     
+-------------+---------------------------------------
+ATE          |
+     suppins |
+   (1 vs 0)  |  .17450497    .18674051    .17133538  
+-------------+---------------------------------------
+POmean       |
+   0.suppins |  7.9644138    7.9557108     7.963022  
+-----------------------------------------------------
+
+. 
+. /* Not needed
+> teffects aipw (ltotexp $rlist2) (suppins $rlist2), vce(robust)
+> scalar bAIPW = r(table)[1,1]
+> scalar seAIPW = r(table)[2,1]
+> di "Estimates     RA     IPW    AIPW " _n ///
+>    "          " %7.3f  bRA  %7.3f bIPW %7.3f  bAIPW  _n ///
+>    "          " %7.3f  seRA  %7.3f seIPW %7.3f  seAIPW 
+>    */
+.    
+. * AIPW using lasso estimate of ATE
+. telasso (ltotexp $rlist2) (suppins $rlist2), selection(plugin) vce(robust)
+
+Estimating lasso for outcome ltotexp if suppins = 0 using plugin method ...
+Estimating lasso for outcome ltotexp if suppins = 1 using plugin method ...
+Estimating lasso for treatment suppins using plugin method ...
+Estimating ATE ...
+
+Treatment-effects lasso estimation    Number of observations      =      2,955
+Outcome model:   linear               Number of controls          =        176
+Treatment model: logit                Number of selected controls =         24
+
+------------------------------------------------------------------------------
+             |               Robust
+     ltotexp | Coefficient  std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+ATE          |
+     suppins |
+   (1 vs 0)  |   .1502124   .0518504     2.90   0.004     .0485875    .2518373
+-------------+----------------------------------------------------------------
+POmean       |
+     suppins |
+          0  |   7.967002   .0410761   193.96   0.000     7.886495     8.04751
+------------------------------------------------------------------------------
+
+. estimates store PLUG
+
+. telasso (ltotexp $rlist2) (suppins $rlist2), selection(bic) vce(robust)
+
+Estimating lasso for outcome ltotexp if suppins = 0 using BIC ...
+Estimating lasso for outcome ltotexp if suppins = 1 using BIC ...
+Estimating lasso for treatment suppins using BIC ...
+Estimating ATE ...
+
+Treatment-effects lasso estimation    Number of observations      =      2,955
+Outcome model:   linear               Number of controls          =        176
+Treatment model: logit                Number of selected controls =         32
+
+------------------------------------------------------------------------------
+             |               Robust
+     ltotexp | Coefficient  std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+ATE          |
+     suppins |
+   (1 vs 0)  |   .1428377   .0595979     2.40   0.017      .026028    .2596473
+-------------+----------------------------------------------------------------
+POmean       |
+     suppins |
+          0  |     7.9557   .0406168   195.87   0.000     7.876093    8.035308
+------------------------------------------------------------------------------
+
+. estimates store BIC
+
+. telasso (ltotexp $rlist2) (suppins $rlist2), selection(cv) xfolds(5) ///
+>    rseed(10101) vce(robust)
+
+Cross-fit fold 1 of 5 ...
+Estimating lasso for outcome ltotexp if suppins = 0 using cross-validation ...
+Estimating lasso for outcome ltotexp if suppins = 1 using cross-validation ...
+Estimating lasso for treatment suppins using cross-validation ...
+
+Cross-fit fold 2 of 5 ...
+Estimating lasso for outcome ltotexp if suppins = 0 using cross-validation ...
+Estimating lasso for outcome ltotexp if suppins = 1 using cross-validation ...
+Estimating lasso for treatment suppins using cross-validation ...
+
+Cross-fit fold 3 of 5 ...
+Estimating lasso for outcome ltotexp if suppins = 0 using cross-validation ...
+Estimating lasso for outcome ltotexp if suppins = 1 using cross-validation ...
+Estimating lasso for treatment suppins using cross-validation ...
+
+Cross-fit fold 4 of 5 ...
+Estimating lasso for outcome ltotexp if suppins = 0 using cross-validation ...
+Estimating lasso for outcome ltotexp if suppins = 1 using cross-validation ...
+Estimating lasso for treatment suppins using cross-validation ...
+
+Cross-fit fold 5 of 5 ...
+Estimating lasso for outcome ltotexp if suppins = 0 using cross-validation ...
+Estimating lasso for outcome ltotexp if suppins = 1 using cross-validation ...
+Estimating lasso for treatment suppins using cross-validation ...
+Estimating ATE ...
+
+Treatment-effects lasso estimation    Number of observations       =     2,955
+                                      Number of controls           =       176
+                                      Number of selected controls  =       119
+Outcome model:   linear               Number of folds in cross-fit =         5
+Treatment model: logit                Number of resamples          =         1
+
+------------------------------------------------------------------------------
+             |               Robust
+     ltotexp | Coefficient  std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+ATE          |
+     suppins |
+   (1 vs 0)  |   .2078262   .0718622     2.89   0.004     .0669789    .3486736
+-------------+----------------------------------------------------------------
+POmean       |
+     suppins |
+          0  |   7.910557   .0661841   119.52   0.000     7.780839    8.040276
+------------------------------------------------------------------------------
+
+. estimates store CV
+
+. estimates table PLUG BIC CV
+
+-----------------------------------------------------
+    Variable |    PLUG         BIC           CV      
+-------------+---------------------------------------
+ATE          |
+     suppins |
+   (1 vs 0)  |  .15021244    .14283769    .20782623  
+-------------+---------------------------------------
+POmean       |
+   0.suppins |  7.9670024    7.9557003    7.9105573  
+-----------------------------------------------------
+
+. 
+. * Did not work attempt to just report ATE
+. * teffects ra (ltotexp $rlist2) (suppins), vce(robust)
+. * estimates store RA
+. * estimates table RA, b keep(ATE:1vs0.suppins)
+
+. exit, clear

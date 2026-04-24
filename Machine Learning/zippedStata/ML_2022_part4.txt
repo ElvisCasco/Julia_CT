@@ -1,0 +1,947 @@
+---------------------------------------------------------------------------------
+      name:  <unnamed>
+       log:  c:\Users\ccameron\Dropbox\Desktop\TEACHING\240f\2022_seminar\ML_2022
+> _part4.txt
+  log type:  text
+ opened on:   2 May 2022, 20:12:19
+
+. 
+. ********** OVERVIEW OF ML_2022_part4.do **********
+. 
+. * To run you need files
+. *  mus203mepsmedexp.dta
+. * in your directory
+. 
+. * And Stata user-written commands 
+. *   rforest
+. * are used
+. 
+. * 2.1 DINMENSION REDUCTION: PRINCIPAL COMPONENTS
+. * 3. BASIS FUNCTIONS - GLOBAL POLYNOMIALS, SPLINES
+. * 4. NEURAL NETWORK EXAMPLE
+. * 6. PREDICTION EXAMPLE
+. 
+. ********** SETUP **********
+. 
+. set more off
+
+. version 16
+
+. clear all
+
+. set linesize 82
+
+. set scheme s1mono  /* Graphics scheme */
+
+. 
+. ********** DATA DESCRIPTION **********
+. 
+. * Data for Principla Components are ggenerated
+. 
+. * Data for Prediction example
+. * File mus203mepsmedexp.dta is aothurs' extract from MEPS 
+. * (Medical Expenditure Panel Survey)
+. * for individuals 65 years and older in U.S. Medicare in 2003
+. 
+. ********** 2.1 DINMENSION REDUCTION: PRINCIPAL COMPONENTS
+. 
+. * Generate three correlated variables (rho = 0.5) and y linear only in x1
+. clear
+
+. quietly set obs 40
+
+. set seed 12345
+
+. matrix MU = (0,0,0)
+
+. scalar rho = 0.5
+
+. matrix SIGMA = (1,rho,rho \ rho,1,rho \ rho,rho,1)
+
+. drawnorm x1 x2 x3, means(MU) cov(SIGMA)
+
+. generate y = 2 + 1*x1 + rnormal(0,3)
+
+. saveold ML_2022_part4, version(11) replace
+(saving in Stata 12 format, which Stata 11 can read)
+file ML_2022_part4.dta saved
+
+. 
+. * Standardize regressors and demean y
+. foreach var of varlist x1 x2 x3 {
+  2.      qui egen double z`var' = std(`var')
+  3. }
+
+. qui summarize y
+
+. qui generate double ydemeaned = y - r(mean)
+
+. summarize ydemeaned z*
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+   ydemeaned |         40   -3.33e-17    3.400129  -6.650633   7.501798
+         zx1 |         40    2.63e-17           1  -1.594598   2.693921
+         zx2 |         40    2.62e-17           1   -2.34211    2.80662
+         zx3 |         40   -2.98e-17           1  -1.688912   2.764129
+
+. 
+. * Summarize data
+. summarize
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+          x1 |         40    .3337951    .8986718  -1.099225   2.754746
+          x2 |         40    .1257017    .9422221  -2.081086   2.770161
+          x3 |         40    .0712341    1.034616  -1.676141   2.931045
+           y |         40    3.107987    3.400129  -3.542646   10.60979
+         zx1 |         40    2.63e-17           1  -1.594598   2.693921
+-------------+---------------------------------------------------------
+         zx2 |         40    2.62e-17           1   -2.34211    2.80662
+         zx3 |         40   -2.98e-17           1  -1.688912   2.764129
+   ydemeaned |         40   -3.33e-17    3.400129  -6.650633   7.501798
+
+. correlate
+(obs=40)
+
+             |       x1       x2       x3        y      zx1      zx2      zx3
+-------------+---------------------------------------------------------------
+          x1 |   1.0000
+          x2 |   0.5077   1.0000
+          x3 |   0.4281   0.2786   1.0000
+           y |   0.4740   0.3370   0.2046   1.0000
+         zx1 |   1.0000   0.5077   0.4281   0.4740   1.0000
+         zx2 |   0.5077   1.0000   0.2786   0.3370   0.5077   1.0000
+         zx3 |   0.4281   0.2786   1.0000   0.2046   0.4281   0.2786   1.0000
+   ydemeaned |   0.4740   0.3370   0.2046   1.0000   0.4740   0.3370   0.2046
+
+             | ydemea~d
+-------------+---------
+   ydemeaned |   1.0000
+
+
+. 
+. * OLS regression of y on x1-x3
+. regress y x1 x2 x3, vce(robust)
+
+Linear regression                               Number of obs     =         40
+                                                F(3, 36)          =       4.91
+                                                Prob > F          =     0.0058
+                                                R-squared         =     0.2373
+                                                Root MSE          =     3.0907
+
+------------------------------------------------------------------------------
+             |               Robust
+           y | Coefficient  std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+          x1 |   1.555582   .5006152     3.11   0.004     .5402873    2.570877
+          x2 |   .4707111   .5251826     0.90   0.376    -.5944086    1.535831
+          x3 |  -.0256025   .6009393    -0.04   0.966    -1.244364    1.193159
+       _cons |   2.531396   .5377607     4.71   0.000     1.440766    3.622025
+------------------------------------------------------------------------------
+
+. 
+. capture drop pc* yhat
+
+. * Principal components using default option that first standardizes the data
+. pca x1 x2 x3
+
+Principal components/correlation                 Number of obs    =         40
+                                                 Number of comp.  =          3
+                                                 Trace            =          3
+    Rotation: (unrotated = principal)            Rho              =     1.0000
+
+    --------------------------------------------------------------------------
+       Component |   Eigenvalue   Difference         Proportion   Cumulative
+    -------------+------------------------------------------------------------
+           Comp1 |      1.81668      1.08919             0.6056       0.6056
+           Comp2 |      .727486       .27165             0.2425       0.8481
+           Comp3 |      .455836            .             0.1519       1.0000
+    --------------------------------------------------------------------------
+
+Principal components (eigenvectors) 
+
+    ----------------------------------------------------------
+        Variable |    Comp1     Comp2     Comp3 | Unexplained 
+    -------------+------------------------------+-------------
+              x1 |   0.6306   -0.1063   -0.7688 |           0 
+              x2 |   0.5712   -0.6070    0.5525 |           0 
+              x3 |   0.5254    0.7876    0.3220 |           0 
+    ----------------------------------------------------------
+
+. 
+. * Not included - get same results using standardized data and covariance option
+. pca zx1 zx2 zx3, covariance
+
+Principal components/covariance                  Number of obs    =         40
+                                                 Number of comp.  =          3
+                                                 Trace            =          3
+    Rotation: (unrotated = principal)            Rho              =     1.0000
+
+    --------------------------------------------------------------------------
+       Component |   Eigenvalue   Difference         Proportion   Cumulative
+    -------------+------------------------------------------------------------
+           Comp1 |      1.81668      1.08919             0.6056       0.6056
+           Comp2 |      .727486       .27165             0.2425       0.8481
+           Comp3 |      .455836            .             0.1519       1.0000
+    --------------------------------------------------------------------------
+
+Principal components (eigenvectors) 
+
+    ----------------------------------------------------------
+        Variable |    Comp1     Comp2     Comp3 | Unexplained 
+    -------------+------------------------------+-------------
+             zx1 |   0.6306   -0.1063   -0.7688 |           0 
+             zx2 |   0.5712   -0.6070    0.5525 |           0 
+             zx3 |   0.5254    0.7876    0.3220 |           0 
+    ----------------------------------------------------------
+
+. 
+. * Compute the 3 principal components and their means, st.devs., correlations
+. predict pc1 pc2 pc3
+(score assumed)
+
+Scoring coefficients 
+    sum of squares(column-loading) = 1
+
+    --------------------------------------------
+        Variable |    Comp1     Comp2     Comp3 
+    -------------+------------------------------
+             zx1 |   0.6306   -0.1063   -0.7688 
+             zx2 |   0.5712   -0.6070    0.5525 
+             zx3 |   0.5254    0.7876    0.3220 
+    --------------------------------------------
+
+. summarize pc1 pc2 pc3
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+         pc1 |         40   -3.35e-09    1.347842   -2.52927   2.925341
+         pc2 |         40   -3.63e-09    .8529281  -1.854475    1.98207
+         pc3 |         40    2.08e-09    .6751564  -1.504279   1.520466
+
+. correlate pc1 pc2 pc3
+(obs=40)
+
+             |      pc1      pc2      pc3
+-------------+---------------------------
+         pc1 |   1.0000
+         pc2 |   0.0000   1.0000
+         pc3 |  -0.0000  -0.0000   1.0000
+
+
+. 
+. * Manually compute the first principal component and compare to pc1
+. generate double pc1manual = 0.6306*zx1 +  0.5712*zx2 + 0.5254*zx3
+
+. summarize pc1 pc1manual
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+         pc1 |         40   -3.35e-09    1.347842   -2.52927   2.925341
+   pc1manual |         40   -9.02e-18    1.347822  -2.529204   2.925356
+
+. 
+. capture drop yhat
+
+. 
+. * Compare R from OLS on all three regressors, on pc1, on x1, on x2, on x3
+. qui regress y x1 x2 x3
+
+. predict yhat
+(option xb assumed; fitted values)
+
+. correlate y yhat pc1 x1 x2 x3
+(obs=40)
+
+             |        y     yhat      pc1       x1       x2       x3
+-------------+------------------------------------------------------
+           y |   1.0000
+        yhat |   0.4871   1.0000
+         pc1 |   0.4444   0.9122   1.0000
+          x1 |   0.4740   0.9732   0.8499   1.0000
+          x2 |   0.3370   0.6919   0.7700   0.5077   1.0000
+          x3 |   0.2046   0.4200   0.7082   0.4281   0.2786   1.0000
+
+
+. 
+. // Not included
+. * Compare OLS on x1 with OLS on first principal component
+. regress y x1
+
+      Source |       SS           df       MS      Number of obs   =        40
+-------------+----------------------------------   F(1, 38)        =     11.01
+       Model |  101.318018         1  101.318018   Prob > F        =    0.0020
+    Residual |  349.556297        38  9.19884993   R-squared       =    0.2247
+-------------+----------------------------------   Adj R-squared   =    0.2043
+       Total |  450.874315        39  11.5608799   Root MSE        =     3.033
+
+------------------------------------------------------------------------------
+           y | Coefficient  Std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+          x1 |   1.793535   .5404224     3.32   0.002     .6995073    2.887563
+       _cons |   2.509313   .5123592     4.90   0.000     1.472097     3.54653
+------------------------------------------------------------------------------
+
+. regress y pc1
+
+      Source |       SS           df       MS      Number of obs   =        40
+-------------+----------------------------------   F(1, 38)        =      9.35
+       Model |  89.0250744         1  89.0250744   Prob > F        =    0.0041
+    Residual |  361.849241        38  9.52234844   R-squared       =    0.1974
+-------------+----------------------------------   Adj R-squared   =    0.1763
+       Total |  450.874315        39  11.5608799   Root MSE        =    3.0858
+
+------------------------------------------------------------------------------
+           y | Coefficient  Std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+         pc1 |   1.120947    .366607     3.06   0.004     .3787895    1.863104
+       _cons |   3.107987   .4879126     6.37   0.000     2.120259    4.095714
+------------------------------------------------------------------------------
+
+. 
+. ********** 3. BASIS FUNCTIONS - GLOBAL POLYNOMIALS, SPLINES
+. 
+. *** GLOBAL POLYNOMIALS
+. 
+. * Generated data: y = 1 + 1*x1 + 1*x2 + f(z) + u where f(z) = z + z^2
+. clear
+
+. set obs 200
+Number of observations (_N) was 0, now 200.
+
+. set seed 10101
+
+. generate x1 = rnormal()
+
+. generate x2 = rnormal() + 0.5*x1
+
+. generate z = rnormal() + 0.5*x1
+
+. generate zsq = z^2
+
+. generate y = 1 + x1 + x2 + z + zsq + 2*rnormal()
+
+. summarize
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+          x1 |        200    .0301211    1.014172  -3.170636   3.093716
+          x2 |        200    .0226274    1.158216  -4.001105   3.049917
+           z |        200    .0664539    1.146429  -3.386704    2.77135
+         zsq |        200    1.312145    1.658477   .0000183   11.46977
+           y |        200    2.164401    3.604061  -5.468721   14.83116
+
+. 
+. // Not included - estimate same model as DGP
+. reg y x1 x2 z zsq
+
+      Source |       SS           df       MS      Number of obs   =       200
+-------------+----------------------------------   F(4, 195)       =    106.50
+       Model |  1773.19125         4  443.297813   Prob > F        =    0.0000
+    Residual |   811.67079       195  4.16241431   R-squared       =    0.6860
+-------------+----------------------------------   Adj R-squared   =    0.6795
+       Total |  2584.86204       199  12.9892565   Root MSE        =    2.0402
+
+------------------------------------------------------------------------------
+           y | Coefficient  Std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+          x1 |    .879966   .1777269     4.95   0.000     .5294523     1.23048
+          x2 |   .9949839   .1435271     6.93   0.000     .7119191    1.278049
+           z |   1.078095   .1416119     7.61   0.000     .7988069    1.357382
+         zsq |   1.065932   .0880125    12.11   0.000     .8923536    1.239511
+       _cons |     .64508   .1849103     3.49   0.001     .2803992    1.009761
+------------------------------------------------------------------------------
+
+. 
+. * Quartic global polynomial model 
+. reg y c.z##c.z##c.z##c.z, vce(robust)
+
+Linear regression                               Number of obs     =        200
+                                                F(4, 195)         =      96.68
+                                                Prob > F          =     0.0000
+                                                R-squared         =     0.4889
+                                                Root MSE          =     2.6028
+
+---------------------------------------------------------------------------------
+                |               Robust
+              y | Coefficient  std. err.      t    P>|t|     [95% conf. interval]
+----------------+----------------------------------------------------------------
+              z |   1.398768   .2765072     5.06   0.000     .8534389    1.944096
+                |
+        c.z#c.z |   .8034603   .2273094     3.53   0.001     .3551597    1.251761
+                |
+    c.z#c.z#c.z |   .0918065   .0554654     1.66   0.099    -.0175826    .2011957
+                |
+c.z#c.z#c.z#c.z |   .0265145   .0274171     0.97   0.335    -.0275577    .0805866
+                |
+          _cons |   .8862917   .2658742     3.33   0.001     .3619334     1.41065
+---------------------------------------------------------------------------------
+
+. 
+. * Graph comparing quartic model predictions to quadratic model predictions
+. predict yquartic, xb
+
+. sort z
+
+. twoway (scatter y z, msize(small)) (qfit y z, lwidth(medthick)clstyle(p2)) ///
+>     (line yquartic z, lwidth(medthick)), scale(1.2)                        ///
+>     legend(pos(11) ring(0) col(1)) legend(size(small))                     ///
+>     legend(label(1 "Actual data") label(2 "Quadratic") label(3 "quartic")) 
+
+. 
+. // Not included - use npregress series command instead
+. npregress series y z, polynomial(4)
+
+Computing approximating function
+
+
+Computing average derivatives
+
+Polynomial-series estimation               Number of obs      =            200
+                                           Polynomial order   =              4
+------------------------------------------------------------------------------
+             |               Robust
+           y |     Effect   std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+           z |   1.881597    .139039    13.53   0.000     1.609085    2.154108
+------------------------------------------------------------------------------
+Note: Effect estimates are averages of derivatives.
+
+. predict yquarticnpseries
+(statistic mean assumed; mean function)
+
+. correlate yquartic yquarticnpseries
+(obs=200)
+
+             | yquartic yquart~s
+-------------+------------------
+    yquartic |   1.0000
+yquarticnp~s |   1.0000   1.0000
+
+
+. 
+. *** REGRESSION SPLINES
+. 
+. * Create the basis function manually with three segments and knots at -1 and 1
+. generate zseg1 = z
+
+. generate zseg2 = 0
+
+. replace zseg2 = z - (-1) if z > -1
+(163 real changes made)
+
+. generate zseg3 = 0
+
+. replace zseg3 = z - 1 if z > 1
+(47 real changes made)
+
+. 
+. * Piecewise linear regression with three sections
+. regress y zseg1 zseg2 zseg3, vce(robust)
+
+Linear regression                               Number of obs     =        200
+                                                F(3, 196)         =      97.11
+                                                Prob > F          =     0.0000
+                                                R-squared         =     0.4849
+                                                Root MSE          =     2.6064
+
+------------------------------------------------------------------------------
+             |               Robust
+           y | Coefficient  std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+       zseg1 |  -1.629491   .5128884    -3.18   0.002     -2.64098    -.618003
+       zseg2 |   2.977586   .7302596     4.08   0.000     1.537411    4.417761
+       zseg3 |   4.594974    .855389     5.37   0.000     2.908026    6.281922
+       _cons |  -1.850531   .7809994    -2.37   0.019    -3.390772   -.3102895
+------------------------------------------------------------------------------
+
+. predict yhat
+(option xb assumed; fitted values)
+
+. twoway (scatter y z) (line yhat z, sort lwidth(thick)),                    ///
+>     title("Piecewise linear: y=a+f(z)+u") ytitle("y and f(z)") xtitle("z") ///
+>     legend(off) saving(graph1.gph, replace)
+file graph1.gph saved
+
+. 
+. * Repeat piecewise linear using command mkspline to create the basis functions
+. mkspline zmk1 -1 zmk2 1 zmk3 = z, marginal
+
+. summarize zseg1 zmk1 zseg2 zmk2 zseg3 zmk3, sep (8) 
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+       zseg1 |        200    .0664539    1.146429  -3.386704    2.77135
+        zmk1 |        200    .0664539    1.146429  -3.386704    2.77135
+       zseg2 |        200    1.171111     .984493          0    3.77135
+        zmk2 |        200    1.171111     .984493          0    3.77135
+       zseg3 |        200     .138441    .3169973          0    1.77135
+        zmk3 |        200     .138441    .3169973          0    1.77135
+
+. regress y zmk1 zmk2 zmk3, vce(robust) noheader
+------------------------------------------------------------------------------
+             |               Robust
+           y | Coefficient  std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+        zmk1 |  -1.629491   .5128884    -3.18   0.002     -2.64098    -.618003
+        zmk2 |   2.977586   .7302596     4.08   0.000     1.537411    4.417761
+        zmk3 |   4.594974    .855389     5.37   0.000     2.908026    6.281922
+       _cons |  -1.850531   .7809994    -2.37   0.019    -3.390772   -.3102895
+------------------------------------------------------------------------------
+
+. 
+. // Not included - use npregress series commmand instead
+. npregress series y z, knots(4) spline
+
+Computing approximating function
+
+
+Computing average derivatives
+
+Cubic-spline estimation                    Number of obs      =            200
+                                           Number of knots    =              4
+------------------------------------------------------------------------------
+             |               Robust
+           y |     Effect   std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+           z |   1.901699     .14558    13.06   0.000     1.616367     2.18703
+------------------------------------------------------------------------------
+Note: Effect estimates are averages of derivatives.
+
+. matrix define mknots = (-1, 1)
+
+. matrix list mknots
+
+mknots[1,2]
+    c1  c2
+r1  -1   1
+
+. npregress series y z, knotsmat(mknots) spline(1)
+
+Computing approximating function
+
+Minimizing  criterion
+
+
+Computing average derivatives
+
+Linear-spline estimation                   Number of obs      =            200
+                                           Number of knots    =              2
+------------------------------------------------------------------------------
+             |               Robust
+           y |     Effect   std. err.      z    P>|z|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+           z |    1.87706   .1383684    13.57   0.000     1.605863    2.148257
+------------------------------------------------------------------------------
+Note: Effect estimates are averages of derivatives.
+
+. predict yhatspline
+(statistic mean assumed; mean function)
+
+. correlate yhat*
+(obs=200)
+
+             |     yhat yhatsp~e
+-------------+------------------
+        yhat |   1.0000
+  yhatspline |   1.0000   1.0000
+
+
+. 
+. * Natural or restricted cubic spline regression of y on z
+. mkspline zspline = z, cubic nknots(5) displayknots
+
+             |     knot1      knot2      knot3      knot4      knot5 
+-------------+-------------------------------------------------------
+           z | -1.707005  -.6282565   .0096633   .8139451   1.889486 
+
+. regress y zspline*, vce(robust)
+
+Linear regression                               Number of obs     =        200
+                                                F(4, 195)         =      72.39
+                                                Prob > F          =     0.0000
+                                                R-squared         =     0.4846
+                                                Root MSE          =     2.6138
+
+------------------------------------------------------------------------------
+             |               Robust
+           y | Coefficient  std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+    zspline1 |  -1.577777   .5393653    -2.93   0.004    -2.641515   -.5140385
+    zspline2 |   8.974681   3.677336     2.44   0.016     1.722224    16.22714
+    zspline3 |   -32.6592   20.52346    -1.59   0.113    -73.13566    7.817256
+    zspline4 |   46.24063   31.10605     1.49   0.139    -15.10685    107.5881
+       _cons |  -1.745086   .8845348    -1.97   0.050    -3.489569   -.0006031
+------------------------------------------------------------------------------
+
+. 
+. * Plot the predicted values from natural cubic spline regression
+. predict yhatnatural
+(option xb assumed; fitted values)
+
+. twoway (scatter y z) (line yhatnatural z, sort lwidth(thick)), ///
+>     title("Natural cubic spline: y=a+f(z)+u") xtitle("z")      ///
+>     ytitle("f(z)") legend(off) saving(graph1.gph, replace)
+file graph1.gph saved
+
+. 
+. ********** 4. NEURAL NETWORK EXAMPLE
+. 
+. /* Following gave me error message - so comment out
+> . brain define, input(x) output(y) hidden(20)
+> non-natively compiled windows plugin detected, e.g. cygwin/mingw
+> unable to load brainwin.plugin from directory C:\Users\ccameron\ado\plus/b/
+> perhaps additional dlls are required in that directory, e.g.:
+> brainwin.plugin
+> libgomp-1.dll
+> libwinpthread-1.dll
+> libgcc_s_seh-1.dll
+> r(999);
+> 
+> * Example from help file for user-written brain command
+> clear 
+> set obs 200
+> gen x = 4*_pi/200*_n
+> gen y = sin(x)
+> brain define, input(x) output(y) hidden(20)
+> quietly brain train, iter(200) eta(2)
+> brain think ybrain
+> sort x
+> twoway (scatter y x) (lfit y x) (line y x)
+> */
+. 
+. ********** 6. PREDICTION EXAMPLE
+. 
+. * Data for prediction example: 5 continuous and 14 binary variables
+. qui use mus203mepsmedexp.dta, clear
+
+. keep if ltotexp != .
+(109 observations deleted)
+
+. global xlist income educyr age famsze totchr
+
+. global dlist suppins female white hisp marry northe mwest south ///
+>     msa phylim actlim injury priolist hvgg
+
+. global rlist c.($xlist)##c.($xlist) i.($dlist) c.($xlist)#i.($dlist)
+
+. 
+. * Summary statistics for full sample
+. summarize ltotexp $xlist $dlist
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+     ltotexp |      2,955    8.059866    1.367592   1.098612   11.74094
+      income |      2,955    22.68353    22.60988         -1     312.46
+      educyr |      2,955    11.82809    3.405095          0         17
+         age |      2,955    74.24535    6.375975         65         90
+      famsze |      2,955    1.890694    .9644483          1         13
+-------------+---------------------------------------------------------
+      totchr |      2,955    1.808799    1.294613          0          7
+     suppins |      2,955    .5915398    .4916322          0          1
+      female |      2,955    .5840948    .4929608          0          1
+       white |      2,955    .9736041    .1603368          0          1
+        hisp |      2,955    .0812183    .2732163          0          1
+-------------+---------------------------------------------------------
+       marry |      2,955    .5583756    .4966646          0          1
+      northe |      2,955    .1536379    .3606623          0          1
+       mwest |      2,955    .2318105      .42206          0          1
+       south |      2,955    .3922166    .4883272          0          1
+         msa |      2,955    .7397631     .438838          0          1
+-------------+---------------------------------------------------------
+      phylim |      2,955    .4362098    .4959981          0          1
+      actlim |      2,955    .2879865    .4529014          0          1
+      injury |      2,955    .2020305    .4015828          0          1
+    priolist |      2,955    .8240271    .3808616          0          1
+        hvgg |      2,955    .6013536    .4897026          0          1
+
+. 
+. * OLS for full sample
+. regress ltotexp $xlist $dlist, vce(robust) noheader
+------------------------------------------------------------------------------
+             |               Robust
+     ltotexp | Coefficient  std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+      income |   .0007411   .0010967     0.68   0.499    -.0014092    .0028914
+      educyr |   .0415116   .0076743     5.41   0.000     .0264641    .0565591
+         age |   .0042834   .0037527     1.14   0.254    -.0030749    .0116416
+      famsze |  -.0669498   .0261385    -2.56   0.010    -.1182014   -.0156982
+      totchr |   .3238205   .0188741    17.16   0.000     .2868126    .3608283
+     suppins |   .1706101   .0469033     3.64   0.000     .0786434    .2625768
+      female |  -.0508783   .0468787    -1.09   0.278    -.1427968    .0410403
+       white |   .1858472   .1325621     1.40   0.161     -.074077    .4457713
+        hisp |  -.1101501   .0904202    -1.22   0.223    -.2874435    .0671433
+       marry |   .1751016   .0516199     3.39   0.001     .0738868    .2763164
+      northe |   .2736686   .0713944     3.83   0.000     .1336804    .4136567
+       mwest |   .3051208   .0689651     4.42   0.000      .169896    .4403456
+       south |   .1957967   .0593267     3.30   0.001     .0794705    .3121229
+         msa |   .0709307   .0512069     1.39   0.166    -.0294743    .1713357
+      phylim |    .268737   .0567284     4.74   0.000     .1575054    .3799685
+      actlim |   .3661458   .0636335     5.75   0.000      .241375    .4909165
+      injury |   .1664688   .0539137     3.09   0.002     .0607564    .2721813
+    priolist |   .4361775   .0689187     6.33   0.000     .3010436    .5713114
+        hvgg |  -.0959803   .0463345    -2.07   0.038    -.1868316   -.0051289
+       _cons |   5.633868   .3425158    16.45   0.000     4.962272    6.305463
+------------------------------------------------------------------------------
+
+. 
+. // Not included - find model degrees of freedom
+. ereturn list
+
+scalars:
+                  e(N) =  2955
+               e(df_m) =  19
+               e(df_r) =  2935
+                  e(F) =  55.46006190001371
+                 e(r2) =  .2682133118042715
+               e(rmse) =  1.173680781756106
+                e(mss) =  1481.84887899482
+                e(rss) =  4043.04050485574
+               e(r2_a) =  .2634760214888648
+                 e(ll) =  -4656.15718995677
+               e(ll_0) =  -5117.530525659257
+               e(rank) =  20
+
+macros:
+            e(cmdline) : "regress ltotexp income educyr age famsze totchr supp.."
+              e(title) : "Linear regression"
+          e(marginsok) : "XB default"
+                e(vce) : "robust"
+             e(depvar) : "ltotexp"
+                e(cmd) : "regress"
+         e(properties) : "b V"
+            e(predict) : "regres_p"
+              e(model) : "ols"
+          e(estat_cmd) : "regress_estat"
+            e(vcetype) : "Robust"
+
+matrices:
+                  e(b) :  1 x 20
+                  e(V) :  20 x 20
+       e(V_modelbased) :  20 x 20
+
+functions:
+             e(sample)   
+
+. 
+. * Split the sample with 80% in training sample
+. splitsample ltotexp, generate(train) split(1 4) values(0 1) rseed(10101)
+
+. tabulate train
+
+      train |      Freq.     Percent        Cum.
+------------+-----------------------------------
+          0 |        591       20.00       20.00
+          1 |      2,364       80.00      100.00
+------------+-----------------------------------
+      Total |      2,955      100.00
+
+. 
+. * OLS with 19 regressors
+. regress ltotexp $xlist $dlist if train==1, noheader vce(robust)
+------------------------------------------------------------------------------
+             |               Robust
+     ltotexp | Coefficient  std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+      income |   .0010653   .0010664     1.00   0.318    -.0010259    .0031565
+      educyr |   .0431495   .0081645     5.29   0.000      .027139    .0591599
+         age |   .0025177   .0040582     0.62   0.535    -.0054403    .0104757
+      famsze |  -.0635828   .0285771    -2.22   0.026    -.1196218   -.0075437
+      totchr |   .3220218   .0208646    15.43   0.000     .2811068    .3629368
+     suppins |   .1547863   .0523682     2.96   0.003     .0520934    .2574791
+      female |  -.0643839    .052321    -1.23   0.219    -.1669842    .0382164
+       white |   .1773761   .1474569     1.20   0.229    -.1117833    .4665356
+        hisp |  -.1031283   .1030525    -1.00   0.317    -.3052118    .0989552
+       marry |   .1491644   .0571793     2.61   0.009     .0370372    .2612917
+      northe |   .2805731   .0794206     3.53   0.000     .1248312     .436315
+       mwest |   .3296948   .0760097     4.34   0.000     .1806417     .478748
+       south |   .1997139   .0670176     2.98   0.003      .068294    .3311338
+         msa |   .0677191   .0572256     1.18   0.237     -.044499    .1799372
+      phylim |   .2661041   .0627222     4.24   0.000     .1431074    .3891008
+      actlim |     .39576   .0698797     5.66   0.000     .2587277    .5327924
+      injury |   .1305469   .0607895     2.15   0.032     .0113402    .2497537
+    priolist |   .3835745    .077633     4.94   0.000     .2313381     .535811
+        hvgg |  -.0965534   .0505962    -1.91   0.056    -.1957713    .0026646
+       _cons |   5.823748   .3754025    15.51   0.000     5.087593    6.559903
+------------------------------------------------------------------------------
+
+. qui predict y_small
+
+. 
+. * OLS with 188 potential regressors and 104 estimated 
+. qui regress ltotexp $rlist if train==1
+
+. qui predict y_full
+
+. 
+. // Not included - find model degrees of freedom
+. ereturn list
+
+scalars:
+                  e(N) =  2364
+               e(df_m) =  104
+               e(df_r) =  2259
+                  e(F) =  9.608573918654399
+                 e(r2) =  .306691905872461
+               e(rmse) =  1.149414338172587
+                e(mss) =  1320.217531438111
+                e(rss) =  2984.485351679804
+               e(r2_a) =  .2747733393433489
+                 e(ll) =  -3629.862057645259
+               e(ll_0) =  -4062.805961257303
+               e(rank) =  105
+
+macros:
+            e(cmdline) : "regress ltotexp c.(income educyr age famsze totchr)#.."
+              e(title) : "Linear regression"
+          e(marginsok) : "XB default"
+                e(vce) : "ols"
+             e(depvar) : "ltotexp"
+                e(cmd) : "regress"
+         e(properties) : "b V"
+            e(predict) : "regres_p"
+              e(model) : "ols"
+          e(estat_cmd) : "regress_estat"
+
+matrices:
+                  e(b) :  1 x 189
+                  e(V) :  189 x 189
+
+functions:
+             e(sample)   
+
+. 
+. * LASSO with 188 potential regressors leads to 32 selected
+. qui lasso linear ltotexp $rlist if train==1, selection(adaptive) ///
+>     rseed(10101) nolog
+
+. lassoknots
+
+----------------------------------------------------------------------------------
+       |              No. of   CV mean |
+       |             nonzero     pred. |       Variables (A)dded, (R)emoved,      
+    ID |   lambda      coef.     error |            or left (U)nchanged           
+-------+-------------------------------+------------------------------------------
+    51 | 17.76327          1   1.76889 | A totchr                                 
+    59 | 8.438993          2   1.55272 | A 0.actlim                               
+    66 | 4.400098          3  1.473914 | A 1.priolist#c.educyr                    
+    71 |  2.76339          4  1.430335 | A 0.phylim#c.famsze                      
+    73 | 2.294215          6  1.415289 | A 1.marry#c.educyr                       
+       |                               |   1.suppins#c.age                        
+    78 | 1.440834          7  1.386716 | A 0.hvgg#c.totchr                        
+    80 | 1.196205          9  1.380092 | A 1.mwest#c.totchr                       
+       |                               |   1.injury#c.educyr                      
+    84 |  .824498         10  1.369338 | A 1.mwest#c.famsze                       
+    85 | .7512519         11  1.367485 | A 0.female#c.totchr                      
+    87 | .6237025         12  1.364392 | A 0.priolist#c.totchr                    
+    89 | .5178088         13  1.361144 | A 0.marry#c.totchr                       
+    90 | .4718081         14  1.359738 | A 1.northe#c.educyr                      
+    91 | .4298939         15   1.35839 | A 0.actlim#c.totchr                      
+    92 | .3917033         16  1.356668 | A 0.priolist#c.famsze                    
+    95 | .2963092         17  1.352067 | A 1.south#c.educyr                       
+    96 | .2699859         18  1.350489 | A 0.white#c.famsze                       
+    99 | .2042345         20  1.346719 | A 1.female#c.income                      
+       |                               |   1.phylim#c.educyr                      
+   100 | .1860908         21  1.346044 | A 0.actlim#c.famsze                      
+   101 |  .169559         23  1.345632 | A 1.actlim#c.famsze                      
+       |                               |   1.northe#c.totchr                      
+   103 | .1407709         25  1.344879 | A 0.south#c.famsze                       
+       |                               |   0.injury#c.totchr                      
+   104 | .1282652         26  1.344431 | A 0.suppins#c.income                     
+   105 | .1168705         27  1.344094 | A 1.hvgg#c.educyr                        
+   106 |  .106488         28  1.343763 | A 0.priolist                             
+   107 | .0970279         29  1.343447 | A 1.hisp#c.income                        
+   108 | .0884082         30  1.343113 | A 0.suppins#c.totchr                     
+   110 | .0733981         31  1.342763 | A 1.mwest#c.income                       
+   112 | .0609364         32  1.341704 | A 1.msa#c.educyr                         
+ * 120 | .0289497         32  1.339496 | U                                        
+   121 | .0263779         33  1.339525 | A 1.hvgg#c.famsze                        
+   128 | .0137535         34  1.340677 | A 0.suppins#c.famsze                     
+   130 | .0114184         35  1.341051 | A 1.actlim#c.income                      
+   132 | .0094797         36  1.341602 | A 0.msa                                  
+   135 | .0071711         38  1.342449 | A 1.hisp#c.age                           
+       |                               |   1.south#c.totchr                       
+   136 |  .006534         37  1.342685 | R 1.msa#c.educyr                         
+   138 | .0054246         36  1.343111 | R 0.actlim#c.famsze                      
+   139 | .0049427         37  1.343368 | A 1.mwest#c.age                          
+   143 | .0034068         39   1.34451 | A 1.msa#c.educyr                         
+       |                               |   1.northe#c.income                      
+   144 | .0031042         38  1.344751 | R totchr                                 
+   145 | .0028284         39  1.344983 | A 0.actlim#c.famsze                      
+   147 | .0023482         40  1.345372 | A totchr                                 
+   149 | .0019495         40  1.345694 | U                                        
+----------------------------------------------------------------------------------
+* lambda selected by cross-validation in final adaptive step.
+
+. qui predict y_laspen                  // use penalized coefficients
+
+. qui predict y_laspost, postselection  // use post selection OLS coeffs
+
+. 
+. * Principal components using the first 5 principal components of 19 variables
+. qui pca $xlist $dlist if train==1
+
+. qui predict pc* 
+
+. qui regress ltotexp pc1-pc5 if train==1
+
+. qui predict y_pca
+
+. 
+. /* Following does not work so drop
+> * Neural network with 19 variables and one hidden layers with 10 units
+> brain define, input($xlist $dlist) output(ltotexp) hidden(10)
+> qui brain train if train==1, iter(500) eta(2)
+> brain think y_neural
+> */    
+. 
+. * Random forest with 19 variables
+. qui rforest ltotexp $xlist $dlist if train==1, ///
+>     type(reg) iter(200) depth(10) lsize(5)
+
+. qui predict y_ranfor    
+
+. 
+. /* Boost requires questionable add-on so drop 
+> capture program drop boost_plugin
+> * Boosting linear regression with 19 variables
+> program boost_plugin, plugin using("C:\ado\personal\boost64.dll")
+> qui boost ltotexp $xlist $dlist if train==1, ///
+>     distribution(normal) trainfraction(0.8) maxiter(100) predict(y_boost)  
+> */
+. 
+. * Training MSE and test MSE for the various methods
+. qui regress ltotexp
+
+. qui predict y_noreg
+
+. foreach var of varlist y_noreg y_small y_full y_laspen y_laspost y_pca ///
+>                        y_ranfor {
+  2.     qui gen `var'errorsq = (`var' - ltotexp)^2
+  3.     qui sum `var'errorsq if train == 1
+  4.     scalar mse`var'train = r(mean)
+  5.     qui sum `var'errorsq if train == 0
+  6.     qui scalar mse`var'test = r(mean)
+  7.     display "Predictor: " "`var'" _col(21) ///
+>             " Train MSE = " %5.3f mse`var'train "  Test MSE = " %5.3f mse`var'te
+> st 
+  8.     }
+Predictor: y_noreg   Train MSE = 1.821  Test MSE = 2.063
+Predictor: y_small   Train MSE = 1.339  Test MSE = 1.492
+Predictor: y_full    Train MSE = 1.262  Test MSE = 1.509
+Predictor: y_laspen  Train MSE = 1.298  Test MSE = 1.491
+Predictor: y_laspost Train MSE = 1.297  Test MSE = 1.493
+Predictor: y_pca     Train MSE = 1.397  Test MSE = 1.545
+Predictor: y_ranfor  Train MSE = 1.046  Test MSE = 1.580
+
+. 
+. ********** CLOSE OUTPUT **********
+. 
+. * log close
+. * clear 
+. * exit
+. 
+end of do-file
+
+. exit, clear

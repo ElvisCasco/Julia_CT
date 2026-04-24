@@ -1,0 +1,1167 @@
+---------------------------------------------------------------------------------
+      name:  <unnamed>
+       log:  c:\Users\ccameron\Dropbox\Desktop\TEACHING\240f\2022_seminar\ML_2022
+> _part2.txt
+  log type:  text
+ opened on:   2 May 2022, 20:24:13
+
+. 
+. ********** OVERVIEW OF ML_2022_part2.do **********
+. 
+. * To run you need files
+. *  none as data is generated
+. * in your directory
+. 
+. * And Stata user-written commands 
+. *   none
+. * are used
+. 
+. * 3. SHRINKAGE ESTIMATION THEORY: RIDGE, LASSO, ELASTICNET 
+. * 4. PREDICTION USING LASSO, RIDGE AND ELSTICNET
+. * 4.1 THE LASSO COMMAND
+. * 4.2 LASSO LINEAR REGRESSION EXAMPLE
+. * 4.3 LASSO POSTESTIMATION COMMANDS EXAMPLE
+. * 4.4 ADAPTIVE LASSO
+. * 4.5 ELASTICNET AND RIDGE REGRESSION
+. * 4.6 COMPARISON OF SHRINKAGE ESTIMATORS
+. * 4.7 SHRINKAGE FOR LOGIT, PROBIT AND POISSON MODELS
+. 
+. ********** SETUP **********
+. 
+. set more off
+
+. version 16
+
+. clear all
+
+. set linesize 82
+
+. set scheme s1mono  /* Graphics scheme */
+
+. 
+. ********** DATA DESCRIPTION **********
+. 
+. * Data are generated
+. * But are nonetheless saved in case want to use a different program than Stata 
+. 
+. ********** GENERATED DATA
+. 
+. * Generate three correlated variables (rho = 0.5) and y linear only in x1
+. clear
+
+. quietly set obs 40
+
+. set seed 12345
+
+. matrix MU = (0,0,0)
+
+. scalar rho = 0.5
+
+. matrix SIGMA = (1,rho,rho \ rho,1,rho \ rho,rho,1)
+
+. drawnorm x1 x2 x3, means(MU) cov(SIGMA)
+
+. generate y = 2 + 1*x1 + rnormal(0,3)
+
+. saveold ML_2022_part1, version(11) replace
+(saving in Stata 12 format, which Stata 11 can read)
+file ML_2022_part1.dta saved
+
+. 
+. * Summarize data
+. summarize
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+          x1 |         40    .3337951    .8986718  -1.099225   2.754746
+          x2 |         40    .1257017    .9422221  -2.081086   2.770161
+          x3 |         40    .0712341    1.034616  -1.676141   2.931045
+           y |         40    3.107987    3.400129  -3.542646   10.60979
+
+. correlate
+(obs=40)
+
+             |       x1       x2       x3        y
+-------------+------------------------------------
+          x1 |   1.0000
+          x2 |   0.5077   1.0000
+          x3 |   0.4281   0.2786   1.0000
+           y |   0.4740   0.3370   0.2046   1.0000
+
+
+. 
+. * OLS regression of y on x1-x3
+. regress y x1 x2 x3, vce(robust)
+
+Linear regression                               Number of obs     =         40
+                                                F(3, 36)          =       4.91
+                                                Prob > F          =     0.0058
+                                                R-squared         =     0.2373
+                                                Root MSE          =     3.0907
+
+------------------------------------------------------------------------------
+             |               Robust
+           y | Coefficient  std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+          x1 |   1.555582   .5006152     3.11   0.004     .5402873    2.570877
+          x2 |   .4707111   .5251826     0.90   0.376    -.5944086    1.535831
+          x3 |  -.0256025   .6009393    -0.04   0.966    -1.244364    1.193159
+       _cons |   2.531396   .5377607     4.71   0.000     1.440766    3.622025
+------------------------------------------------------------------------------
+
+. 
+. ********** 3: SHRINKAGE ESTIMATION
+. 
+. * Standardize regressors and demean y
+. foreach var of varlist x1 x2 x3 {
+  2.      qui egen double z`var' = std(`var')
+  3. }
+
+. qui summarize y
+
+. qui generate double ydemeaned = y - r(mean)
+
+. summarize ydemeaned z*
+
+    Variable |        Obs        Mean    Std. dev.       Min        Max
+-------------+---------------------------------------------------------
+   ydemeaned |         40   -3.33e-17    3.400129  -6.650633   7.501798
+         zx1 |         40    2.63e-17           1  -1.594598   2.693921
+         zx2 |         40    2.62e-17           1   -2.34211    2.80662
+         zx3 |         40   -2.98e-17           1  -1.688912   2.764129
+
+. 
+. ********** 4.2 LASSO LINEAR REGRESSION EXAMPLE
+. 
+. // Long output so only is included 
+. * Lasso linear using 5-fold cross validation
+. lasso linear y x1 x2 x3, selection(cv) folds(5) rseed(10101)
+
+5-fold cross-validation with 100 lambdas ...
+Grid value 1:     lambda = 1.591525   no. of nonzero coef. =       0
+Folds: 1...5   CVF = 11.85738
+Grid value 2:     lambda = 1.450138   no. of nonzero coef. =       1
+Folds: 1...5   CVF = 11.60145
+Grid value 3:     lambda = 1.321312   no. of nonzero coef. =       1
+Folds: 1...5   CVF =  11.2296
+Grid value 4:     lambda =  1.20393   no. of nonzero coef. =       1
+Folds: 1...5   CVF = 10.87719
+Grid value 5:     lambda = 1.096976   no. of nonzero coef. =       1
+Folds: 1...5   CVF = 10.60149
+Grid value 6:     lambda = .9995238   no. of nonzero coef. =       1
+Folds: 1...5   CVF = 10.38463
+Grid value 7:     lambda = .9107289   no. of nonzero coef. =       1
+Folds: 1...5   CVF = 10.20522
+Grid value 8:     lambda = .8298222   no. of nonzero coef. =       1
+Folds: 1...5   CVF = 10.05685
+Grid value 9:     lambda = .7561031   no. of nonzero coef. =       1
+Folds: 1...5   CVF = 9.934201
+Grid value 10:    lambda =  .688933   no. of nonzero coef. =       1
+Folds: 1...5   CVF = 9.829713
+Grid value 11:    lambda = .6277301   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.739804
+Grid value 12:    lambda = .5719643   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.666469
+Grid value 13:    lambda = .5211525   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.606777
+Grid value 14:    lambda = .4748548   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.562824
+Grid value 15:    lambda =   .43267   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.525748
+Grid value 16:    lambda = .3942328   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.493472
+Grid value 17:    lambda = .3592102   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.460115
+Grid value 18:    lambda =  .327299   no. of nonzero coef. =       2
+Folds: 1...5   CVF =  9.43311
+Grid value 19:    lambda = .2982226   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.411316
+Grid value 20:    lambda = .2717294   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.393794
+Grid value 21:    lambda = .2475897   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.393523
+Grid value 22:    lambda = .2255945   no. of nonzero coef. =       2
+Folds: 1...5   CVF =  9.40661
+Grid value 23:    lambda = .2055533   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.420332
+Grid value 24:    lambda = .1872925   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.434326
+... cross-validation complete ... minimum found
+
+Lasso linear model                          No. of obs        =         40
+                                            No. of covariates =          3
+Selection: Cross-validation                 No. of CV folds   =          5
+
+--------------------------------------------------------------------------
+         |                                No. of      Out-of-      CV mean
+         |                               nonzero       sample   prediction
+      ID |     Description      lambda     coef.    R-squared        error
+---------+----------------------------------------------------------------
+       1 |    first lambda    1.591525         0      -0.0519     11.85738
+      20 |   lambda before    .2717294         2       0.1666     9.393794
+    * 21 | selected lambda    .2475897         2       0.1666     9.393523
+      22 |    lambda after    .2255945         2       0.1655      9.40661
+      24 |     last lambda    .1872925         2       0.1630     9.434326
+--------------------------------------------------------------------------
+* lambda selected by cross-validation.
+
+. 
+. ********** 4.3 LASSO POSTESTIMATION COMMANDS EXAMPLE
+. 
+. * List the values of lambda at which variables are added or removed
+. lassoknots
+
+----------------------------------------------------------------------------------
+       |              No. of   CV mean |
+       |             nonzero     pred. |       Variables (A)dded, (R)emoved,      
+    ID |   lambda      coef.     error |            or left (U)nchanged           
+-------+-------------------------------+------------------------------------------
+     2 | 1.450138          1  11.60145 | A x1                                     
+    11 | .6277301          2  9.739804 | A x2                                     
+  * 21 | .2475897          2  9.393523 | U                                        
+    24 | .1872925          2  9.434326 | U                                        
+----------------------------------------------------------------------------------
+* lambda selected by cross-validation.
+
+. 
+. // Not included
+. // lasso linear y x1 x2 x3, selection(none) 
+. // lassoknots, display(bic)
+. // lassoknots, display(bic) alllambdas
+. 
+. * Plot the change in the penalized objective function as lambda changes
+. cvplot, saving(graph1, replace)
+file graph1.gph saved
+
+. 
+. * Plot how estimated coefficients change with lambda
+. coefpath, xunits(rlnlambda) saving(graph2, replace)
+file graph2.gph saved
+
+. 
+. graph combine graph1.gph graph2.gph, iscale(1.25) ysize(2.5) xsize(6.0)
+
+. * graph export mus228fig1cvplots.eps, replace
+. 
+. * Provide a summary of the lasso
+. lassoinfo
+
+    Estimate: active
+     Command: lasso
+-----------------------------------------------------------------
+            |                                              No. of
+  Dependent |           Selection  Selection             selected
+   variable |    Model     method  criterion    lambda  variables
+------------+----------------------------------------------------
+          y |   linear         cv    CV min.  .2475897          2
+-----------------------------------------------------------------
+
+. 
+. * Lasso coefficients for the standardized regressors
+. lassocoef, display(coef, standardized)
+
+------------------------
+             |    active
+-------------+----------
+          x1 |  1.206056
+          x2 |  .2715635
+       _cons |         0
+------------------------
+Legend:
+  b - base level
+  e - empty cell
+  o - omitted
+
+. 
+. *  Lasso coefficients for the unstandardized regressors
+. lassocoef, display(coef, penalized) nolegend
+
+------------------------
+             |    active
+-------------+----------
+          x1 |   1.35914
+          x2 |  .2918877
+       _cons |  2.617622
+------------------------
+
+. 
+. * Post-selection estimated coefficients for the unstandardized regressors
+. lassocoef, display(coef, postselection) nolegend
+
+------------------------
+             |    active
+-------------+----------
+          x1 |  1.544198
+          x2 |  .4683922
+       _cons |  2.533663
+------------------------
+
+. 
+. * Goodness-of-fit with penalized coefficients and postselection coefficients
+. lassogof, penalized
+
+Penalized coefficients
+------------------------------------
+         MSE    R-squared        Obs
+------------------------------------
+    8.679274       0.2300         40
+------------------------------------
+
+. lassogof, postselection
+
+Postselection coefficients
+------------------------------------
+         MSE    R-squared        Obs
+------------------------------------
+    8.597958       0.2372         40
+------------------------------------
+
+. 
+. * Compare to OLS with the lasso selected regressors 
+. regress y x1 x2, noheader
+------------------------------------------------------------------------------
+           y | Coefficient  Std. err.      t    P>|t|     [95% conf. interval]
+-------------+----------------------------------------------------------------
+          x1 |   1.544198   .6305617     2.45   0.019     .2665582    2.821837
+          x2 |   .4683922   .6014166     0.78   0.441    -.7501936    1.686978
+       _cons |   2.533663   .5159805     4.91   0.000     1.488188    3.579139
+------------------------------------------------------------------------------
+
+. 
+. ********* * 4.4 ADAPTIVE LASSO
+. 
+. * Lasso linear using 5-fold adaptive cross validation
+. qui lasso linear y x1 x2 x3, selection(adaptive) folds(5) rseed(10101)
+
+. lassoknots
+
+----------------------------------------------------------------------------------
+       |              No. of   CV mean |
+       |             nonzero     pred. |       Variables (A)dded, (R)emoved,      
+    ID |   lambda      coef.     error |            or left (U)nchanged           
+-------+-------------------------------+------------------------------------------
+    26 | 3.945214          1  11.60145 | A x1                                     
+  * 52 | .3512089          1  9.160539 | U                                        
+    57 | .2205694          2  9.210699 | A x2                                     
+    95 | .0064297          2  9.172378 | U                                        
+----------------------------------------------------------------------------------
+* lambda selected by cross-validation in final adaptive step.
+
+. 
+. * Lasso linear with no method for selecting lambda
+. qui lasso linear y x1 x2 x3, selection(none) folds(5)
+
+. lassoknots
+
+----------------------------------------------------------------------------------
+       |              No. of           |
+       |             nonzero In-sample |       Variables (A)dded, (R)emoved,      
+    ID |   lambda      coef. R-squared |            or left (U)nchanged           
+-------+-------------------------------+------------------------------------------
+     2 | 1.450138          1    0.0382 | A x1                                     
+    11 | .6277301          2    0.1908 | A x2                                     
+    52 | .0138423          3    0.2372 | A x3                                     
+    62 | .0054597          3    0.2373 | U                                        
+----------------------------------------------------------------------------------
+Note: No lambda selected. lassoselect can be used to select lambda.
+
+. 
+. // Not included - Lasso linear with plugin lambda
+. lasso linear y x1 x2 x3, selection(plugin) folds(5)
+
+Computing plugin lambda ...
+Iteration 1:     lambda = .4540637   no. of nonzero coef. =       1
+Iteration 2:     lambda = .4540637   no. of nonzero coef. =       1
+
+Lasso linear model                          No. of obs        =         40
+                                            No. of covariates =          3
+Selection: Plugin heteroskedastic
+
+--------------------------------------------------------------------------
+         |                                No. of
+         |                               nonzero    In-sample
+      ID |     Description      lambda     coef.    R-squared          BIC
+---------+----------------------------------------------------------------
+     * 1 | selected lambda    .4540637         1       0.0922     213.9161
+--------------------------------------------------------------------------
+* lambda selected by plugin formula assuming heteroskedastic errors.
+
+. 
+. ********* 4.5 ELASTICNET AND RIDGE REGRESSION
+. 
+. // Not included - Ridge with complete grid datasets
+. elasticnet linear y x1 x2 x3, alpha(0) rseed(10101)
+
+Evaluating up to 100 lambdas in grid ...
+Grid value 1:     lambda = 1.59e+08   no. of nonzero coef. =       3
+Grid value 2:     lambda = 1450.138   no. of nonzero coef. =       3
+Grid value 3:     lambda = 1321.312   no. of nonzero coef. =       3
+Grid value 4:     lambda =  1203.93   no. of nonzero coef. =       3
+Grid value 5:     lambda = 1096.976   no. of nonzero coef. =       3
+Grid value 6:     lambda = 999.5238   no. of nonzero coef. =       3
+Grid value 7:     lambda = 910.7289   no. of nonzero coef. =       3
+Grid value 8:     lambda = 829.8222   no. of nonzero coef. =       3
+Grid value 9:     lambda = 756.1031   no. of nonzero coef. =       3
+Grid value 10:    lambda =  688.933   no. of nonzero coef. =       3
+Grid value 11:    lambda = 627.7301   no. of nonzero coef. =       3
+Grid value 12:    lambda = 571.9643   no. of nonzero coef. =       3
+Grid value 13:    lambda = 521.1525   no. of nonzero coef. =       3
+Grid value 14:    lambda = 474.8548   no. of nonzero coef. =       3
+Grid value 15:    lambda =   432.67   no. of nonzero coef. =       3
+Grid value 16:    lambda = 394.2328   no. of nonzero coef. =       3
+Grid value 17:    lambda = 359.2102   no. of nonzero coef. =       3
+Grid value 18:    lambda =  327.299   no. of nonzero coef. =       3
+Grid value 19:    lambda = 298.2226   no. of nonzero coef. =       3
+Grid value 20:    lambda = 271.7294   no. of nonzero coef. =       3
+Grid value 21:    lambda = 247.5897   no. of nonzero coef. =       3
+Grid value 22:    lambda = 225.5945   no. of nonzero coef. =       3
+Grid value 23:    lambda = 205.5533   no. of nonzero coef. =       3
+Grid value 24:    lambda = 187.2925   no. of nonzero coef. =       3
+Grid value 25:    lambda =  170.654   no. of nonzero coef. =       3
+Grid value 26:    lambda = 155.4935   no. of nonzero coef. =       3
+Grid value 27:    lambda = 141.6799   no. of nonzero coef. =       3
+Grid value 28:    lambda = 129.0935   no. of nonzero coef. =       3
+Grid value 29:    lambda = 117.6252   no. of nonzero coef. =       3
+Grid value 30:    lambda = 107.1757   no. of nonzero coef. =       3
+Grid value 31:    lambda = 97.65447   no. of nonzero coef. =       3
+Grid value 32:    lambda = 88.97912   no. of nonzero coef. =       3
+Grid value 33:    lambda = 81.07446   no. of nonzero coef. =       3
+Grid value 34:    lambda = 73.87203   no. of nonzero coef. =       3
+Grid value 35:    lambda = 67.30944   no. of nonzero coef. =       3
+Grid value 36:    lambda = 61.32985   no. of nonzero coef. =       3
+Grid value 37:    lambda = 55.88148   no. of nonzero coef. =       3
+Grid value 38:    lambda = 50.91712   no. of nonzero coef. =       3
+Grid value 39:    lambda = 46.39379   no. of nonzero coef. =       3
+Grid value 40:    lambda = 42.27229   no. of nonzero coef. =       3
+Grid value 41:    lambda = 38.51694   no. of nonzero coef. =       3
+Grid value 42:    lambda =  35.0952   no. of nonzero coef. =       3
+Grid value 43:    lambda = 31.97744   no. of nonzero coef. =       3
+Grid value 44:    lambda = 29.13665   no. of nonzero coef. =       3
+Grid value 45:    lambda = 26.54823   no. of nonzero coef. =       3
+Grid value 46:    lambda = 24.18976   no. of nonzero coef. =       3
+Grid value 47:    lambda = 22.04081   no. of nonzero coef. =       3
+Grid value 48:    lambda = 20.08276   no. of nonzero coef. =       3
+Grid value 49:    lambda = 18.29867   no. of nonzero coef. =       3
+Grid value 50:    lambda = 16.67306   no. of nonzero coef. =       3
+Grid value 51:    lambda = 15.19187   no. of nonzero coef. =       3
+Grid value 52:    lambda = 13.84227   no. of nonzero coef. =       3
+Grid value 53:    lambda = 12.61256   no. of nonzero coef. =       3
+Grid value 54:    lambda = 11.49209   no. of nonzero coef. =       3
+Grid value 55:    lambda = 10.47117   no. of nonzero coef. =       3
+Grid value 56:    lambda = 9.540939   no. of nonzero coef. =       3
+Grid value 57:    lambda = 8.693348   no. of nonzero coef. =       3
+Grid value 58:    lambda = 7.921055   no. of nonzero coef. =       3
+Grid value 59:    lambda = 7.217371   no. of nonzero coef. =       3
+Grid value 60:    lambda = 6.576199   no. of nonzero coef. =       3
+Grid value 61:    lambda = 5.991988   no. of nonzero coef. =       3
+Grid value 62:    lambda = 5.459676   no. of nonzero coef. =       3
+Grid value 63:    lambda = 4.974654   no. of nonzero coef. =       3
+Grid value 64:    lambda = 4.532719   no. of nonzero coef. =       3
+Grid value 65:    lambda = 4.130045   no. of nonzero coef. =       3
+Grid value 66:    lambda = 3.763143   no. of nonzero coef. =       3
+Grid value 67:    lambda = 3.428836   no. of nonzero coef. =       3
+Grid value 68:    lambda = 3.124227   no. of nonzero coef. =       3
+Grid value 69:    lambda =  2.84668   no. of nonzero coef. =       3
+Grid value 70:    lambda = 2.593788   no. of nonzero coef. =       3
+Grid value 71:    lambda = 2.363363   no. of nonzero coef. =       3
+Grid value 72:    lambda = 2.153409   no. of nonzero coef. =       3
+Grid value 73:    lambda = 1.962106   no. of nonzero coef. =       3
+Grid value 74:    lambda = 1.787798   no. of nonzero coef. =       3
+Grid value 75:    lambda = 1.628975   no. of nonzero coef. =       3
+Grid value 76:    lambda = 1.484261   no. of nonzero coef. =       3
+Grid value 77:    lambda = 1.352403   no. of nonzero coef. =       3
+Grid value 78:    lambda =  1.23226   no. of nonzero coef. =       3
+Grid value 79:    lambda = 1.122789   no. of nonzero coef. =       3
+Grid value 80:    lambda = 1.023044   no. of nonzero coef. =       3
+Grid value 81:    lambda = .9321593   no. of nonzero coef. =       3
+Grid value 82:    lambda = .8493488   no. of nonzero coef. =       3
+Grid value 83:    lambda =  .773895   no. of nonzero coef. =       3
+Grid value 84:    lambda = .7051443   no. of nonzero coef. =       3
+Grid value 85:    lambda = .6425012   no. of nonzero coef. =       3
+Grid value 86:    lambda = .5854232   no. of nonzero coef. =       3
+Grid value 87:    lambda = .5334158   no. of nonzero coef. =       3
+Grid value 88:    lambda = .4860286   no. of nonzero coef. =       3
+Grid value 89:    lambda = .4428512   no. of nonzero coef. =       3
+Grid value 90:    lambda = .4035095   no. of nonzero coef. =       3
+Grid value 91:    lambda = .3676628   no. of nonzero coef. =       3
+Grid value 92:    lambda = .3350007   no. of nonzero coef. =       3
+Grid value 93:    lambda = .3052401   no. of nonzero coef. =       3
+Grid value 94:    lambda = .2781234   no. of nonzero coef. =       3
+Grid value 95:    lambda = .2534157   no. of nonzero coef. =       3
+Grid value 96:    lambda =  .230903   no. of nonzero coef. =       3
+Grid value 97:    lambda = .2103902   no. of nonzero coef. =       3
+Grid value 98:    lambda = .1916997   no. of nonzero coef. =       3
+Grid value 99:    lambda = .1746696   no. of nonzero coef. =       3
+Grid value 100:   lambda = .1591525   no. of nonzero coef. =       3
+
+10-fold cross-validation with 100 lambdas ...
+Fold  1 of 10:  10....20....30....40....50....60....70....80....90....100
+Fold  2 of 10:  10....20....30....40....50....60....70....80....90....100
+Fold  3 of 10:  10....20....30....40....50....60....70....80....90....100
+Fold  4 of 10:  10....20....30....40....50....60....70....80....90....100
+Fold  5 of 10:  10....20....30....40....50....60....70....80....90....100
+Fold  6 of 10:  10....20....30....40....50....60....70....80....90....100
+Fold  7 of 10:  10....20....30....40....50....60....70....80....90....100
+Fold  8 of 10:  10....20....30....40....50....60....70....80....90....100
+Fold  9 of 10:  10....20....30....40....50....60....70....80....90....100
+Fold 10 of 10:  10....20....30....40....50....60....70....80....90....100
+... cross-validation complete
+
+Elastic net linear model                         No. of obs        =         40
+                                                 No. of covariates =          3
+Selection: Cross-validation                      No. of CV folds   =         10
+
+-------------------------------------------------------------------------------
+               |                               No. of      Out-of-      CV mean
+               |                              nonzero       sample   prediction
+alpha       ID |     Description      lambda    coef.    R-squared        error
+---------------+---------------------------------------------------------------
+0.000          |
+             1 |    first lambda    1591.525        3      -0.0602     11.95098
+            96 |   lambda before     .230903        3       0.1444     9.644598
+          * 97 | selected lambda    .2103902        3       0.1444     9.644142
+            98 |    lambda after    .1916997        3       0.1444     9.644459
+           100 |     last lambda    .1591525        3       0.1442     9.646923
+-------------------------------------------------------------------------------
+* alpha and lambda selected by cross-validation.
+
+. 
+. * Ridge estimation using the elasticnet command and selected results
+. qui elasticnet linear y x1 x2 x3, alpha(0) rseed(10101) folds(5)
+
+. lassoknots
+
+----------------------------------------------------------------------------------
+            |              No. of   CV mean |
+            |             nonzero     pred. |    Variables (A)dded, (R)emoved,    
+alpha    ID |   lambda      coef.     error |         or left (U)nchanged         
+------------+-------------------------------+-------------------------------------
+0.000       |                               |
+          1 | 1591.525          3   11.9595 | A x1       x2                       
+            |                               |   x3                                
+       * 93 | .3052401          3   9.54017 | U                                   
+        100 | .1591525          3  9.566065 | U                                   
+----------------------------------------------------------------------------------
+* alpha and lambda selected by cross-validation.
+
+. lassocoef, display(coef, penalized) nolegend
+
+------------------------
+             |    active
+-------------+----------
+          x1 |  1.139476
+          x2 |  .4865453
+          x3 |  .0958546
+       _cons |  2.659647
+------------------------
+
+. lassogof, penalized
+
+Penalized coefficients
+------------------------------------
+         MSE    R-squared        Obs
+------------------------------------
+     8.70562       0.2277         40
+------------------------------------
+
+. 
+. * Elastic net estimation and selected results
+. qui elasticnet linear y x1 x2 x3, alpha(0.9(0.05)1) rseed(10101) folds(5)
+
+. lassoknots
+
+----------------------------------------------------------------------------------
+            |              No. of   CV mean |
+            |             nonzero     pred. |    Variables (A)dded, (R)emoved,    
+alpha    ID |   lambda      coef.     error |         or left (U)nchanged         
+------------+-------------------------------+-------------------------------------
+1.000       |                               |
+          4 | 1.450138          1  11.60145 | A x1                                
+         13 | .6277301          2  9.739804 | A x2                                
+         26 | .1872925          2  9.434326 | U                                   
+------------+-------------------------------+-------------------------------------
+0.950       |                               |
+         29 | 1.591525          1  11.73019 | A x1                                
+         38 |  .688933          2   9.81611 | A x2                                
+       * 48 | .2717294          2    9.3884 | U                                   
+         51 | .2055533          2  9.425887 | U                                   
+------------+-------------------------------+-------------------------------------
+0.900       |                               |
+         53 | 1.675289          1  11.74015 | A x1                                
+         62 | .7561031          2  9.900317 | A x2                                
+         76 | .2055533          2  9.431641 | U                                   
+----------------------------------------------------------------------------------
+* alpha and lambda selected by cross-validation.
+
+. lassocoef, display(coef, penalized) nolegend
+
+------------------------
+             |    active
+-------------+----------
+          x1 |  1.329744
+          x2 |  .2908281
+       _cons |  2.627567
+------------------------
+
+. lassogof, penalized
+
+Penalized coefficients
+------------------------------------
+         MSE    R-squared        Obs
+------------------------------------
+    8.693386       0.2288         40
+------------------------------------
+
+. 
+. // Not included - Elastic net with complete grid datasets
+. elasticnet linear y x1 x2 x3, alpha(0.1(0.3)1) rseed(10101) folds(5)
+
+alpha 1 of 4: alpha = 1
+
+5-fold cross-validation with 126 lambdas ...
+Grid value 1:     lambda = 15.91525   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 2:     lambda = 14.50138   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 3:     lambda = 13.21312   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 4:     lambda =  12.0393   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 5:     lambda = 10.96976   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 6:     lambda = 9.995238   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 7:     lambda = 9.107289   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 8:     lambda = 8.298222   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 9:     lambda = 7.561031   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 10:    lambda =  6.88933   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 11:    lambda = 6.277301   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 12:    lambda = 5.719643   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 13:    lambda = 5.211525   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 14:    lambda = 4.748548   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 15:    lambda =   4.3267   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 16:    lambda = 3.978811   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 17:    lambda = 3.625345   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 18:    lambda = 3.303279   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 19:    lambda = 3.009825   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 20:    lambda =  2.74244   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 21:    lambda =  2.49881   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 22:    lambda = 2.276822   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 23:    lambda = 2.273607   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 24:    lambda = 2.071626   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 25:    lambda = 1.887588   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 26:    lambda =   1.7199   no. of nonzero coef. =       0
+Folds: 1...5   CVF = 11.95133
+Grid value 27:    lambda = 1.591525   no. of nonzero coef. =       0
+Folds: 1...5   CVF = 11.85738
+Grid value 28:    lambda = 1.450138   no. of nonzero coef. =       1
+Folds: 1...5   CVF = 11.60145
+Grid value 29:    lambda = 1.321312   no. of nonzero coef. =       1
+Folds: 1...5   CVF =  11.2296
+Grid value 30:    lambda =  1.20393   no. of nonzero coef. =       1
+Folds: 1...5   CVF = 10.87719
+Grid value 31:    lambda = 1.096976   no. of nonzero coef. =       1
+Folds: 1...5   CVF = 10.60149
+Grid value 32:    lambda = .9995238   no. of nonzero coef. =       1
+Folds: 1...5   CVF = 10.38463
+Grid value 33:    lambda = .9107289   no. of nonzero coef. =       1
+Folds: 1...5   CVF = 10.20522
+Grid value 34:    lambda = .8298222   no. of nonzero coef. =       1
+Folds: 1...5   CVF = 10.05685
+Grid value 35:    lambda = .7561031   no. of nonzero coef. =       1
+Folds: 1...5   CVF = 9.934201
+Grid value 36:    lambda =  .688933   no. of nonzero coef. =       1
+Folds: 1...5   CVF = 9.829713
+Grid value 37:    lambda = .6277301   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.739804
+Grid value 38:    lambda = .5719643   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.666469
+Grid value 39:    lambda = .5211525   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.606777
+Grid value 40:    lambda = .4748548   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.562824
+Grid value 41:    lambda =   .43267   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.525748
+Grid value 42:    lambda = .3942328   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.493472
+Grid value 43:    lambda = .3592102   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.460115
+Grid value 44:    lambda =  .327299   no. of nonzero coef. =       2
+Folds: 1...5   CVF =  9.43311
+Grid value 45:    lambda = .2982226   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.411316
+Grid value 46:    lambda = .2717294   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.393794
+Grid value 47:    lambda = .2475897   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.393523
+Grid value 48:    lambda = .2255945   no. of nonzero coef. =       2
+Folds: 1...5   CVF =  9.40661
+Grid value 49:    lambda = .2055533   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.420332
+Grid value 50:    lambda = .1872925   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.434326
+... cross-validation complete ... minimum found
+
+alpha 2 of 4: alpha = .7
+
+5-fold cross-validation with 126 lambdas ...
+Grid value 1:     lambda = 15.91525   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 2:     lambda = 14.50138   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 3:     lambda = 13.21312   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 4:     lambda =  12.0393   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 5:     lambda = 10.96976   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 6:     lambda = 9.995238   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 7:     lambda = 9.107289   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 8:     lambda = 8.298222   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 9:     lambda = 7.561031   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 10:    lambda =  6.88933   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 11:    lambda = 6.277301   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 12:    lambda = 5.719643   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 13:    lambda = 5.211525   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 14:    lambda = 4.748548   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 15:    lambda =   4.3267   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 16:    lambda = 3.978811   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 17:    lambda = 3.625345   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 18:    lambda = 3.303279   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 19:    lambda = 3.009825   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 20:    lambda =  2.74244   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 21:    lambda =  2.49881   no. of nonzero coef. =       0
+Folds: 1...5   CVF = 11.95861
+Grid value 22:    lambda = 2.276822   no. of nonzero coef. =       0
+Folds: 1...5   CVF = 11.90052
+Grid value 23:    lambda = 2.273607   no. of nonzero coef. =       0
+Folds: 1...5   CVF = 11.89792
+Grid value 24:    lambda = 2.071626   no. of nonzero coef. =       1
+Folds: 1...5   CVF = 11.73111
+Grid value 25:    lambda = 1.887588   no. of nonzero coef. =       1
+Folds: 1...5   CVF = 11.47283
+Grid value 26:    lambda =   1.7199   no. of nonzero coef. =       1
+Folds: 1...5   CVF = 11.21024
+Grid value 27:    lambda = 1.591525   no. of nonzero coef. =       1
+Folds: 1...5   CVF = 11.01803
+Grid value 28:    lambda = 1.450138   no. of nonzero coef. =       1
+Folds: 1...5   CVF = 10.80835
+Grid value 29:    lambda = 1.321312   no. of nonzero coef. =       1
+Folds: 1...5   CVF = 10.62026
+Grid value 30:    lambda =  1.20393   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 10.44627
+Grid value 31:    lambda = 1.096976   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 10.28845
+Grid value 32:    lambda = .9995238   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 10.14408
+Grid value 33:    lambda = .9107289   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 10.02368
+Grid value 34:    lambda = .8298222   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.909093
+Grid value 35:    lambda = .7561031   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.810083
+Grid value 36:    lambda =  .688933   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.725928
+Grid value 37:    lambda = .6277301   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.654719
+Grid value 38:    lambda = .5719643   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.594736
+Grid value 39:    lambda = .5211525   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.544438
+Grid value 40:    lambda = .4748548   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.502459
+Grid value 41:    lambda =   .43267   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.467595
+Grid value 42:    lambda = .3942328   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.438787
+Grid value 43:    lambda = .3592102   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.415113
+Grid value 44:    lambda =  .327299   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.408793
+Grid value 45:    lambda = .2982226   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.415818
+Grid value 46:    lambda = .2717294   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.424484
+Grid value 47:    lambda = .2475897   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.434331
+Grid value 48:    lambda = .2255945   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.444982
+... cross-validation complete ... minimum found
+
+alpha 3 of 4: alpha = .4
+
+5-fold cross-validation with 126 lambdas ...
+Grid value 1:     lambda = 15.91525   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 2:     lambda = 14.50138   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 3:     lambda = 13.21312   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 4:     lambda =  12.0393   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 5:     lambda = 10.96976   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 6:     lambda = 9.995238   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 7:     lambda = 9.107289   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 8:     lambda = 8.298222   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 9:     lambda = 7.561031   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 10:    lambda =  6.88933   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 11:    lambda = 6.277301   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 12:    lambda = 5.719643   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 13:    lambda = 5.211525   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 14:    lambda = 4.748548   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9595
+Grid value 15:    lambda =   4.3267   no. of nonzero coef. =       0
+Folds: 1...5   CVF = 11.95789
+Grid value 16:    lambda = 3.978811   no. of nonzero coef. =       0
+Folds: 1...5   CVF =  11.9286
+Grid value 17:    lambda = 3.625345   no. of nonzero coef. =       1
+Folds: 1...5   CVF = 11.83982
+Grid value 18:    lambda = 3.303279   no. of nonzero coef. =       1
+Folds: 1...5   CVF = 11.69478
+Grid value 19:    lambda = 3.009825   no. of nonzero coef. =       1
+Folds: 1...5   CVF = 11.53543
+Grid value 20:    lambda =  2.74244   no. of nonzero coef. =       1
+Folds: 1...5   CVF = 11.37936
+Grid value 21:    lambda =  2.49881   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 11.22297
+Grid value 22:    lambda = 2.276822   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 11.05642
+Grid value 23:    lambda = 2.273607   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 11.05392
+Grid value 24:    lambda = 2.071626   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 10.88727
+Grid value 25:    lambda = 1.887588   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 10.71926
+Grid value 26:    lambda =   1.7199   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 10.56267
+Grid value 27:    lambda = 1.591525   no. of nonzero coef. =       2
+Folds: 1...5   CVF =   10.441
+Grid value 28:    lambda = 1.450138   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 10.30578
+Grid value 29:    lambda = 1.321312   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 10.18212
+Grid value 30:    lambda =  1.20393   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 10.06979
+Grid value 31:    lambda = 1.096976   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.968418
+Grid value 32:    lambda = .9995238   no. of nonzero coef. =       2
+Folds: 1...5   CVF =  9.87752
+Grid value 33:    lambda = .9107289   no. of nonzero coef. =       2
+Folds: 1...5   CVF =  9.79654
+Grid value 34:    lambda = .8298222   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.724856
+Grid value 35:    lambda = .7561031   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.661803
+Grid value 36:    lambda =  .688933   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.606694
+Grid value 37:    lambda = .6277301   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.558886
+Grid value 38:    lambda = .5719643   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.517716
+Grid value 39:    lambda = .5211525   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.482471
+Grid value 40:    lambda = .4748548   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.472509
+Grid value 41:    lambda =   .43267   no. of nonzero coef. =       2
+Folds: 1...5   CVF =  9.46659
+Grid value 42:    lambda = .3942328   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.463868
+Grid value 43:    lambda = .3592102   no. of nonzero coef. =       2
+Folds: 1...5   CVF =  9.46382
+Grid value 44:    lambda =  .327299   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.465976
+Grid value 45:    lambda = .2982226   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.469917
+Grid value 46:    lambda = .2717294   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.475272
+Grid value 47:    lambda = .2475897   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.481718
+Grid value 48:    lambda = .2255945   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 9.488974
+... cross-validation complete ... minimum found
+
+alpha 4 of 4: alpha = .1
+
+5-fold cross-validation with 126 lambdas ...
+Grid value 1:     lambda = 15.91525   no. of nonzero coef. =       0
+Folds: 1...5   CVF = 11.95262
+Grid value 2:     lambda = 14.50138   no. of nonzero coef. =       1
+Folds: 1...5   CVF =  11.9319
+Grid value 3:     lambda = 13.21312   no. of nonzero coef. =       1
+Folds: 1...5   CVF = 11.89648
+Grid value 4:     lambda =  12.0393   no. of nonzero coef. =       1
+Folds: 1...5   CVF =  11.8539
+Grid value 5:     lambda = 10.96976   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 11.80724
+Grid value 6:     lambda = 9.995238   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 11.74983
+Grid value 7:     lambda = 9.107289   no. of nonzero coef. =       2
+Folds: 1...5   CVF =  11.6814
+Grid value 8:     lambda = 8.298222   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 11.60702
+Grid value 9:     lambda = 7.561031   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 11.52922
+Grid value 10:    lambda =  6.88933   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 11.44815
+Grid value 11:    lambda = 6.277301   no. of nonzero coef. =       2
+Folds: 1...5   CVF = 11.36391
+Grid value 12:    lambda = 5.719643   no. of nonzero coef. =       3
+Folds: 1...5   CVF =  11.2738
+Grid value 13:    lambda = 5.211525   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 11.18085
+Grid value 14:    lambda = 4.748548   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 11.08612
+Grid value 15:    lambda =   4.3267   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 10.99007
+Grid value 16:    lambda = 3.978811   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 10.90279
+Grid value 17:    lambda = 3.625345   no. of nonzero coef. =       3
+Folds: 1...5   CVF =  10.8056
+Grid value 18:    lambda = 3.303279   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 10.70858
+Grid value 19:    lambda = 3.009825   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 10.61231
+Grid value 20:    lambda =  2.74244   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 10.51733
+Grid value 21:    lambda =  2.49881   no. of nonzero coef. =       3
+Folds: 1...5   CVF =  10.4242
+Grid value 22:    lambda = 2.276822   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 10.33344
+Grid value 23:    lambda = 2.273607   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 10.33208
+Grid value 24:    lambda = 2.071626   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 10.24423
+Grid value 25:    lambda = 1.887588   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 10.15969
+Grid value 26:    lambda =   1.7199   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 10.07886
+Grid value 27:    lambda = 1.591525   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 10.01455
+Grid value 28:    lambda = 1.450138   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 9.941351
+Grid value 29:    lambda = 1.321312   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 9.872646
+Grid value 30:    lambda =  1.20393   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 9.812485
+Grid value 31:    lambda = 1.096976   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 9.765021
+Grid value 32:    lambda = .9995238   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 9.722448
+Grid value 33:    lambda = .9107289   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 9.684677
+Grid value 34:    lambda = .8298222   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 9.651564
+Grid value 35:    lambda = .7561031   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 9.622922
+Grid value 36:    lambda =  .688933   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 9.598526
+Grid value 37:    lambda = .6277301   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 9.578122
+Grid value 38:    lambda = .5719643   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 9.561433
+Grid value 39:    lambda = .5211525   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 9.548169
+Grid value 40:    lambda = .4748548   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 9.538029
+Grid value 41:    lambda =   .43267   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 9.530713
+Grid value 42:    lambda = .3942328   no. of nonzero coef. =       3
+Folds: 1...5   CVF =  9.52592
+Grid value 43:    lambda = .3592102   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 9.523359
+Grid value 44:    lambda =  .327299   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 9.522747
+Grid value 45:    lambda = .2982226   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 9.523818
+Grid value 46:    lambda = .2717294   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 9.526318
+Grid value 47:    lambda = .2475897   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 9.530014
+Grid value 48:    lambda = .2255945   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 9.533917
+Grid value 49:    lambda = .2055533   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 9.538399
+Grid value 50:    lambda = .1872925   no. of nonzero coef. =       3
+Folds: 1...5   CVF = 9.543394
+... cross-validation complete ... minimum found
+
+Elastic net linear model                         No. of obs        =         40
+                                                 No. of covariates =          3
+Selection: Cross-validation                      No. of CV folds   =          5
+
+-------------------------------------------------------------------------------
+               |                               No. of      Out-of-      CV mean
+               |                              nonzero       sample   prediction
+alpha       ID |     Description      lambda    coef.    R-squared        error
+---------------+---------------------------------------------------------------
+1.000          |
+             1 |    first lambda    15.91525        0      -0.0610      11.9595
+            46 |   lambda before    .2717294        2       0.1666     9.393794
+          * 47 | selected lambda    .2475897        2       0.1666     9.393523
+            48 |    lambda after    .2255945        2       0.1655      9.40661
+            50 |     last lambda    .1872925        2       0.1630     9.434326
+---------------+---------------------------------------------------------------
+0.700          |
+            51 |    first lambda    15.91525        0      -0.0610      11.9595
+            98 |     last lambda    .2255945        2       0.1621     9.444982
+---------------+---------------------------------------------------------------
+0.400          |
+            99 |    first lambda    15.91525        0      -0.0610      11.9595
+           146 |     last lambda    .2255945        2       0.1582     9.488974
+---------------+---------------------------------------------------------------
+0.100          |
+           147 |    first lambda    15.91525        0      -0.0604     11.95262
+           196 |     last lambda    .1872925        3       0.1533     9.543394
+-------------------------------------------------------------------------------
+* alpha and lambda selected by cross-validation.
+
+. 
+. ********* 4.6 COMPARISON OF SHRINKAGE ESTIMATORS
+. 
+. * Estimate various models and store results
+. qui regress y x1 x2 x3
+
+. estimates store OLS
+
+. qui lasso linear y x1 x2 x3, selection(cv) folds(5) rseed(10101)
+
+. estimates store LASCV
+
+. qui lasso linear y x1 x2 x3, selection(adaptive) folds(5) rseed(10101)
+
+. estimates store LASADAPT
+
+. qui lasso linear y x1 x2 x3, selection(plugin) folds(5)
+
+. estimates store LASPLUG
+
+. qui elasticnet linear y x1 x2 x3, alpha(0) selection(cv) folds(5) rseed(10101)
+
+. estimates store RIDGECV
+
+. qui elasticnet linear y x1 x2 x3, alpha(0.9(0.05)1) rseed(10101) folds(5)
+
+. estimates store ELASTIC
+
+. 
+. * Compare in-sample fit and selected coefficients of various models
+. lassogof OLS LASCV LASADAPT LASPLUG RIDGECV ELASTIC
+
+Penalized coefficients
+-------------------------------------------------
+       Name |         MSE    R-squared        Obs
+------------+------------------------------------
+        OLS |    8.597403       0.2373         40
+      LASCV |    8.679274       0.2300         40
+   LASADAPT |    8.755573       0.2232         40
+    LASPLUG |    10.23264       0.0922         40
+    RIDGECV |     8.70562       0.2277         40
+    ELASTIC |    8.693386       0.2288         40
+-------------------------------------------------
+
+. lassocoef OLS LASCV LASADAPT LASPLUG RIDGECV ELASTIC, display(coef) nolegend  
+
+-------------------------------------------------------------------------------
+             |       OLS      LASCV   LASADAPT    LASPLUG    RIDGECV    ELASTIC
+-------------+-----------------------------------------------------------------
+          x1 |  1.555582   1.206056   1.462431   .3693423   1.011134   1.179972
+          x2 |  .4707111   .2715635                          .452667   .2705777
+          x3 | -.0256025                                    .0979251
+       _cons |  2.531396          0          0          0          0          0
+-------------------------------------------------------------------------------
+
+. 
+. ********** 4.7 SHRINKAGE FOR LOGIT, PROBIT AND POISSON MODELS
+. 
+. * Lasso for logit example
+. qui generate dy = y > 3
+
+. qui lasso logit dy x1 x2 x3, rseed(10101) folds(5)
+
+. lassoknots
+
+----------------------------------------------------------------------------------
+       |              No. of           |
+       |             nonzero   CV mean |       Variables (A)dded, (R)emoved,      
+    ID |   lambda      coef.  deviance |            or left (U)nchanged           
+-------+-------------------------------+------------------------------------------
+     2 | .2065674          1  1.407613 | A x1                                     
+  * 24 | .0266792          1  1.192646 | U                                        
+    26 | .0221495          2  1.192865 | A x2                                     
+    30 | .0152668          3  1.194545 | A x3                                     
+    31 | .0139106          3  1.195055 | U                                        
+----------------------------------------------------------------------------------
+* lambda selected by cross-validation.
+
+. 
+. * Lasso for count data example
+. qui generate ycount = rpoisson(exp(-1 + x1)) 
+
+. qui lasso poisson ycount x1 x2 x3, rseed(10101) folds(5)
+
+. lassoknots
+
+----------------------------------------------------------------------------------
+       |              No. of           |
+       |             nonzero   CV mean |       Variables (A)dded, (R)emoved,      
+    ID |   lambda      coef.  deviance |            or left (U)nchanged           
+-------+-------------------------------+------------------------------------------
+     2 | 1.012329          1  2.191141 | A x1                                     
+  * 25 |  .119132          1  .8257619 | U                                        
+    29 | .0821131          2  .8334985 | A x3                                     
+----------------------------------------------------------------------------------
+* lambda selected by cross-validation.
+
+. 
+. ********** CLOSE OUTPUT **********
+. 
+. * log close
+. * clear 
+. * exit
+. 
+end of do-file
+
+. exit, clear

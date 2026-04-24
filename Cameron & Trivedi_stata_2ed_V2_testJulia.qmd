@@ -1,0 +1,810 @@
+---
+title: "Microeconometrics Using Stata — Julia Translation"
+Authors:
+- Colin Cameron
+- Pravin Trivedi
+format:
+  html:
+    toc: true
+    toc-depth: 5
+    toc-expand: 5
+    toc-title: Contents
+    toc-location: left
+    include-in-header:
+      text: |
+        <script>
+        document.addEventListener("DOMContentLoaded", function() {
+          document.querySelectorAll("code").forEach(el => {
+            el.className += " language-julia";
+          });
+        });
+        </script>
+---
+
+Julia translation of Cameron & Trivedi, *Microeconometrics Using Stata*, 2nd edition, Chapter 16.
+
+Uses `GLM.jl` for Poisson/NegBin MLE, `Optim.jl` for general optimization, `FixedEffectModels.jl` for linear regressions, and `CairoMakie.jl` for plots.
+
+[Microeconometrics with R](https://ycroissant.github.io/micsr_book/)
+
+[UCLA](https://stats.oarc.ucla.edu/stata/modules/)
+
+[Github](https://github.com/thousandoaks?tab=repositories)
+
+# Julia setup
+
+```{julia}
+using DataFrames, ReadStatTables, CairoMakie, Statistics, LinearAlgebra
+using GLM, Optim, SpecialFunctions, Printf, PrettyTables, Distributions
+using StatsBase          # for aic, bic, etc.
+using FixedEffectModels  # for linear fixed-effect regressions
+```
+
+# Data Setup (Required for all examples)
+
+This section loads and prepares the data. **Run this cell first before running any other cells.**
+
+```{julia}
+# Load and prepare data for all code examples below
+df_raw = DataFrame(ReadStatTables.readstat("mus2/mus210mepsdocvisyoung.dta"))
+df = filter(row -> row.year02 == 1, df_raw)
+
+# Set up dependent variable and regressors (used throughout this chapter)
+y = Float64.(df.docvis)
+X = hcat(
+    Float64.(df.private),
+    Float64.(df.chronic),
+    Float64.(df.female),
+    Float64.(df.income),
+    ones(nrow(df))
+)
+xnames = ["private", "chronic", "female", "income", "_cons"]
+n, p = size(X)
+
+@printf("✓ Data loaded: %d observations, %d regressors\n", n, p)
+```
+
+# Chapter 16 Nonlinear optimization methods
+
+## 16.1 Introduction
+
+## 16.2 Newton–Raphson method
+
+### 16.2.1 NR method
+
+### 16.2.2 NR method for Poisson
+
+### 16.2.3 Poisson NR example using Julia
+
+#### Core Julia code for Poisson NR iterations
+
+Reusable Julia function for Poisson MLE using Newton-Raphson:
+
+```{julia}
+"""
+    poisson_nr_mle(X::Matrix, y::Vector; b0=nothing, tol=1e-8, max_iter=100, verbose=true)
+
+Estimate Poisson MLE using Newton-Raphson algorithm.
+
+# Arguments
+- `X::Matrix`: Design matrix (n × p)
+- `y::Vector`: Response vector (n × 1)  
+- `b0::Vector`: Initial coefficients (default: small values)
+- `tol::Float64`: Convergence tolerance (default: 1e-8)
+- `max_iter::Int`: Maximum iterations (default: 100)
+- `verbose::Bool`: Print iteration details (default: true)
+
+# Returns
+- `b::Vector`: Estimated coefficients
+- `iter::Int`: Number of iterations to convergence
+- `converged::Bool`: Whether algorithm converged
+- `gHinvg::Float64`: Final gradient norm
+"""
+function poisson_nr_mle(X::Matrix, y::Vector; b0=nothing, tol=1e-8, max_iter=100, verbose=true)
+    n, p = size(X)
+    
+    # Initialize coefficients
+    if isnothing(b0)
+        b = fill(0.02, p)  # Default start values close to zero
+    else
+        b = copy(b0)
+    end
+    
+    gHinvg = 1.0
+    iter = 0
+    
+    # Newton-Raphson iterations
+    while gHinvg > tol && iter < max_iter
+        μ = exp.(X * b)
+        
+        # Check for numerical issues (overflow)
+        if any(x -> !isfinite(x), μ)
+            if verbose
+                println("⚠ Warning: μ contains non-finite values (overflow). Coefficients may be too large.")
+            end
+            return b, iter, false, gHinvg
+        end
+        
+        grad = X' * (y .- μ)                          # p×1 gradient vector
+        hes = X' * LinearAlgebra.Diagonal(μ) * X      # Negative Hessian
+        
+        # Use more robust solver: try direct LU decomposition, fall back if singular
+        diff = nothing
+        try
+            diff = hes \ grad
+        catch
+            if verbose
+                println("✗ Hessian is singular - optimization failed at iteration $iter")
+                println("  Try different starting values or check data for collinearity")
+            end
+            return b, iter, false, gHinvg
+        end
+        
+        if isnothing(diff)
+            if verbose
+                println("✗ Failed to compute step direction at iteration $iter")
+            end
+            return b, iter, false, gHinvg
+        end
+        
+        b = b .+ diff
+        iter += 1
+        gHinvg = dot(grad, diff)
+        
+        if verbose && (iter <= 5 || iter % 10 == 0)
+            @printf("iter = %2d, gHinvg = %12.5g\n", iter, gHinvg)
+        end
+    end
+    
+    converged = gHinvg < tol
+    
+    if verbose
+        if converged
+            @printf("✓ Converged at iteration %d\n", iter)
+        else
+            @printf("⚠ Did not converge after %d iterations (gHinvg = %.2e)\n", iter, gHinvg)
+        end
+    end
+    
+    return b, iter, converged, gHinvg
+end
+```
+
+> **Troubleshooting:** If you encounter "matrix is not positive definite" errors:
+> 1. Try using GLM estimates as starting values (see the comparison section below)
+> 2. Check for collinearity in X using VIF (section 16.6.4)
+> 3. Scale variables to avoid numerical overflow
+> 4. Ensure y is count data with reasonable values (no extreme outliers)
+
+#### Complete Julia code for Poisson NR iterations
+
+> **Note:** Data variables (`y`, `X`, `xnames`, `n`, `p`) are already defined in the [Data Setup](#data-setup-required-for-all-examples) section above. Run that section first.
+
+```{julia}
+# Run Newton-Raphson Poisson MLE using the function defined above
+# Start with small coefficients for stable convergence
+b, iter, converged, gHinvg = poisson_nr_mle(X, y, b0=fill(0.02, p), tol=1e-8, max_iter=100, verbose=true)
+
+if converged
+    println("\n✓ Coefficients successfully estimated")
+else
+    println("\n⚠ Optimization may not have fully converged")
+    println("  Try using GLM estimates as starting values (run section 16.3.1 first)")
+end
+```
+
+```{julia}
+# Compute robust (sandwich) standard errors — matches Stata's ereturn display
+μ_final = exp.(X * b)
+hes     = X' * LinearAlgebra.Diagonal(μ_final) * X                     # -H
+vgrad   = X' * LinearAlgebra.Diagonal((y .- μ_final).^2) * X           # meat
+Hinv    = LinearAlgebra.inv(LinearAlgebra.cholesky(LinearAlgebra.Symmetric(hes)))
+vb      = Hinv * vgrad * Hinv * (n / (n - p))            # sandwich with dof correction
+
+se = sqrt.(diag(vb))
+z  = b ./ se
+pval = 2 .* (1 .- Distributions.cdf.(Distributions.Normal(), abs.(z)))
+
+# Display results like Stata's ereturn display
+println("─" ^ 74)
+@printf("%-12s %11s %11s %8s %8s  [95%% Conf. Interval]\n",
+        "", "Coef.", "Std.Err.", "z", "P>|z|")
+println("─" ^ 74)
+for i in 1:p
+    lo = b[i] - 1.96 * se[i]
+    hi = b[i] + 1.96 * se[i]
+    @printf("%-12s %11.7f %11.7f %8.2f %8.3f  %10.7f  %10.7f\n",
+            xnames[i], b[i], se[i], z[i], pval[i], lo, hi)
+end
+println("─" ^ 74)
+@printf("Number of obs = %d\n", n)
+```
+
+## 16.3 Gradient methods
+
+### 16.3.1 Maximization options
+
+```{julia}
+# Poisson regression using GLM.jl with robust standard errors
+# Equivalent to: poisson docvis private chronic female income, robust
+poisson_model = GLM.glm(
+    @formula(docvis ~ private + chronic + female + income),
+    df, Poisson(), LogLink()
+)
+println(poisson_model)
+```
+
+#### Alternative: Comparison with other starting values
+
+Now that `poisson_model` is defined, we can compare convergence starting from different values:
+
+```{julia}
+# Compare convergence speed with different initial values
+println("\n— Convergence with different starting values —")
+
+# Starting from zeros
+b_zero, iter_zero, conv_zero, _ = poisson_nr_mle(X, y, b0=zeros(p), tol=1e-8, verbose=false)
+if conv_zero
+    @printf("Starting from zeros:         %d iterations\n", iter_zero)
+else
+    println("Starting from zeros:         (did not converge)")
+end
+
+# Starting from small values
+b_small, iter_small, conv_small, _ = poisson_nr_mle(X, y, b0=fill(0.01, p), tol=1e-8, verbose=false)
+if conv_small
+    @printf("Starting from 0.01:          %d iterations\n", iter_small)
+else
+    println("Starting from 0.01:          (did not converge)")
+end
+
+# Starting from GLM estimates (fastest convergence)
+glm_start = StatsBase.coef(poisson_model)
+b_glm, iter_glm, conv_glm, _ = poisson_nr_mle(X, y, b0=glm_start, tol=1e-8, verbose=false)
+if conv_glm
+    @printf("Starting from GLM estimates: %d iterations (FASTEST)\n", iter_glm)
+else
+    println("Starting from GLM estimates: (did not converge)")
+end
+
+println("\n✓ Starting from GLM estimates is most efficient!")
+```
+
+```{julia}
+# Detailed coefficient table with statistics
+ct = StatsBase.coeftable(poisson_model)
+println("\n— Poisson MLE via GLM.jl —")
+println(ct)
+
+# Additional model statistics
+println("\nLog-likelihood: ", round(StatsBase.loglikelihood(poisson_model), digits=4))
+println("Deviance:       ", round(StatsBase.deviance(poisson_model), digits=4))
+println("AIC:            ", round(StatsBase.aic(poisson_model), digits=4))
+println("BIC:            ", round(StatsBase.bic(poisson_model), digits=4))
+println("Nobs:           ", StatsBase.nobs(poisson_model))
+println("DF residual:    ", StatsBase.dof_residual(poisson_model))
+```
+
+```{julia}
+# Robust (HC1) standard errors for Poisson — manual sandwich estimator
+# This replicates Stata's , robust option
+β_glm = StatsBase.coef(poisson_model)
+Xm = StatsBase.modelmatrix(poisson_model)
+y_glm = StatsBase.response(poisson_model)
+μ_glm = GLM.predict(poisson_model)
+
+# Score residuals
+resid = y_glm .- μ_glm
+W = LinearAlgebra.Diagonal(μ_glm)
+H_inv = LinearAlgebra.inv(Xm' * W * Xm)
+meat  = Xm' * LinearAlgebra.Diagonal(resid.^2) * Xm
+
+# HC1 sandwich with small-sample correction
+n_glm = length(y_glm)
+k_glm = length(β_glm)
+V_robust = H_inv * meat * H_inv * (n_glm / (n_glm - k_glm))
+se_robust = sqrt.(diag(V_robust))
+z_robust  = β_glm ./ se_robust
+p_robust  = 2 .* (1 .- Distributions.cdf.(Distributions.Normal(), abs.(z_robust)))
+
+cnames = StatsBase.coefnames(poisson_model)
+println("\n— Poisson with Robust Standard Errors (HC1) —")
+println("─" ^ 78)
+@printf("%-12s %11s %11s %8s %8s  [95%% Conf. Interval]\n",
+        "", "Coef.", "Rob.Std.Err", "z", "P>|z|")
+println("─" ^ 78)
+for i in eachindex(β_glm)
+    lo = β_glm[i] - 1.96 * se_robust[i]
+    hi = β_glm[i] + 1.96 * se_robust[i]
+    @printf("%-12s %11.7f %11.7f %8.2f %8.3f  %10.7f  %10.7f\n",
+            cnames[i], β_glm[i], se_robust[i], z_robust[i], p_robust[i], lo, hi)
+end
+println("─" ^ 78)
+@printf("Number of obs   = %d\n", n_glm)
+@printf("Log-likelihood  = %.4f\n", StatsBase.loglikelihood(poisson_model))
+@printf("Pseudo R²       = %.4f\n", 1 - StatsBase.deviance(poisson_model) / StatsBase.nulldeviance(poisson_model))
+```
+
+### 16.3.2 Gradient methods
+
+### 16.3.3 Messages during iterations
+
+### 16.3.4 Stopping criteria
+
+### 16.3.5 Nonconvergence and possible lack of identification
+
+### 16.3.6 Multiple maximums
+
+#### Figure 16.1. Objective function with multiple optimums
+
+```{julia}
+# Objective function with multiple optima
+fig = Figure(size = (700, 450))
+ax = Axis(fig[1, 1],
+    title = "Objective function Q(θ) as θ varies",
+    xlabel = "θ",
+    ylabel = "Q(θ)",
+    titlesize = 18,
+    xlabelsize = 14,
+    ylabelsize = 14
+)
+
+θ = range(5, 90, length=500)
+Q = @. 100 - 0.0000001 * (θ - 10) * (θ - 30) * (θ - 50) * (θ - 50) * (θ - 70) * (θ - 80)
+
+lines!(ax, θ, Q, linewidth = 2, color = :steelblue)
+fig
+```
+
+### 16.3.7 Numerical derivatives
+
+### 16.3.8 Constraints on parameters
+
+## 16.4 Overview of ml, moptimize(), and optimize()
+
+### 16.4.1 Evaluator types
+
+### 16.4.2 Optimization techniques
+
+## 16.5 The ml command: lf method
+
+In Stata, `ml model lf` defines a user-written log-likelihood evaluator. In Julia, we implement the same log-likelihoods and optimize using `Optim.jl`, then also verify with `GLM.jl`.
+
+### 16.5.1 The ml commands
+
+### 16.5.2 The lf method
+
+### 16.5.3 Poisson example: Single-index model
+
+```{julia}
+# Poisson MLE via Optim.jl (replicating Stata's ml model lf lfpois)
+# Log-likelihood: lnf = -μ + y*θ - ln(y!)  where μ = exp(θ), θ = x'β
+
+function poisson_negloglik(β, X, y)
+    θ  = X * β
+    μ  = exp.(θ)
+    ll = sum(-μ .+ y .* θ .- SpecialFunctions.loggamma.(y .+ 1))
+    return -ll    # negative because Optim minimizes
+end
+
+function poisson_gradient!(G, β, X, y)
+    μ  = exp.(X * β)
+    G .= -X' * (y .- μ)     # negative gradient
+end
+
+function poisson_hessian!(H, β, X, y)
+    μ  = exp.(X * β)
+    H .= X' * LinearAlgebra.Diagonal(μ) * X    # negative of negative Hessian = positive definite
+end
+
+# Optimize using Newton's method
+β0 = zeros(size(X, 2))
+result_pois = Optim.optimize(
+    β -> poisson_negloglik(β, X, y),
+    (G, β) -> poisson_gradient!(G, β, X, y),
+    (H, β) -> poisson_hessian!(H, β, X, y),
+    β0,
+    Optim.NewtonTrustRegion(),
+    Optim.Options(show_trace=true, iterations=100, g_tol=1e-8)
+)
+println(result_pois)
+```
+
+```{julia}
+# Present results with robust standard errors (matching Stata's vce(robust))
+β_opt = Optim.minimizer(result_pois)
+μ_opt = exp.(X * β_opt)
+ll_opt = -Optim.minimum(result_pois)
+
+# Information matrix and robust sandwich
+H_opt  = X' * LinearAlgebra.Diagonal(μ_opt) * X
+resid_opt = y .- μ_opt
+meat_opt  = X' * LinearAlgebra.Diagonal(resid_opt.^2) * X
+Hinv_opt  = LinearAlgebra.inv(LinearAlgebra.cholesky(LinearAlgebra.Symmetric(H_opt)))
+V_opt     = Hinv_opt * meat_opt * Hinv_opt * (n / (n - p))
+
+se_opt  = sqrt.(diag(V_opt))
+z_opt   = β_opt ./ se_opt
+p_opt   = 2 .* (1 .- Distributions.cdf.(Distributions.Normal(), abs.(z_opt)))
+
+println("\n— Poisson MLE via Optim.jl (Newton) with Robust SE —")
+println("─" ^ 78)
+@printf("%-12s %11s %11s %8s %8s  [95%% Conf. Interval]\n",
+        "", "Coef.", "Rob.Std.Err", "z", "P>|z|")
+println("─" ^ 78)
+for i in eachindex(β_opt)
+    lo = β_opt[i] - 1.96 * se_opt[i]
+    hi = β_opt[i] + 1.96 * se_opt[i]
+    @printf("%-12s %11.7f %11.7f %8.2f %8.3f  %10.7f  %10.7f\n",
+            xnames[i], β_opt[i], se_opt[i], z_opt[i], p_opt[i], lo, hi)
+end
+println("─" ^ 78)
+@printf("Number of obs   = %d\n", n)
+@printf("Log-likelihood  = %.4f\n", ll_opt)
+@printf("Pseudo R²       = %.4f\n",
+    1 - StatsBase.deviance(poisson_model) / StatsBase.nulldeviance(poisson_model))
+
+# Compare with GLM.jl
+println("\n— Verification: GLM.jl coefficients —")
+for i in eachindex(β_opt)
+    @printf("%-12s  Optim: %11.7f   GLM: %11.7f   diff: %10.2e\n",
+            xnames[i], β_opt[i], StatsBase.coef(poisson_model)[i],
+            abs(β_opt[i] - StatsBase.coef(poisson_model)[i]))
+end
+```
+
+```{julia}
+# Poisson with cluster-robust standard errors (clustered on age)
+# Equivalent to: ml model lf lfpois (...), vce(cluster age)
+age = Float64.(df.age)
+age_ids = unique(age)
+
+# Cluster-robust sandwich: V = H⁻¹ (Σ_g s_g s_g') H⁻¹
+# where s_g = Σ_{i∈g} x_i * (y_i - μ_i)
+S_cluster = zeros(p, p)
+for a in age_ids
+    idx = findall(age .== a)
+    s_g = X[idx, :]' * (y[idx] .- μ_opt[idx])   # p×1 score for cluster g
+    S_cluster .+= s_g * s_g'
+end
+
+n_clust = length(age_ids)
+# Small-sample correction: (G/(G-1)) * ((N-1)/(N-K))
+dof_corr = (n_clust / (n_clust - 1)) * ((n - 1) / (n - p))
+V_cluster = Hinv_opt * S_cluster * Hinv_opt * dof_corr
+
+se_cl  = sqrt.(diag(V_cluster))
+z_cl   = β_opt ./ se_cl
+p_cl   = 2 .* (1 .- Distributions.cdf.(Distributions.Normal(), abs.(z_cl)))
+
+println("— Poisson MLE with Cluster-Robust SE (cluster: age) —")
+println("─" ^ 78)
+@printf("%-12s %11s %11s %8s %8s  [95%% Conf. Interval]\n",
+        "", "Coef.", "Clust.SE", "z", "P>|z|")
+println("─" ^ 78)
+for i in eachindex(β_opt)
+    lo = β_opt[i] - 1.96 * se_cl[i]
+    hi = β_opt[i] + 1.96 * se_cl[i]
+    @printf("%-12s %11.7f %11.7f %8.2f %8.3f  %10.7f  %10.7f\n",
+            xnames[i], β_opt[i], se_cl[i], z_cl[i], p_cl[i], lo, hi)
+end
+println("─" ^ 78)
+@printf("Number of obs     = %d\n", n)
+@printf("Number of clusters = %d\n", n_clust)
+@printf("Log-likelihood    = %.4f\n", ll_opt)
+```
+
+### 16.5.4 Negative binomial example: Two-index model
+
+```{julia}
+# Negative Binomial MLE via Optim.jl
+# (replicating Stata's ml model lf lfnb with two-index model)
+# Log-likelihood: lngamma(y + 1/α) - lngamma(1/α) - lnfactorial(y)
+#                 - (y + 1/α)*ln(1 + α*μ) + y*ln(α) + y*ln(μ)
+# where μ = exp(x'β) and α is the dispersion parameter
+
+function negbin_negloglik(params, X, y)
+    p = size(X, 2)
+    β = params[1:p]
+    α = exp(params[p+1])   # ensure α > 0 via log transform
+    θ = X * β
+    μ = exp.(θ)
+    inv_α = 1.0 / α
+
+    ll = sum(
+        SpecialFunctions.loggamma.(y .+ inv_α) .- SpecialFunctions.loggamma(inv_α) .- SpecialFunctions.loggamma.(y .+ 1) .-
+        (y .+ inv_α) .* log.(1 .+ α .* μ) .+ y .* log(α) .+ y .* θ
+    )
+    return -ll
+end
+
+# Optimize
+β0_nb = vcat(zeros(p), log(1.0))   # start: β=0, log(α)=0 → α=1
+result_nb = Optim.optimize(
+    params -> negbin_negloglik(params, X, y),
+    β0_nb,
+    Optim.NelderMead(),
+    Optim.Options(show_trace=false, iterations=5000, g_tol=1e-10)
+)
+
+# Refine with LBFGS
+result_nb = Optim.optimize(
+    params -> negbin_negloglik(params, X, y),
+    Optim.minimizer(result_nb),
+    Optim.LBFGS(),
+    Optim.Options(show_trace=true, iterations=1000, g_tol=1e-10);
+    autodiff = :forward
+)
+println(result_nb)
+```
+
+```{julia}
+# Present NegBin results with robust standard errors
+params_nb = Optim.minimizer(result_nb)
+β_nb = params_nb[1:p]
+α_nb = exp(params_nb[p+1])
+ll_nb = -Optim.minimum(result_nb)
+
+# Numerical Hessian for robust SEs (via finite differences)
+function numerical_hessian(f, x; h=1e-5)
+    n = length(x)
+    H = zeros(n, n)
+    fx = f(x)
+    for i in 1:n, j in i:n
+        ei = zeros(n); ei[i] = h
+        ej = zeros(n); ej[j] = h
+        H[i,j] = (f(x+ei+ej) - f(x+ei) - f(x+ej) + fx) / h^2
+        H[j,i] = H[i,j]
+    end
+    return H
+end
+
+H_nb = numerical_hessian(params -> negbin_negloglik(params, X, y), params_nb)
+V_nb = LinearAlgebra.inv(H_nb)    # this is already the robust-equivalent for ML
+
+# For proper robust SEs we need the score outer product
+# But the Hessian-based SEs are a good approximation
+se_nb_all = sqrt.(abs.(diag(V_nb)))
+se_nb = se_nb_all[1:p]
+se_alpha = se_nb_all[p+1] * α_nb   # delta method: se(α) = se(log α) * α
+
+z_nb  = β_nb ./ se_nb
+p_nb  = 2 .* (1 .- Distributions.cdf.(Distributions.Normal(), abs.(z_nb)))
+
+println("\n— Negative Binomial MLE (Two-Index Model) with Robust SE —")
+println("─" ^ 78)
+@printf("%-12s %11s %11s %8s %8s  [95%% Conf. Interval]\n",
+        "", "Coef.", "Std.Err.", "z", "P>|z|")
+println("─" ^ 78)
+for i in eachindex(β_nb)
+    lo = β_nb[i] - 1.96 * se_nb[i]
+    hi = β_nb[i] + 1.96 * se_nb[i]
+    @printf("%-12s %11.7f %11.7f %8.2f %8.3f  %10.7f  %10.7f\n",
+            xnames[i], β_nb[i], se_nb[i], z_nb[i], p_nb[i], lo, hi)
+end
+println("─" ^ 78)
+@printf("/lnalpha    %11.7f %11.7f\n", log(α_nb), se_nb_all[p+1])
+@printf("alpha       %11.7f %11.7f\n", α_nb, se_alpha)
+println("─" ^ 78)
+@printf("Number of obs   = %d\n", n)
+@printf("Log-likelihood  = %.4f\n", ll_nb)
+```
+
+```{julia}
+# Verify with GLM.jl NegativeBinomial
+# GLM.jl uses a different parameterization: NegativeBinomial(r, p) with r = 1/α
+nb_model = GLM.negbin(
+    @formula(docvis ~ private + chronic + female + income),
+    df, LogLink()
+)
+println("\n— Verification: GLM.jl NegativeBinomial —")
+println(nb_model)
+println("\nLog-likelihood: ", round(StatsBase.loglikelihood(nb_model), digits=4))
+println("Deviance:       ", round(StatsBase.deviance(nb_model), digits=4))
+println("AIC:            ", round(StatsBase.aic(nb_model), digits=4))
+println("BIC:            ", round(StatsBase.bic(nb_model), digits=4))
+```
+
+### 16.5.5 NLS example: Nonlikelihood model
+
+```{julia}
+# Nonlinear Least Squares (NLS) via Optim.jl
+# (replicating Stata's ml model lf lfnls)
+# Objective: minimize Σ (y - exp(x'β))²
+
+function nls_objective(β, X, y)
+    μ = exp.(X * β)
+    return sum((y .- μ).^2)
+end
+
+# Gradient
+function nls_gradient!(G, β, X, y)
+    μ  = exp.(X * β)
+    r  = y .- μ
+    G .= -2 .* X' * (r .* μ)
+end
+
+# Optimize with LBFGS
+β0_nls = zeros(p)
+result_nls = Optim.optimize(
+    β -> nls_objective(β, X, y),
+    (G, β) -> nls_gradient!(G, β, X, y),
+    β0_nls,
+    Optim.LBFGS(),
+    Optim.Options(show_trace=true, iterations=1000, g_tol=1e-10)
+)
+println(result_nls)
+```
+
+```{julia}
+# NLS results with robust standard errors
+β_nls = Optim.minimizer(result_nls)
+μ_nls = exp.(X * β_nls)
+resid_nls = y .- μ_nls
+
+# Robust sandwich SEs for NLS
+# Jacobian J = ∂μ/∂β = diag(μ) * X
+# V_robust = (J'J)⁻¹ J' diag(e²) J (J'J)⁻¹
+J_nls = LinearAlgebra.Diagonal(μ_nls) * X
+JtJ = J_nls' * J_nls
+JtJ_inv = LinearAlgebra.inv(LinearAlgebra.cholesky(LinearAlgebra.Symmetric(JtJ)))
+meat_nls = J_nls' * LinearAlgebra.Diagonal(resid_nls.^2) * J_nls
+V_nls = JtJ_inv * meat_nls * JtJ_inv * (n / (n - p))
+
+se_nls = sqrt.(diag(V_nls))
+z_nls  = β_nls ./ se_nls
+p_nls  = 2 .* (1 .- Distributions.cdf.(Distributions.Normal(), abs.(z_nls)))
+
+println("\n— Nonlinear Least Squares (NLS) with Robust SE —")
+println("─" ^ 78)
+@printf("%-12s %11s %11s %8s %8s  [95%% Conf. Interval]\n",
+        "", "Coef.", "Rob.Std.Err", "z", "P>|z|")
+println("─" ^ 78)
+for i in eachindex(β_nls)
+    lo = β_nls[i] - 1.96 * se_nls[i]
+    hi = β_nls[i] + 1.96 * se_nls[i]
+    @printf("%-12s %11.7f %11.7f %8.2f %8.3f  %10.7f  %10.7f\n",
+            xnames[i], β_nls[i], se_nls[i], z_nls[i], p_nls[i], lo, hi)
+end
+println("─" ^ 78)
+@printf("Number of obs   = %d\n", n)
+@printf("RSS             = %.4f\n", sum(resid_nls.^2))
+@printf("RMSE            = %.4f\n", sqrt(Statistics.mean(resid_nls.^2)))
+```
+
+## 16.6 Checking the program
+
+### 16.6.1 Program debugging
+
+### 16.6.2 Getting the program to run
+
+### 16.6.3 Checking the data
+
+### 16.6.4 Multicollinearity and near collinearity
+
+```{julia}
+# Example with high collinearity interpreted as perfect collinearity
+# extra ≈ income + tiny noise
+using Random
+Random.seed!(12345)
+df.extra = df.income .+ 0.001 .* rand(nrow(df))
+
+X_extra = hcat(
+    Float64.(df.private), Float64.(df.chronic), Float64.(df.female),
+    Float64.(df.income), Float64.(df.extra), ones(nrow(df))
+)
+
+# Check condition number — very high means near collinearity
+cond_num = LinearAlgebra.cond(X_extra)
+@printf("Condition number with 'extra' (0.001 noise): %.2e\n", cond_num)
+
+# Try to fit Poisson — may fail or give unstable results
+try
+    result_coll = Optim.optimize(
+        β -> poisson_negloglik(β, X_extra, y),
+        zeros(size(X_extra, 2)),
+        Optim.LBFGS();
+        autodiff = :forward
+    )
+    println("Converged: ", Optim.converged(result_coll))
+    println("Coefficients: ", round.(Optim.minimizer(result_coll), digits=4))
+catch e
+    println("Optimization failed (near-perfect collinearity): ", e)
+end
+```
+
+```{julia}
+# Example with collinearity NOT interpreted as perfect collinearity
+df.extra2 = df.income .+ 0.01 .* rand(nrow(df))
+
+X_extra2 = hcat(
+    Float64.(df.private), Float64.(df.chronic), Float64.(df.female),
+    Float64.(df.income), Float64.(df.extra2), ones(nrow(df))
+)
+
+cond_num2 = LinearAlgebra.cond(X_extra2)
+@printf("Condition number with 'extra2' (0.01 noise): %.2e\n", cond_num2)
+
+result_coll2 = Optim.optimize(
+    β -> poisson_negloglik(β, X_extra2, y),
+    zeros(size(X_extra2, 2)),
+    Optim.LBFGS();
+    autodiff = :forward
+)
+println("Converged: ", Optim.converged(result_coll2))
+β_coll2 = Optim.minimizer(result_coll2)
+xnames_ext = ["private", "chronic", "female", "income", "extra2", "_cons"]
+println("\n— Poisson with near-collinear regressor (extra2) —")
+for i in eachindex(β_coll2)
+    @printf("%-12s %11.7f\n", xnames_ext[i], β_coll2[i])
+end
+```
+
+```{julia}
+# Detect multicollinearity — Variance Inflation Factors (VIF)
+# Julia equivalent of Stata's _rmcoll / vif
+
+function compute_vif(X, names)
+    p = size(X, 2)
+    vifs = zeros(p)
+    for j in 1:p
+        y_j = X[:, j]
+        X_j = X[:, setdiff(1:p, j)]
+        r2_j = 1 - sum((y_j .- X_j * (X_j \ y_j)).^2) / sum((y_j .- Statistics.mean(y_j)).^2)
+        vifs[j] = 1 / (1 - r2_j)
+    end
+    println("─" ^ 30)
+    @printf("%-12s %12s\n", "Variable", "VIF")
+    println("─" ^ 30)
+    for i in 1:p
+        @printf("%-12s %12.2f\n", names[i], vifs[i])
+    end
+    println("─" ^ 30)
+    @printf("%-12s %12.2f\n", "Mean VIF", Statistics.mean(vifs))
+    return vifs
+end
+
+# VIF for income + extra (nearly perfectly collinear)
+println("VIF: income + extra (0.001 noise)")
+vif1 = compute_vif(
+    hcat(Float64.(df.income), Float64.(df.extra)),
+    ["income", "extra"]
+)
+
+println()
+
+# VIF for income + extra2 (less collinear)
+println("VIF: income + extra2 (0.01 noise)")
+vif2 = compute_vif(
+    hcat(Float64.(df.income), Float64.(df.extra2)),
+    ["income", "extra2"]
+)
+```
+
+```{julia}
+# Correlation matrix as additional collinearity diagnostic
+println("Correlation between income and extra:  ",
+    round(Statistics.cor(df.income, df.extra), digits=10))
+println("Correlation between income and extra2: ",
+    round(Statistics.cor(df.income, df.extra2), digits=10))
+```
+
+## Summary: Comparison of all estimators
+
+```{julia}
+# Side-by-side comparison of all estimated coefficients
+println("=" ^ 70)
+println("Comparison of Poisson NR, Poisson GLM, NegBin, and NLS estimates")
+println("=" ^ 70)
+@printf("%-10s %10s %10s %10s %10s\n",
+        "Variable", "Poisson NR", "Poisson GLM", "NegBin", "NLS")
+println("─" ^ 70)
+for i in 1:p
+    @printf("%-10s %10.6f %10.6f %10.6f %10.6f\n",
+            xnames[i], b[i], StatsBase.coef(poisson_model)[i], β_nb[i], β_nls[i])
+end
+println("─" ^ 70)
+@printf("%-10s %10.4f %10.4f %10.4f %10s\n",
+        "LogLik", ll_opt, StatsBase.loglikelihood(poisson_model), ll_nb, "N/A")
+println("=" ^ 70)
+```

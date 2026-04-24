@@ -1,0 +1,4 @@
+d Files associated with text by A. Colin Cameron and Pravin K. Trivedi
+
+p mus2 Files for Microeconometrics Using Stata, Second Edition
+
