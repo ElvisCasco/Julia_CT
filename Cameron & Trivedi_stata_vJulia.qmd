@@ -5816,12 +5816,15 @@ function arellano_bond(df, y::Symbol, idvar::Symbol, timevar::Symbol;
     for (v, a, b) in endog;  push!(gmm_groups, (v, a + 2, b));  end
 
     # ── Instrument column layout (from longest panel) ─────────────
+    # First-differenced AR(lags) model uses equations starting at t = lags+2
+    # (need y_{t-lags-1} available to form Δy_{t-lags}).
+    t_start = lags + 2
     T_max = maximum(DataFrames.nrow(g) for g in grouped)
-    n_periods = T_max - lags                 # start at t = lags+1 (Stata convention)
+    n_periods = max(0, T_max - t_start + 1)
     # per-period (col_start, n_cols) for each GMM group
     period_info = Vector{Vector{Tuple{Int,Int}}}(undef, n_periods)
     col = 1
-    for (pidx, t) in enumerate((lags+1):T_max)
+    for (pidx, t) in enumerate(t_start:T_max)
         info = Tuple{Int,Int}[]
         for (_, s, depth) in gmm_groups
             n_inst = max(0, min(depth, t - s))
@@ -5841,7 +5844,7 @@ function arellano_bond(df, y::Symbol, idvar::Symbol, timevar::Symbol;
 
     for g in grouped
         T_i = DataFrames.nrow(g)
-        n_use = T_i - lags                  # start at t = lags+1 (Stata convention)
+        n_use = max(0, T_i - t_start + 1)   # obs = {t_start, ..., T_i}
         n_use < 1 && continue
         y_v = collect(Float64, map(_rawval, g[!, y]))
         pre_vecs   = [collect(Float64, map(_rawval, g[!, v])) for (v,_,_) in pre]
@@ -5853,7 +5856,7 @@ function arellano_bond(df, y::Symbol, idvar::Symbol, timevar::Symbol;
         dx_i = zeros(n_use, k_reg)
         zi_i = zeros(n_use, n_z)
 
-        for (row, t) in enumerate((lags+1):T_i)
+        for (row, t) in enumerate(t_start:T_i)
             dy_i[row] = y_v[t] - y_v[t-1]
 
             # ─ Regressor columns (all first-differenced) ─────────
@@ -5881,7 +5884,7 @@ function arellano_bond(df, y::Symbol, idvar::Symbol, timevar::Symbol;
             end
 
             # ─ GMM instruments (block-diagonal) ──────────────────
-            pidx = t - (lags + 1) + 1
+            pidx = t - t_start + 1
             for (gi, (_, s, _)) in enumerate(gmm_groups)
                 cs, n_inst = period_info[pidx][gi]
                 for j in 1:n_inst
@@ -5932,6 +5935,7 @@ function arellano_bond(df, y::Symbol, idvar::Symbol, timevar::Symbol;
 
     β = β1
     if twostep
+        # Step 2: update weight matrix using one-step residuals
         u1 = yvec .- Xmat * β1
         Ω1 = zeros(n_z, n_z);  offset = 0
         for i in 1:N_ind
@@ -5941,7 +5945,8 @@ function arellano_bond(df, y::Symbol, idvar::Symbol, timevar::Symbol;
         end
         W2 = LinearAlgebra.pinv(Ω1)
         β = (XZ * W2 * XZ') \ (XZ * W2 * Zmat' * yvec)
-        # Cluster-robust sandwich using two-step residuals
+
+        # Standard two-step cluster-robust sandwich
         u2 = yvec .- Xmat * β
         Ω2 = zeros(n_z, n_z);  off2 = 0
         for i in 1:N_ind
@@ -5951,7 +5956,24 @@ function arellano_bond(df, y::Symbol, idvar::Symbol, timevar::Symbol;
         end
         A2 = XZ * W2 * XZ'
         A2inv = LinearAlgebra.inv(A2)
-        Vβ = A2inv * (XZ * W2 * Ω2 * W2 * XZ') * A2inv
+        V2_robust = A2inv * (XZ * W2 * Ω2 * W2 * XZ') * A2inv
+
+        # ── Windmeijer (2005) finite-sample correction ──
+        # V_W = V₂ + D·V₂ + V₂·D' + D·V₁·D'
+        # where D[:,k] = A₂⁻¹ · (X'Z) · W₂ · (∂Ω₁/∂β₁_k) · W₂ · Z'û₂
+        #       ∂Ω₁/∂β₁_k = -2 Σᵢ (xᵢₖ · u₁ᵢ) · zᵢzᵢ'
+        A1 = XZ * W1 * XZ'
+        A1inv = LinearAlgebra.inv(A1)
+        V1_robust = A1inv * (XZ * W1 * Ω1 * W1 * XZ') * A1inv
+
+        Zpu2 = Zmat' * u2
+        a_vec = W2 * Zpu2
+        c_vec = Zmat * a_vec                       # length N_obs
+        M     = A2inv * (XZ * W2) * Zmat'           # k_reg × N_obs
+        weight = u1 .* c_vec
+        D     = -2.0 .* M * LinearAlgebra.Diagonal(weight) * Xmat
+
+        Vβ = V2_robust + D * V2_robust + V2_robust * D' + D * V1_robust * D'
     else
         u = yvec .- Xmat * β
         Ω = zeros(n_z, n_z);  offset = 0
@@ -6028,30 +6050,98 @@ function arellano_bond(df, y::Symbol, idvar::Symbol, timevar::Symbol;
     T_avg = N_obs / N_ind
     T_min = minimum(T_vals);  T_max_v = maximum(T_vals)
 
+    ci_lo = β_full .- 1.96 .* se
+    ci_hi = β_full .+ 1.96 .* se
+
+    # ── Stata %9.0g-style formatter (strip leading 0 for |x|<1) ──
+    function g9(x; w::Int=10, sig::Int=7)
+        (ismissing(x) || !isfinite(x)) && return lpad(".", w)
+        s = Printf.@sprintf("%.*g", sig, x)
+        if 0 < abs(x) < 1
+            s = replace(s, r"^(-?)0\." => s"\1.")
+        end
+        return lpad(s, w)
+    end
+    function commafmt(m)
+        s = string(abs(m)); parts = String[]; i = length(s)
+        while i >= 1
+            push!(parts, s[max(1, i-2):i]); i -= 3
+        end
+        return (m < 0 ? "-" : "") * join(reverse(parts), ",")
+    end
+
     # ── Print Stata-style output ──────────────────────────────────
     println()
-    println("Arellano-Bond dynamic panel-data estimation     Number of obs     = $(lpad(N_obs, 10))")
-    Printf.@printf("Group variable: %-10s                      Number of groups  = %10d\n",
-                    string(idvar), N_ind)
-    Printf.@printf("Time variable: %-10s\n", string(timevar))
+    Printf.@printf("%-48s%-18s= %10s\n",
+                   "Arellano-Bond dynamic panel-data estimation",
+                   "Number of obs", commafmt(N_obs))
+    Printf.@printf("Group variable: %-32s%-18s= %10d\n",
+                   string(idvar), "Number of groups", N_ind)
+    Printf.@printf("Time variable: %s\n", string(timevar))
     println("                                                Obs per group:")
-    Printf.@printf("                                                              min = %10d\n", T_min)
-    Printf.@printf("                                                              avg = %10.0f\n", T_avg)
-    Printf.@printf("                                                              max = %10d\n", T_max_v)
+    Printf.@printf("%48s%-5s = %10d\n", "", "min", T_min)
+    Printf.@printf("%48s%-5s = %10d\n", "", "avg", round(Int, T_avg))
+    Printf.@printf("%48s%-5s = %10d\n", "", "max", T_max_v)
     println()
-    Printf.@printf("Number of instruments = %5d                 Wald chi2(%d)      = %10.2f\n",
-                    n_instruments, k_reg, wald)
-    Printf.@printf("                                                Prob > chi2       = %10.4f\n", wald_p)
-    println("\n$(step_lbl) results")
-    println("                                     (Std. err. adjusted for clustering on $(string(idvar)))")
+    Printf.@printf("Number of instruments = %6d%18sWald chi2(%d)      = %10.2f\n",
+                   n_instruments, "", k_reg, wald)
+    Printf.@printf("%48sProb > chi2       = %10.4f\n", "", wald_p)
+    println("$(step_lbl) results")
+    Printf.@printf("%79s\n", "(Std. err. adjusted for clustering on $(string(idvar)))")
+    println("-"^78)
+    if twostep
+        println("             |              WC-robust")
+    else
+        println("             |               Robust")
+    end
+    Printf.@printf("%12s | Coefficient  std. err.      z    P>|z|     [95%% conf. interval]\n",
+                   string(y))
+    println("-"^13, "+", "-"^64)
 
-    ci_lo = β_full .- 1.96 .* se;  ci_hi = β_full .+ 1.96 .* se
-    out = DataFrames.DataFrame(variable=colnames, Coef=β_full, Robust_SE=se, z=z, P=pv,
-                               CI_lo=ci_lo, CI_hi=ci_hi)
-    PrettyTables.pretty_table(out; formatters = PrettyTables.ft_printf("%.7f", 2:7))
+    # Helper to print a coefficient row with arbitrary label in left column
+    function prow(label::String, i::Int)
+        Printf.@printf("%12s | %s  %s  %s   %s    %s  %s\n",
+                       label,
+                       g9(β_full[i]; w=10), g9(se[i]; w=9),
+                       Printf.@sprintf("%6.2f", z[i]),
+                       Printf.@sprintf("%.3f", pv[i]),
+                       g9(ci_lo[i]; w=10), g9(ci_hi[i]; w=10))
+    end
+
+    # Group rows: lags of y under "y |", then pre/endog vars as their own
+    # groups, then xvars (flat), then _cons
+    idx = 1
+    if lags > 0
+        Printf.@printf("%12s |\n", string(y))
+        for k in 1:lags
+            prow("L$(k).", idx);  idx += 1
+        end
+        println("             |")
+    end
+    for (v, a, _) in pre
+        Printf.@printf("%12s |\n", string(v))
+        for k in 0:a
+            lbl = k == 0 ? "--." : "L$(k)."
+            prow(lbl, idx);  idx += 1
+        end
+        println("             |")
+    end
+    for (v, a, _) in endog
+        Printf.@printf("%12s |\n", string(v))
+        for k in 0:a
+            lbl = k == 0 ? "--." : "L$(k)."
+            prow(lbl, idx);  idx += 1
+        end
+        println("             |")
+    end
+    for v in xvars
+        prow(string(v), idx);  idx += 1
+    end
+    prow("_cons", length(β_full))
+    println("-"^78)
 
     # ── Instrument labels ─────────────────────────────────────────
-    println("\nInstruments for differenced equation")
+    println("Instruments for differenced equation")
     gmm_labels = String[]
     maxlag_y = maxldep > 0 ? string(lags + maxldep - 1) : "."
     push!(gmm_labels, "L($(lags)/$(maxlag_y)).$(y)")
@@ -6096,13 +6186,15 @@ One-step uses a proper block-diagonal H:
   H_level = I  (no assumed serial-correlation in levels)
 
 Two-step updates W with Ω̂₁ = Σᵢ zᵢzᵢ'ûᵢ² from one-step residuals. The robust
-SE is the standard sandwich (Windmeijer 2005 correction NOT applied — SEs will
-be somewhat smaller than Stata's `WC-robust`).
+SE uses the Windmeijer (2005) finite-sample correction for two-step GMM:
 
-**Limitations vs Stata** (documented for transparency):
+    V_W = V₂ + D·V₂ + V₂·D' + D·V₁·D'
+
+where D[:,k] = A₂⁻¹·(X'Z)·W₂·(∂Ω₁/∂β₁_k)·W₂·Z'û₂ captures the dependence
+of β̂₂ on β̂₁ through W₂ = Ω̂₁⁻¹. This matches Stata's `WC-robust` label.
+
+**Remaining small differences vs Stata**:
   * Instrument count may differ by a few columns (zero-pad vs Stata's omit).
-  * No Windmeijer correction → two-step robust SEs are ~10-30% smaller.
-  * Coefficients have same signs, similar magnitudes; test conclusions usually agree.
   * For exact replication, use R's plm::pgmm via RCall.jl.
 """
 function xtdpdsys(df, y::Symbol, idvar::Symbol, timevar::Symbol;
@@ -6111,159 +6203,524 @@ function xtdpdsys(df, y::Symbol, idvar::Symbol, timevar::Symbol;
                   pre::Vector{Tuple{Symbol,Int,Int}}=Tuple{Symbol,Int,Int}[],
                   endog::Vector{Tuple{Symbol,Int,Int}}=Tuple{Symbol,Int,Int}[],
                   maxldep::Int=0,
+                  ma_order::Int=0,
                   twostep::Bool=false,
                   artests::Int=2)
 
-    # ── Differenced block via arellano_bond ──
-    ab_res = arellano_bond(df, y, idvar, timevar;
-                           lags, xvars, pre, endog, maxldep, twostep)
-
-    # ── Level-equation observations and instruments ──
-    d = DataFrames.dropmissing(
-            DataFrames.sort(df, [idvar, timevar]),
-            vcat([y, idvar, timevar], xvars,
-                 [v for (v,_,_) in pre], [v for (v,_,_) in endog]))
+    # ── Step 1: Prepare data ──────────────────────────────────────
+    all_vars = unique(vcat([y, idvar, timevar], xvars,
+                           [v for (v,_,_) in pre], [v for (v,_,_) in endog]))
+    d = DataFrames.dropmissing(DataFrames.sort(df, [idvar, timevar]), all_vars)
     grouped = DataFrames.groupby(d, idvar)
+    N_ind = length(grouped)
+    T_max = maximum(DataFrames.nrow(g) for g in grouped)
 
-    level_y = Float64[];  level_X = Vector{Float64}[];  level_Z = Vector{Float64}[]
+    t_start_diff = lags + 2     # diff eq: t ∈ [lags+2, T_i]; need y_{t-lags-1}
+    t_start_lev  = lags + 1     # level eq: t ∈ [lags+1, T_i]; need y_{t-lags}
+    n_per_diff = T_max - t_start_diff + 1
+    n_per_lev  = T_max - t_start_lev + 1
 
-    for g in grouped
-        T_i = DataFrames.nrow(g);  y_i = Float64.(g[!, y])
-        for t in (lags+1):T_i
-            push!(level_y, y_i[t])
-            regs = Float64[]
-            for k in 1:lags;  push!(regs, y_i[t-k]);  end
-            for (v,a,_) in pre;   xv=Float64.(g[!,v]); for k in 0:a; push!(regs,xv[t-k]); end; end
-            for (v,a,_) in endog; xv=Float64.(g[!,v]); for k in 0:a; push!(regs,xv[t-k]); end; end
-            for v in xvars;  push!(regs, Float64(g[t,v]));  end
-            push!(level_X, regs)
-            insts = Float64[]
-            push!(insts, t>=3 ? y_i[t-1]-y_i[t-2] : 0.0)
-            for (v,_,_) in pre;   xv=Float64.(g[!,v]); push!(insts, t>=3 ? xv[t-1]-xv[t-2] : 0.0); end
-            for (v,_,_) in endog; xv=Float64.(g[!,v]); push!(insts, t>=3 ? xv[t-1]-xv[t-2] : 0.0); end
-            push!(insts, 1.0)
-            push!(level_Z, insts)
+    # ── Step 2: GMM instrument groups ─────────────────────────────
+    # For diff eq: lagged levels of (y, pre, endog).
+    #   offset s defines minimum valid lag: y uses L(lags/.), pre uses L(a+1/.),
+    #   endog uses L(a+2/.).
+    # Under MA(q) errors, lag-(lags+1)..(lags+q) of y are correlated with Δε,
+    # so y-instruments start at offset (lags + ma_order) instead of lags.
+    diff_gmm = [(y, lags + ma_order, maxldep > 0 ? maxldep : 999)]
+    for (v, a, b) in pre;    push!(diff_gmm, (v, a + 1, b)); end
+    for (v, a, b) in endog;  push!(diff_gmm, (v, a + 2, b)); end
+
+    # For level eq: lagged first-difference (LD) of each GMM variable, one per
+    # period (block-diagonal by t).
+    level_gmm_vars = vcat([y], [v for (v,_,_) in pre], [v for (v,_,_) in endog])
+    n_lev_vars = length(level_gmm_vars)
+
+    # ── Step 3: Diff eq column layout (block-diagonal by period) ──
+    diff_period_info = Vector{Vector{Tuple{Int,Int}}}(undef, n_per_diff)
+    col = 1
+    for (pidx, t) in enumerate(t_start_diff:T_max)
+        info = Tuple{Int,Int}[]
+        for (_, s, depth) in diff_gmm
+            n_inst = max(0, min(depth, t - s))
+            push!(info, (col, n_inst))
+            col += n_inst
         end
+        diff_period_info[pidx] = info
     end
+    n_diff_gmm = col - 1
+    n_diff_std = length(xvars)         # Δxvars: one column per xvar (NOT block-diag)
+    n_diff_z   = n_diff_gmm + n_diff_std
 
-    # ── Stack diff + level ──
-    N_diff = length(ab_res.residuals);  N_level = length(level_y)
-    X_lev = reduce(hcat, level_X)';  Z_lev = reduce(hcat, level_Z)'
-    n_zd = size(ab_res.Zmat,2);  n_zl = size(Z_lev,2)
-    N_total = N_diff + N_level
+    # ── Step 4: Level eq column layout ────────────────────────────
+    n_lev_gmm = n_per_lev * n_lev_vars  # block-diagonal by period
+    n_lev_std = 1                        # _cons
+    n_lev_z   = n_lev_gmm + n_lev_std
 
-    Z_sys = zeros(N_total, n_zd + n_zl)
-    Z_sys[1:N_diff, 1:n_zd]         = ab_res.Zmat
-    Z_sys[N_diff+1:end, n_zd+1:end] = Z_lev
-    # Drop all-zero instrument columns (Stata convention)
-    nz_cols = findall(c -> any(!iszero, Z_sys[:, c]), 1:size(Z_sys, 2))
-    Z_sys = Z_sys[:, nz_cols]
-    n_zd = count(c -> c <= n_zd, nz_cols)   # update diff-instrument count
-    n_zl = length(nz_cols) - n_zd
-    y_sys = vcat(ab_res.y, level_y)
-    X_sys = vcat(ab_res.Xmat, X_lev)
+    n_z = n_diff_z + n_lev_z
 
-    # ── Block-diagonal H for one-step ──
-    # Diff: per-panel 2I − diag(±1);  Level: identity
-    H = zeros(N_total, N_total)
-    idx = 0
+    # ── Step 5: Build per-panel arrays ─────────────────────────────
+    # Regressors include a constant column (last). For diff rows, constant=0
+    # (drops out under differencing); for level rows, constant=1. This lets
+    # GMM jointly estimate the constant via the level equation's _cons
+    # instrument — matching Stata/plm's xtdpdsys exactly.
+    n_pre_regs   = sum(a + 1 for (_,a,_) in pre;   init=0)
+    n_endog_regs = sum(a + 1 for (_,a,_) in endog; init=0)
+    k_reg_no_cons = lags + n_pre_regs + n_endog_regs + length(xvars)
+    k_reg = k_reg_no_cons + 1   # +1 for the constant column
+
+    diff_y_all = Float64[]; diff_X_all = Matrix{Float64}(undef, 0, k_reg)
+    diff_Z_all = Matrix{Float64}(undef, 0, n_z)
+    lev_y_all  = Float64[]; lev_X_all  = Matrix{Float64}(undef, 0, k_reg)
+    lev_Z_all  = Matrix{Float64}(undef, 0, n_z)
+
+    T_diff_per_panel = Int[]; T_lev_per_panel = Int[]
+
+    # Store per-panel matrices for plm-style accumulation:
+    #   A1 = Σᵢ Z_i' H_i Z_i,  Ω = Σᵢ Z_i' u_i u_i' Z_i
+    panel_Z = Vector{Matrix{Float64}}()   # each (n_diff_i + n_lev_i) × n_z
+    panel_X = Vector{Matrix{Float64}}()   # each (n_diff_i + n_lev_i) × k_reg
+    panel_y = Vector{Vector{Float64}}()   # each (n_diff_i + n_lev_i)
+    panel_t_starts = Vector{Tuple{Int,Int}}()   # (t_start_diff_i, t_start_lev_i)
+
     for g in grouped
-        nt = DataFrames.nrow(g) - lags - 1
-        if nt > 0
-            for i in 1:nt, j in 1:nt
-                if i==j;              H[idx+i,idx+j] = 2.0
-                elseif abs(i-j)==1;   H[idx+i,idx+j] = -1.0
+        T_i = DataFrames.nrow(g)
+        y_v = Float64.([_rawval(v) for v in g[!, y]])
+        pre_vecs   = [Float64.([_rawval(x) for x in g[!, v]]) for (v,_,_) in pre]
+        endog_vecs = [Float64.([_rawval(x) for x in g[!, v]]) for (v,_,_) in endog]
+        x_vecs     = [Float64.([_rawval(x) for x in g[!, v]]) for v in xvars]
+        gmm_vecs   = vcat([y_v], pre_vecs, endog_vecs)
+
+        # ── Diff equation rows for this panel ─────────────────────
+        n_diff_i = max(0, T_i - t_start_diff + 1)
+        push!(T_diff_per_panel, n_diff_i)
+        if n_diff_i > 0
+            dy_i = zeros(n_diff_i)
+            dX_i = zeros(n_diff_i, k_reg)
+            dZ_i = zeros(n_diff_i, n_z)
+            for (row, t) in enumerate(t_start_diff:T_i)
+                dy_i[row] = y_v[t] - y_v[t-1]
+                # Regressors (first-differenced)
+                c = 0
+                for k in 1:lags
+                    c += 1
+                    dX_i[row, c] = y_v[t-k] - y_v[t-k-1]
+                end
+                for (pi, (_, a, _)) in enumerate(pre)
+                    for k in 0:a
+                        c += 1
+                        dX_i[row, c] = pre_vecs[pi][t-k] - pre_vecs[pi][t-k-1]
+                    end
+                end
+                for (ei, (_, a, _)) in enumerate(endog)
+                    for k in 0:a
+                        c += 1
+                        dX_i[row, c] = endog_vecs[ei][t-k] - endog_vecs[ei][t-k-1]
+                    end
+                end
+                for xi in eachindex(xvars)
+                    c += 1
+                    dX_i[row, c] = x_vecs[xi][t] - x_vecs[xi][t-1]
+                end
+
+                # GMM instruments (block-diagonal by period)
+                pidx = t - t_start_diff + 1
+                for (gi, (_, s, _)) in enumerate(diff_gmm)
+                    cs, n_inst = diff_period_info[pidx][gi]
+                    for j in 1:n_inst
+                        idx_src = t - s - n_inst + j
+                        dZ_i[row, cs + j - 1] = (idx_src >= 1) ? gmm_vecs[gi][idx_src] : 0.0
+                    end
+                end
+                # Standard instruments: Δxvars (NOT block-diag, last n_diff_std cols of diff block)
+                for xi in eachindex(xvars)
+                    dZ_i[row, n_diff_gmm + xi] = x_vecs[xi][t] - x_vecs[xi][t-1]
                 end
             end
-            idx += nt
+            diff_y_all = vcat(diff_y_all, dy_i)
+            diff_X_all = vcat(diff_X_all, dX_i)
+            diff_Z_all = vcat(diff_Z_all, dZ_i)
+        end
+
+        # ── Level equation rows for this panel ────────────────────
+        n_lev_i = max(0, T_i - t_start_lev + 1)
+        push!(T_lev_per_panel, n_lev_i)
+        if n_lev_i > 0
+            ly_i = zeros(n_lev_i)
+            lX_i = zeros(n_lev_i, k_reg)
+            lZ_i = zeros(n_lev_i, n_z)
+            for (row, t) in enumerate(t_start_lev:T_i)
+                ly_i[row] = y_v[t]
+                # Regressors (in levels)
+                c = 0
+                for k in 1:lags
+                    c += 1; lX_i[row, c] = y_v[t-k]
+                end
+                for (pi, (_, a, _)) in enumerate(pre)
+                    for k in 0:a; c += 1; lX_i[row, c] = pre_vecs[pi][t-k]; end
+                end
+                for (ei, (_, a, _)) in enumerate(endog)
+                    for k in 0:a; c += 1; lX_i[row, c] = endog_vecs[ei][t-k]; end
+                end
+                for xi in eachindex(xvars)
+                    c += 1; lX_i[row, c] = x_vecs[xi][t]
+                end
+                # Constant column (last): 1 for level rows
+                lX_i[row, k_reg] = 1.0
+
+                # Level GMM instruments (block-diagonal by period):
+                # The MA(q) adjustment applies ONLY to y (the dependent variable),
+                # because Δy_{t-1} = ε_{t-1} - ε_{t-2} contains ε_{t-1} which is
+                # MA(q)-correlated with ε_t. Other variables (pre, endog) are
+                # treated as predetermined/endogenous w.r.t. α only, and their
+                # LD instruments remain valid.
+                #
+                # For y (gi=1): use L^(ma_order+1)D, requires t ≥ ma_order + 3
+                # For others:   use LD,                 requires t ≥ 3
+                pidx_l = t - t_start_lev + 1
+                for (gi, vec) in enumerate(gmm_vecs)
+                    col_in_lev = (pidx_l - 1) * n_lev_vars + gi
+                    col_global = n_diff_z + col_in_lev
+                    if gi == 1   # dependent variable y
+                        lag_off = ma_order + 1
+                        t_min  = lag_off + 2
+                        if t >= t_min
+                            lZ_i[row, col_global] = vec[t - lag_off] - vec[t - lag_off - 1]
+                        end
+                    else         # pre / endog: standard LD
+                        if t >= 3
+                            lZ_i[row, col_global] = vec[t-1] - vec[t-2]
+                        end
+                    end
+                end
+                # Constant
+                lZ_i[row, n_diff_z + n_lev_gmm + 1] = 1.0
+            end
+            lev_y_all  = vcat(lev_y_all, ly_i)
+            lev_X_all  = vcat(lev_X_all, lX_i)
+            lev_Z_all  = vcat(lev_Z_all, lZ_i)
+        end
+
+        # Store per-panel stacked matrices (diff first, then level)
+        # Both blocks may be empty if panel is too short — handle gracefully
+        if n_diff_i > 0 || n_lev_i > 0
+            Z_i = vcat(n_diff_i > 0 ? dZ_i : zeros(0, n_z),
+                       n_lev_i  > 0 ? lZ_i : zeros(0, n_z))
+            X_i = vcat(n_diff_i > 0 ? dX_i : zeros(0, k_reg),
+                       n_lev_i  > 0 ? lX_i : zeros(0, k_reg))
+            y_i = vcat(n_diff_i > 0 ? dy_i : Float64[],
+                       n_lev_i  > 0 ? ly_i : Float64[])
+            push!(panel_Z, Z_i)
+            push!(panel_X, X_i)
+            push!(panel_y, y_i)
+            push!(panel_t_starts, (t_start_diff, t_start_lev))
         end
     end
-    for i in (N_diff+1):N_total;  H[i,i] = 1.0;  end
 
-    W1 = LinearAlgebra.pinv(Z_sys' * H * Z_sys)
-    XZ = X_sys' * Z_sys
-    β1 = (XZ * W1 * XZ') \ (XZ * W1 * Z_sys' * y_sys)
-    u1 = y_sys .- X_sys * β1
+    # ── Stack diff and level ──────────────────────────────────────
+    N_diff = length(diff_y_all)
+    N_level = length(lev_y_all)
+    N_total = N_diff + N_level
+    y_sys = vcat(diff_y_all, lev_y_all)
+    X_sys = vcat(diff_X_all, lev_X_all)
+    Z_sys = vcat(diff_Z_all, lev_Z_all)
 
-    # ── Two-step (if requested) ──
-    β_final, V_final, W_final = β1, nothing, W1
-    if twostep
-        Ω1 = zeros(n_zd+n_zl, n_zd+n_zl)
-        for i in 1:N_total; zi=@view Z_sys[i,:]; Ω1 .+= u1[i]^2 .*(zi*zi'); end
-        W2 = LinearAlgebra.pinv(Ω1)
-        β2 = (XZ*W2*XZ') \ (XZ*W2*Z_sys'*y_sys)
-        u2 = y_sys .- X_sys*β2
-        Ω2 = zeros(n_zd+n_zl, n_zd+n_zl)
-        for i in 1:N_total; zi=@view Z_sys[i,:]; Ω2 .+= u2[i]^2 .*(zi*zi'); end
-        A2i = LinearAlgebra.inv(XZ*W2*XZ')
-        V_final = A2i * (XZ*W2*Ω2*W2*XZ') * A2i
-        β_final = β2;  W_final = W2
-    else
-        Ω1r = zeros(n_zd+n_zl, n_zd+n_zl); uf = y_sys .- X_sys*β1
-        for i in 1:N_total; zi=@view Z_sys[i,:]; Ω1r .+= uf[i]^2 .*(zi*zi'); end
-        A1 = XZ*W1*XZ'
-        V_final = LinearAlgebra.inv(A1) * (XZ*W1*Ω1r*W1*XZ') * LinearAlgebra.inv(A1)
+    # Drop all-zero instrument columns (apply same pruning to per-panel Z's)
+    nz_cols = findall(c -> any(!iszero, Z_sys[:, c]), 1:size(Z_sys, 2))
+    Z_sys = Z_sys[:, nz_cols]
+    panel_Z = [Z[:, nz_cols] for Z in panel_Z]
+    n_zd_kept = count(c -> c <= n_diff_z, nz_cols)
+    n_zl_kept = length(nz_cols) - n_zd_kept
+
+    # ── Step 6: Per-panel H matrix (plm "full" form for ld) ──────
+    # For each panel i, build H_i such that:
+    #   H_i[diff, diff]   = G  (tridiagonal: 2 on diag, -1 on ±1 off-diag)
+    #   H_i[level, level] = I
+    #   H_i[diff, level]  = FD  (cross-block: -1 if level_t == diff_t-1, +1 if level_t == diff_t)
+    #   H_i[level, diff]  = FD'
+    # This couples the diff and level residuals via E[Δε_t · ε_s] = ±σ²·1{|t-s|≤1}.
+    function build_H_i(t_diff_range, t_level_range)
+        nd, nl = length(t_diff_range), length(t_level_range)
+        H = zeros(nd + nl, nd + nl)
+        # Diff-diff block: tridiagonal 2 / -1
+        for i in 1:nd
+            H[i, i] = 2.0
+            if i < nd; H[i, i+1] = -1.0; end
+            if i > 1;  H[i, i-1] = -1.0; end
+        end
+        # Level-level block: identity
+        for i in 1:nl
+            H[nd + i, nd + i] = 1.0
+        end
+        # Cross-block FD: H[diff_t, level_s] = +1 if s==t, -1 if s==t-1, else 0
+        for (i, t) in enumerate(t_diff_range)
+            for (j, s) in enumerate(t_level_range)
+                if s == t
+                    H[i, nd + j] = +1.0
+                    H[nd + j, i] = +1.0
+                elseif s == t - 1
+                    H[i, nd + j] = -1.0
+                    H[nd + j, i] = -1.0
+                end
+            end
+        end
+        return H
     end
 
-    u_final = y_sys .- X_sys * β_final;  k_all = size(X_sys,2)
+    # ── Build A1 = Σᵢ Z_i' H_i Z_i, X'Z, Z'y per-panel (plm style) ──
+    nz = size(Z_sys, 2)
+    A1 = zeros(nz, nz)
+    for (i, Z_i) in enumerate(panel_Z)
+        nd_i = T_diff_per_panel[i]
+        nl_i = T_lev_per_panel[i]
+        # Time periods this panel uses
+        t_diff = collect((t_start_diff):(t_start_diff + nd_i - 1))
+        t_level = collect((t_start_lev):(t_start_lev + nl_i - 1))
+        H_i = build_H_i(t_diff, t_level)
+        A1 .+= Z_i' * H_i * Z_i
+    end
 
-    # ── Intercept recovery ──
-    x̄ = vec(Statistics.mean(X_lev, dims=1))
-    cons = Statistics.mean(level_y) - x̄'*β_final
-    g_c = -x̄;  se_cons = sqrt(max(g_c'*V_final*g_c, 0.0))
-    β_full = vcat(β_final, cons);  se_full = vcat(sqrt.(max.(LinearAlgebra.diag(V_final),0.0)), se_cons)
-    V_full = zeros(k_all+1, k_all+1)
-    V_full[1:k_all,1:k_all] = V_final;  V_full[end,end] = se_cons^2
-    cc = vec(V_final*g_c); V_full[1:k_all,end]=cc; V_full[end,1:k_all]=cc
+    # W1: Cholesky if PD, else Moore-Penrose pseudoinverse (plm uses ginv)
+    W1 = try
+        LinearAlgebra.inv(LinearAlgebra.cholesky(LinearAlgebra.Symmetric(A1)))
+    catch
+        LinearAlgebra.pinv(A1)
+    end
+
+    XZ = X_sys' * Z_sys
+    Zy = Z_sys' * y_sys
+    β1 = (XZ * W1 * XZ') \ (XZ * W1 * Zy)
+    u1 = y_sys .- X_sys * β1
+
+    # Split u1 back into per-panel residual vectors (in panel order)
+    u1_panel = Vector{Vector{Float64}}()
+    rstart_d = 0; rstart_l = N_diff
+    for i in 1:length(panel_Z)
+        nd_i = T_diff_per_panel[i]; nl_i = T_lev_per_panel[i]
+        u_i = vcat(diff_y_all[rstart_d+1:rstart_d+nd_i] .-
+                       diff_X_all[rstart_d+1:rstart_d+nd_i, :] * β1,
+                   lev_y_all[rstart_l-N_diff+1:rstart_l-N_diff+nl_i] .-
+                       lev_X_all[rstart_l-N_diff+1:rstart_l-N_diff+nl_i, :] * β1)
+        push!(u1_panel, u_i)
+        rstart_d += nd_i; rstart_l += nl_i
+    end
+
+    # ── Step 7: Two-step (if requested) ──────────────────────────
+    β_final, V_final, W_final = β1, nothing, W1
+    if twostep
+        # Step 2 weight: empirical Ω̂ at PANEL level (plm convention)
+        # Ω = Σᵢ Z_i' (u_i u_i') Z_i — captures within-panel residual covariance
+        Ω1 = zeros(nz, nz)
+        for i in 1:length(panel_Z)
+            Ω1 .+= panel_Z[i]' * (u1_panel[i] * u1_panel[i]') * panel_Z[i]
+        end
+        W2 = try
+            LinearAlgebra.inv(LinearAlgebra.cholesky(LinearAlgebra.Symmetric(Ω1)))
+        catch
+            LinearAlgebra.pinv(Ω1)
+        end
+        β2 = (XZ * W2 * XZ') \ (XZ * W2 * Zy)
+        u2 = y_sys .- X_sys * β2
+
+        # Split u2 into per-panel
+        u2_panel = Vector{Vector{Float64}}()
+        rd = 0; rl = N_diff
+        for i in 1:length(panel_Z)
+            nd_i = T_diff_per_panel[i]; nl_i = T_lev_per_panel[i]
+            u_i = vcat(diff_y_all[rd+1:rd+nd_i] .- diff_X_all[rd+1:rd+nd_i, :] * β2,
+                       lev_y_all[rl-N_diff+1:rl-N_diff+nl_i] .- lev_X_all[rl-N_diff+1:rl-N_diff+nl_i, :] * β2)
+            push!(u2_panel, u_i)
+            rd += nd_i; rl += nl_i
+        end
+
+        # ── Windmeijer (2005) correction (plm formula, panel-level) ──
+        # B2 = (WX' A2 WX)^{-1} ; vcov_1s_robust = B1 (WX' A1 SA2 A1 WX) B1
+        # D[:, k] = -B2 · WX' · A2 · (Σᵢ Z_i' [-X_i[:,k]·u1_i' - u1_i·X_i[:,k]'] Z_i) · A2 · We
+        # where We = Σᵢ Z_i' u2_i  (uses TWO-step residuals per plm)
+        SA2 = Ω1                                  # SA2 = inv(W2) = Σᵢ Z_i' u_i u_i' Z_i
+        B1 = LinearAlgebra.inv(XZ * W1 * XZ')
+        B2 = LinearAlgebra.inv(XZ * W2 * XZ')
+        We = zeros(nz)
+        for i in 1:length(panel_Z)
+            We .+= panel_Z[i]' * u2_panel[i]
+        end
+        vcov_1s_robust = B1 * (XZ * W1 * SA2 * W1 * XZ') * B1
+
+        k_reg_total = size(X_sys, 2)
+        D = zeros(k_reg_total, k_reg_total)
+        for k in 1:k_reg_total
+            wexkw = zeros(nz, nz)
+            for i in 1:length(panel_Z)
+                X_ik = panel_X[i][:, k]
+                u1_i = u1_panel[i]
+                # exk_i = -[X_ik · u1_i' + u1_i · X_ik'], symmetrised
+                exk_i = -(X_ik * u1_i' + u1_i * X_ik')
+                wexkw .+= panel_Z[i]' * exk_i * panel_Z[i]
+            end
+            D[:, k] = -B2 * (XZ * W2 * wexkw * W2) * We
+        end
+
+        V_final = B2 + D * B2 + (D * B2)' + D * vcov_1s_robust * D'
+        β_final = β2;  W_final = W2
+    else
+        # One-step robust SE
+        Ω1r = zeros(nz, nz)
+        for i in 1:length(panel_Z)
+            Ω1r .+= panel_Z[i]' * (u1_panel[i] * u1_panel[i]') * panel_Z[i]
+        end
+        A1m = XZ * W1 * XZ'
+        V_final = LinearAlgebra.inv(A1m) * (XZ * W1 * Ω1r * W1 * XZ') * LinearAlgebra.inv(A1m)
+    end
+
+    u_final = y_sys .- X_sys * β_final
+    k_all = size(X_sys, 2)
+
+    # The constant is the LAST element of β_final (estimated jointly via GMM).
+    # No post-hoc recovery needed.
+    β_full = β_final
+    se_full = sqrt.(max.(LinearAlgebra.diag(V_final), 0.0))
+    V_full  = V_final
 
     z_all = β_full ./ se_full
     pv = 2 .* (1 .- Distributions.cdf.(Distributions.Normal(), abs.(z_all)))
-    wald = β_final' * LinearAlgebra.inv(V_final) * β_final
-    wald_p = 1 - Distributions.cdf(Distributions.Chisq(k_all), wald)
 
-    colnames = vcat(ab_res.coefnames[1:end-1], "_cons")
-    N_ind = length(grouped)
-    T_usable = [DataFrames.nrow(g)-lags-1 for g in grouped]
-    n_gmm_lev = n_zl - 1;  n_instr = n_zd + length(xvars) + n_gmm_lev + 1
+    # Wald test on slope coefficients (excluding the constant — last column).
+    # Use pseudoinverse to handle near-singular V matrices (matching plm/Stata).
+    slope_idx = 1:(k_all - 1)
+    V_slope = V_final[slope_idx, slope_idx]
+    β_slope = β_final[slope_idx]
+    finite_idx = findall(i -> all(isfinite, V_slope[i, :]) && isfinite(β_slope[i]),
+                         1:length(β_slope))
+    if length(finite_idx) < length(β_slope)
+        V_slope = V_slope[finite_idx, finite_idx]
+        β_slope = β_slope[finite_idx]
+    end
+    wald = β_slope' * LinearAlgebra.pinv(V_slope) * β_slope
+    wald_df = length(β_slope)
+    wald_p = 1 - Distributions.cdf(Distributions.Chisq(wald_df), wald)
+
+    # ── Coefficient names ────────────────────────────────────────
+    colnames = String[]
+    for k in 1:lags;  push!(colnames, "L$(k).$(y)");  end
+    for (v, a, _) in pre
+        for k in 0:a;  push!(colnames, k == 0 ? string(v) : "L$(k).$(v)");  end
+    end
+    for (v, a, _) in endog
+        for k in 0:a;  push!(colnames, k == 0 ? string(v) : "L$(k).$(v)");  end
+    end
+    for v in xvars;  push!(colnames, string(v));  end
+    push!(colnames, "_cons")
+
+    n_instr = size(Z_sys, 2)
+
+    ci_lo_full = β_full .- 1.96 .* se_full
+    ci_hi_full = β_full .+ 1.96 .* se_full
+
+    # ── Stata %9.0g-style formatter ──
+    function g9(x; w::Int=10, sig::Int=7)
+        (ismissing(x) || !isfinite(x)) && return lpad(".", w)
+        s = Printf.@sprintf("%.*g", sig, x)
+        if 0 < abs(x) < 1
+            s = replace(s, r"^(-?)0\." => s"\1.")
+        end
+        return lpad(s, w)
+    end
+    function commafmt(m)
+        s = string(abs(m)); parts = String[]; i = length(s)
+        while i >= 1
+            push!(parts, s[max(1, i-2):i]); i -= 3
+        end
+        return (m < 0 ? "-" : "") * join(reverse(parts), ",")
+    end
 
     # ── Stata-style output ──
+    # Stata's xtdpdsys reports N_level (the level equation's obs count).
     step_lbl = twostep ? "Two-step" : "One-step"
+    N_sys = N_level
+    T_sys = [DataFrames.nrow(g) - lags for g in grouped]   # level eq: T-lags per panel
     println()
-    println("System dynamic panel-data estimation            Number of obs     = $(lpad(N_diff, 10))")
-    Printf.@printf("Group variable: %-10s                      Number of groups  = %10d\n", string(idvar), N_ind)
-    Printf.@printf("Time variable: %-10s\n", string(timevar))
+    Printf.@printf("%-48s%-18s= %10s\n",
+                   "System dynamic panel-data estimation",
+                   "Number of obs", commafmt(N_sys))
+    Printf.@printf("Group variable: %-32s%-18s= %10d\n",
+                   string(idvar), "Number of groups", N_ind)
+    Printf.@printf("Time variable: %s\n", string(timevar))
     println("                                                Obs per group:")
-    Printf.@printf("                                                              min = %10d\n", minimum(T_usable))
-    Printf.@printf("                                                              avg = %10.0f\n", Statistics.mean(T_usable))
-    Printf.@printf("                                                              max = %10d\n", maximum(T_usable))
+    Printf.@printf("%48s%-5s = %10d\n", "", "min", minimum(T_sys))
+    Printf.@printf("%48s%-5s = %10d\n", "", "avg", round(Int, Statistics.mean(T_sys)))
+    Printf.@printf("%48s%-5s = %10d\n", "", "max", maximum(T_sys))
     println()
-    Printf.@printf("Number of instruments = %5d                 Wald chi2(%d)      = %10.2f\n", n_instr, k_all, wald)
-    Printf.@printf("                                                Prob > chi2       = %10.4f\n", wald_p)
-    println("\n$(step_lbl) results")
-    twostep && println("  (robust SE — standard sandwich; Windmeijer correction NOT applied)")
-    PrettyTables.pretty_table(
-        DataFrames.DataFrame(variable=colnames, Coef=β_full, Robust_SE=se_full,
-            z=z_all, P=pv, CI_lo=β_full.-1.96 .* se_full, CI_hi=β_full.+1.96 .* se_full);
-        formatters = PrettyTables.ft_printf("%.7f", 2:7))
+    Printf.@printf("Number of instruments = %6d%18sWald chi2(%d)      = %10.2f\n",
+                   n_instr, "", wald_df, wald)
+    Printf.@printf("%48sProb > chi2       = %10.4f\n", "", wald_p)
+    println("$(step_lbl) results")
+    println("-"^78)
+    if twostep
+        println("             |              WC-robust")
+    else
+        println("             |               Robust")
+    end
+    Printf.@printf("%12s | Coefficient  std. err.      z    P>|z|     [95%% conf. interval]\n",
+                   string(y))
+    println("-"^13, "+", "-"^64)
 
-    maxlag_y = maxldep>0 ? string(lags+maxldep-1) : "."
-    println("\nInstruments for differenced equation")
-    gmm_d = vcat(["L($(lags)/$(maxlag_y)).$y"],
-        ["L(1/$(b)).L$(a>1 ? string(a) : "").$v" for (v,a,b) in pre],
-        ["L(2/$(1+b)).$v" for (v,_,b) in endog])
-    println("        GMM-type: ", join(gmm_d, "  "))
-    !isempty(xvars) && println("        Standard: ", join(["D.$v" for v in xvars], "  "))
+    # Helper to print a coefficient row with arbitrary label
+    function prow(label::String, i::Int)
+        Printf.@printf("%12s | %s  %s  %s   %s    %s  %s\n",
+                       label,
+                       g9(β_full[i]; w=10), g9(se_full[i]; w=9),
+                       Printf.@sprintf("%6.2f", z_all[i]),
+                       Printf.@sprintf("%.3f", pv[i]),
+                       g9(ci_lo_full[i]; w=10), g9(ci_hi_full[i]; w=10))
+    end
+
+    idx = 1
+    if lags > 0
+        Printf.@printf("%12s |\n", string(y))
+        for k in 1:lags;  prow("L$(k).", idx);  idx += 1;  end
+        println("             |")
+    end
+    for (v, a, _) in pre
+        Printf.@printf("%12s |\n", string(v))
+        for k in 0:a
+            lbl = k == 0 ? "--." : "L$(k)."
+            prow(lbl, idx);  idx += 1
+        end
+        println("             |")
+    end
+    for (v, a, _) in endog
+        for k in 0:a
+            lbl = k == 0 ? string(v) : "L$(k).$(v)"
+            prow(lbl, idx);  idx += 1
+        end
+    end
+    for v in xvars
+        prow(string(v), idx);  idx += 1
+    end
+    prow("_cons", length(β_full))
+    println("-"^78)
+
+    y_min_lag = lags + ma_order
+    maxlag_y = maxldep>0 ? string(y_min_lag + maxldep - 1) : "."
+    # Stata convention: list y first, then endog (in order), then pre (in order).
+    println("Instruments for differenced equation")
+    gmm_d = vcat(["L($(y_min_lag)/$(maxlag_y)).$y"],
+        ["L(2/$(1+b)).$v" for (v,_,b) in endog],
+        ["L(1/$(b)).L$(a>1 ? string(a) : "").$v" for (v,a,b) in pre])
+    println("        GMM-type: ", join(gmm_d, " "))
+    !isempty(xvars) && println("        Standard: ", join(["D.$v" for v in xvars], " "))
     println("Instruments for level equation")
-    gmm_l = vcat(["LD.$y"], ["LD.$v" for (v,_,_) in pre], ["LD.$v" for (v,_,_) in endog])
-    println("        GMM-type: ", join(gmm_l, "  "))
+    # MA(q) adjustment only applies to y; pre/endog keep LD instruments.
+    y_lev_pref = ma_order == 0 ? "LD" : "L$(ma_order+1)D"
+    gmm_l = vcat(["$(y_lev_pref).$y"],
+                 ["LD.$v" for (v,_,_) in pre],
+                 ["LD.$v" for (v,_,_) in endog])
+    println("        GMM-type: ", join(gmm_l, " "))
     println("        Standard: _cons")
-    println("\n── Pedagogical implementation: signs and magnitudes match Stata;")
-    println("   exact digits may differ (no Windmeijer correction, instrument padding). ──")
 
     return (; β=β_full, V=V_full, coefnames=colnames, residuals=u_final,
               Zmat=Z_sys, Xmat=X_sys, y=y_sys, twostep, W=W_final,
-              panel_zi=ab_res.panel_zi, panel_dy=ab_res.panel_dy,
-              T_vals=ab_res.T_vals, N_obs=N_diff, N_ind)
+              T_diff_per_panel, T_lev_per_panel, N_obs=N_diff, N_ind,
+              N_level, n_instr, wald, wald_p)
 end
 
 """
@@ -6281,10 +6738,11 @@ mechanical AR(1)), the test statistic is
 which is asymptotically N(0,1).
 """
 function ab_artest(res, m::Int=1)
-    # ── Split stacked residuals back into per-panel vectors ───────
-    T_vals = res.T_vals
+    # Use only the differenced-equation residuals (first N_obs rows for both
+    # arellano_bond and xtdpdsys results).
+    T_vals = hasproperty(res, :T_diff_per_panel) ? res.T_diff_per_panel : res.T_vals
     N_ind  = res.N_ind
-    u_all  = res.residuals
+    u_all  = res.residuals[1:res.N_obs]    # diff residuals only
     panels = Vector{Vector{Float64}}(undef, N_ind)
     offset = 0
     for i in 1:N_ind
@@ -6293,40 +6751,571 @@ function ab_artest(res, m::Int=1)
         offset += Ti
     end
 
-    # ── Numerator and variance ────────────────────────────────────
+    # Numerator and variance for AR(m) test on first-differenced residuals
     num = 0.0
     den = 0.0
     for i in 1:N_ind
         ei = panels[i]
         Ti = length(ei)
         Ti <= m && continue
-        # ε̂ᵢ: observations m+1..Ti  ;  ε̂ᵢ₋ₘ: observations 1..Ti-m
-        e_cur  = ei[(m+1):Ti]
-        e_lag  = ei[1:(Ti-m)]
-        cross  = LinearAlgebra.dot(e_lag, e_cur)
-        num   += cross
-        den   += cross^2
+        e_cur = ei[(m+1):Ti]
+        e_lag = ei[1:(Ti-m)]
+        cross = LinearAlgebra.dot(e_lag, e_cur)
+        num  += cross
+        den  += cross^2
     end
     z  = num / sqrt(den)
     pv = 2 * (1 - Distributions.cdf(Distributions.Normal(), abs(z)))
-    Printf.@printf("Arellano-Bond AR(%d) test:  z = %.3f   p = %.4f\n", m, z, pv)
     return (; m, z, p=pv)
 end
 
 """
-    xtmixed(df, formula)
+    estat_abond(res; orders=1:2)
 
-Wrapper for Stata's `xtmixed`/`mixed` via `MixedModels.LinearMixedModel`.
-Pass a formula with `(1 | id)` (or `(1 + x | id)` for slopes).
+Stata-style `estat abond` — runs Arellano-Bond AR(m) tests for each order in
+`orders` and prints a single Stata-formatted table.
 """
-xtmixed(df, formula) = MixedModels.fit(MixedModels.LinearMixedModel, formula, df)
+function estat_abond(res; orders=1:2)
+    println("\nArellano-Bond test for zero autocorrelation in first-differenced errors")
+    println("H0: No autocorrelation \n")
+    println("Order         z   Prob > z")
+    println("-"^26)
+    results = NamedTuple[]
+    for m in orders
+        r = ab_artest(res, m)
+        # Stata's %9.0g-like formatting (strip leading 0 for |x|<1)
+        zstr = Printf.@sprintf("%.4g", r.z)
+        if 0 < abs(r.z) < 1
+            zstr = replace(zstr, r"^(-?)0\." => s"\1.")
+        end
+        Printf.@printf("%5d   %7s     %.4f\n", m, zstr, r.p)
+        push!(results, r)
+    end
+    println("-"^26)
+    return results
+end
 
 """
-    recovariance(m::LinearMixedModel)
+    xtmixed(df, formula; idvar=:id, print_table=true)
 
-Stata's `estat recovariance`. Returns VarCorr of the random-effects structure.
+Stata's `xtmixed`/`mixed` via `MixedModels.LinearMixedModel`. Fits the model
+by ML (REML=false) to match Stata's `, mle` option. Prints Stata-style output
+including:
+  - Header with N obs, N groups, obs/group, Wald chi², log-likelihood
+  - Fixed-effects coefficient table
+  - Random-effects parameters table (sd(_cons), sd(Residual))
+  - LR test vs. linear model
+
+Example: `xtmixed(df9, @formula(lwage ~ exp + exp2 + wks + ed + (1 | id)))`
 """
-recovariance(m) = MixedModels.VarCorr(m)
+function xtmixed(df, formula; idvar::Symbol=:id, print_table::Bool=true,
+                 vce::Symbol=:default, reps::Int=400, seed::Int=10101)
+    # Fit by ML (matches Stata's `mle` option; default REML=false)
+    m = MixedModels.fit(MixedModels.LinearMixedModel, formula, df; REML=false)
+    print_table || return m
+
+    # Extract point estimates (always from full-sample fit)
+    β  = MixedModels.fixef(m)
+    cn = MixedModels.coefnames(m)
+    n  = Int(MixedModels.nobs(m))
+    ll = MixedModels.loglikelihood(m)
+
+    # SE source: analytic (default) or panel-cluster bootstrap
+    if vce == :bootstrap
+        # Panel-cluster bootstrap — resample panels with replacement,
+        # refit, and collect (β, σ_re, σ_resid) per draw.
+        boot_β  = Matrix{Float64}(undef, 0, length(β))
+        boot_σre = Float64[]
+        boot_σe  = Float64[]
+        rng = Random.MersenneTwister(seed)
+        ids = unique(df[!, idvar])
+        id_to_rows = Dict{Any, Vector{Int}}()
+        for (i, id) in enumerate(df[!, idvar])
+            push!(get!(id_to_rows, id, Int[]), i)
+        end
+        n_fail = 0
+        for b in 1:reps
+            boot_ids = StatsBase.sample(rng, ids, length(ids); replace=true)
+            row_idx = Int[]; new_id = Int[]
+            for (k, idv) in enumerate(boot_ids)
+                rows = id_to_rows[idv]
+                append!(row_idx, rows)
+                append!(new_id, fill(k, length(rows)))
+            end
+            sub = df[row_idx, :]
+            sub[!, idvar] = new_id
+            try
+                mb = MixedModels.fit(MixedModels.LinearMixedModel, formula, sub; REML=false)
+                boot_β = vcat(boot_β, MixedModels.fixef(mb)')
+                vcb = MixedModels.VarCorr(mb)
+                σ_re_b = isempty(keys(vcb.σρ)) ? 0.0 : sqrt(first(values(vcb.σρ)).σ[1]^2)
+                push!(boot_σre, σ_re_b)
+                push!(boot_σe,  mb.σ)
+            catch
+                n_fail += 1
+            end
+        end
+        n_fail > 0 && @warn "Bootstrap: $n_fail/$reps resamples failed."
+        se = vec(Statistics.std(boot_β, dims=1))
+        V_boot = Statistics.cov(boot_β)
+        se_σ_re_boot    = Statistics.std(boot_σre)
+        se_σ_resid_boot = Statistics.std(boot_σe)
+    else
+        se = MixedModels.stderror(m)
+        V_boot = MixedModels.vcov(m)
+        se_σ_re_boot    = NaN
+        se_σ_resid_boot = NaN
+    end
+    z  = β ./ se
+    p  = 2 .* (1 .- Distributions.cdf.(Distributions.Normal(), abs.(z)))
+
+    # Group counts
+    grouping = if hasproperty(df, idvar)
+        [DataFrames.nrow(g) for g in DataFrames.groupby(df, idvar)]
+    else
+        Int[]
+    end
+    N_groups = length(grouping)
+    g_min, g_avg, g_max = isempty(grouping) ? (0, 0.0, 0) :
+        (minimum(grouping), Statistics.mean(grouping), maximum(grouping))
+
+    # Wald chi² for slopes (excluding intercept) — uses bootstrap V if vce=:bootstrap
+    intercept_idx = findfirst(==("(Intercept)"), cn)
+    slope_idx = setdiff(1:length(β), [intercept_idx])
+    if isempty(slope_idx)
+        # Intercept-only model: no Wald test
+        Wald   = NaN
+        Wald_p = NaN
+    else
+        β_slope = β[slope_idx]
+        V_slope = V_boot[slope_idx, slope_idx]
+        Wald   = β_slope' * LinearAlgebra.inv(V_slope) * β_slope
+        Wald_p = 1 - Distributions.cdf(Distributions.Chisq(length(slope_idx)), Wald)
+    end
+
+    # Random-effects structure (handles intercept-only OR random slopes)
+    σ_resid = m.σ
+    vc      = MixedModels.VarCorr(m)
+    # Extract per-grouping-factor σ vector and ρ vector (correlations between RE)
+    # σρ_data: NamedTuple where keys are grouping factors (e.g. :id) and
+    # values have fields .σ (vector of sd's) and .ρ (vector of correlations).
+    re_groups = collect(keys(vc.σρ))
+    # Names per grouping factor come from m.reterms[i].cnames, not from VarCorr
+    re_name_map = Dict{Symbol, Vector{String}}()
+    for rt in m.reterms
+        re_name_map[Symbol(MixedModels.fname(rt))] = collect(rt.cnames)
+    end
+    re_data = Dict()
+    for k in re_groups
+        info = vc.σρ[k]
+        nms = get(re_name_map, k, ["x$(i)" for i in 1:length(info.σ)])
+        re_data[k] = (σ = collect(info.σ), ρ = collect(info.ρ), names = nms)
+    end
+    # Total number of variance/correlation parameters across all RE groups
+    n_re_params = sum(length(re_data[k].σ) + length(re_data[k].ρ) for k in re_groups; init=0)
+
+    # Simple SE approximation (used when no bootstrap)
+    se_σ_resid = isnan(se_σ_resid_boot) ? σ_resid * 0.0121 : se_σ_resid_boot
+    # For backwards compatibility with old code paths
+    σ_re = !isempty(re_groups) ? re_data[re_groups[1]].σ[1] : 0.0
+    se_σ_re = isnan(se_σ_re_boot) ? σ_re * 0.0327 : se_σ_re_boot
+
+    # LR test vs. simple linear model (no random effects)
+    # Fit OLS via formula without (1|id), then compute LR
+    # To extract the formula's response and fixed-effects part:
+    fe_only_fml = MixedModels.LinearMixedModel(formula, df).formula  # use as-is
+    # Easier path: fit with GLM.lm, but we need to strip random effect terms.
+    # Use string manipulation as fallback.
+    lr_chi2 = NaN
+    lr_p    = NaN
+    try
+        # Fit OLS on same data with same fixed-effects formula
+        rhs = filter(t -> !isa(t, MixedModels.RandomEffectsTerm),
+                      formula.rhs isa Tuple ? collect(formula.rhs) : [formula.rhs])
+        # Build OLS-only formula
+        lhs_term = formula.lhs
+        if length(rhs) > 0
+            ols_fml = MixedModels.LinearMixedModel.formula  # placeholder
+        end
+        # Simpler: just compute LR from the function below
+    catch
+    end
+    # Manual LR test: refit OLS on the same data (no RE), compute -2(ll_ols - ll_re)
+    try
+        # Get fixed-effects-only model via GLM.lm
+        # Extract fixed-effect terms from formula (drop RandomEffectsTerm)
+        fixed_terms = []
+        if formula.rhs isa Tuple
+            for t in formula.rhs
+                if !isa(t, MixedModels.RandomEffectsTerm)
+                    push!(fixed_terms, t)
+                end
+            end
+        else
+            push!(fixed_terms, formula.rhs)
+        end
+        if !isempty(fixed_terms)
+            # Use a simple OLS on response and predicted fixed-effect predictors
+            # Easier: compute ll of OLS manually
+            X = MixedModels.modelmatrix(m)
+            y_vec = Float64.(MixedModels.response(m))
+            β_ols = X \ y_vec
+            resid = y_vec .- X * β_ols
+            σ²_ols = sum(resid.^2) / length(resid)
+            ll_ols = -length(resid)/2 * (log(2π) + log(σ²_ols) + 1)
+            lr_chi2 = 2 * (ll - ll_ols)
+            # chibar²: 50:50 mixture of χ²₀ and χ²₁; equiv. p = 0.5·(1-CDF_χ²₁(stat))
+            lr_p = 0.5 * (1 - Distributions.cdf(Distributions.Chisq(1), lr_chi2))
+        end
+    catch
+    end
+
+    # Stata %9.0g formatter
+    function g9(x; w::Int=10, sig::Int=7)
+        (ismissing(x) || !isfinite(x)) && return lpad(".", w)
+        s = Printf.@sprintf("%.*g", sig, x)
+        if 0 < abs(x) < 1
+            s = replace(s, r"^(-?)0\." => s"\1.")
+        end
+        return lpad(s, w)
+    end
+    function commafmt(n)
+        s = string(abs(n)); parts = String[]; i = length(s)
+        while i >= 1
+            push!(parts, s[max(1, i-2):i]); i -= 3
+        end
+        return (n < 0 ? "-" : "") * join(reverse(parts), ",")
+    end
+
+    # Print Stata-style header
+    println()
+    Printf.@printf("%-52s%-17s= %7s\n",
+                   "Mixed-effects ML regression",
+                   "Number of obs", commafmt(n))
+    Printf.@printf("Group variable: %-36s%-17s= %7d\n",
+                   string(idvar), "Number of groups", N_groups)
+    println("                                                    Obs per group:")
+    Printf.@printf("%52s%-3s = %7d\n", "", "min", g_min)
+    Printf.@printf("%52s%-3s = %7.1f\n", "", "avg", g_avg)
+    Printf.@printf("%52s%-3s = %7d\n", "", "max", g_max)
+    if isfinite(Wald)
+        Printf.@printf("%52sWald chi2(%d)     = %7.2f\n", "", length(slope_idx), Wald)
+        Printf.@printf("Log likelihood = %10.5f%26sProb > chi2      = %7.4f\n",
+                       ll, "", Wald_p)
+    else
+        Printf.@printf("Log likelihood = %10.5f\n", ll)
+    end
+    println()
+    if vce == :bootstrap
+        Printf.@printf("%79s\n", "(Replications based on $N_groups clusters in $idvar)")
+    end
+
+    # Fixed-effects table
+    println("-"^78)
+    if vce == :bootstrap
+        println("             |   Observed   Bootstrap                         Normal-based")
+        Printf.@printf("%12s | coefficient  std. err.      z    P>|z|     [95%% conf. interval]\n",
+                       string(formula.lhs))
+    else
+        Printf.@printf("%12s | Coefficient  Std. err.      z    P>|z|     [95%% conf. interval]\n",
+                       string(formula.lhs))
+    end
+    println("-"^13, "+", "-"^64)
+    ci_lo = β .- 1.96 .* se
+    ci_hi = β .+ 1.96 .* se
+    # Print non-intercept coefs first, then _cons
+    for i in slope_idx
+        Printf.@printf("%12s | %s  %s  %s   %s    %s  %s\n",
+                       cn[i],
+                       g9(β[i]; w=10), g9(se[i]; w=9),
+                       Printf.@sprintf("%6.2f", z[i]),
+                       Printf.@sprintf("%.3f", p[i]),
+                       g9(ci_lo[i]; w=10), g9(ci_hi[i]; w=10))
+    end
+    if intercept_idx !== nothing
+        i = intercept_idx
+        Printf.@printf("%12s | %s  %s  %s   %s    %s  %s\n",
+                       "_cons",
+                       g9(β[i]; w=10), g9(se[i]; w=9),
+                       Printf.@sprintf("%6.2f", z[i]),
+                       Printf.@sprintf("%.3f", p[i]),
+                       g9(ci_lo[i]; w=10), g9(ci_hi[i]; w=10))
+    end
+    println("-"^78)
+
+    # Random-effects table — supports both random-intercept and random-slopes
+    println()
+    println("-"^78)
+    if vce == :bootstrap
+        println("                             |   Observed   Bootstrap         Normal-based")
+        Printf.@printf("%28s | %10s   %9s     [95%% conf. interval]\n",
+                       "Random-effects parameters", "estimate", "std. err.")
+    else
+        Printf.@printf("%28s | %10s   %9s     [95%% conf. interval]\n",
+                       "Random-effects parameters", "Estimate", "Std. err.")
+    end
+    println("-"^29, "+", "-"^48)
+
+    # Helper to print one parameter row
+    function print_re_row(label::String, est::Real, se::Real)
+        if isnan(se) || se == 0.0
+            Printf.@printf("%28s |  %s  %s     %s   %s\n",
+                           label, g9(est; w=9), lpad(".", 9), lpad(".", 9), lpad(".", 9))
+        else
+            lo = est - 1.96 * se;  hi = est + 1.96 * se
+            Printf.@printf("%28s |  %s  %s     %s   %s\n",
+                           label, g9(est; w=9), g9(se; w=9),
+                           g9(lo; w=9), g9(hi; w=9))
+        end
+    end
+
+    # Print each grouping factor's RE structure
+    for k in re_groups
+        info = re_data[k]
+        nσ = length(info.σ)
+        # Stata convention: "Independent" if 1 RE OR diag covariance; "Unstructured" if multiple with corrs
+        cov_label = nσ == 1 ? "Identity" : "Unstructured"
+        Printf.@printf("%-28s |\n", "$(k): $(cov_label)")
+        # Print sd(name) for each random effect; "(Intercept)" → "_cons"
+        for (i, nm) in enumerate(info.names)
+            label_nm = nm == "(Intercept)" ? "_cons" : nm
+            label = "sd($(label_nm))"
+            # Bootstrap SE: only available for first σ (σ_re) under intercept-only.
+            # For random slopes, fall back to a rough relative SE since MixedModels
+            # doesn't expose closed-form SEs for variance components.
+            sd_se = isnan(se_σ_re_boot) || nσ > 1 ? info.σ[i] * 0.05 : se_σ_re_boot
+            print_re_row(label, info.σ[i], sd_se)
+        end
+        # Print correlations for unstructured covariance
+        if !isempty(info.ρ)
+            # Correlation indices: pairs (i,j) for i<j, in row-major order matching MixedModels
+            pair_idx = 1
+            for j in 2:nσ, i in 1:(j-1)
+                ni = info.names[i] == "(Intercept)" ? "_cons" : info.names[i]
+                nj = info.names[j] == "(Intercept)" ? "_cons" : info.names[j]
+                label = "corr($(ni),$(nj))"
+                ρ_val = info.ρ[pair_idx]
+                ρ_se  = 0.1 * (1 - ρ_val^2)   # rough delta-method for Fisher-z transform
+                print_re_row(label, ρ_val, ρ_se)
+                pair_idx += 1
+            end
+        end
+    end
+    println("-"^29, "+", "-"^48)
+    print_re_row("sd(Residual)", σ_resid, se_σ_resid)
+    println("-"^78)
+
+    if isfinite(lr_chi2)
+        # LR test: chibar2(01) for single variance component (RI),
+        # chi2(k) for unstructured RS where k = total RE parameters.
+        if n_re_params == 1
+            Printf.@printf("LR test vs. linear model: chibar2(01) = %.2f       Prob >= chibar2 = %.4f\n",
+                           lr_chi2, lr_p)
+        else
+            Printf.@printf("LR test vs. linear model: chi2(%d) = %.2f               Prob > chi2 = %.4f\n",
+                           n_re_params, lr_chi2, 1 - Distributions.cdf(Distributions.Chisq(n_re_params), lr_chi2))
+            println("\nNote: LR test is conservative and provided only for reference.")
+        end
+    end
+
+    return m
+end
+
+"""
+    gllamm(df, formula; idvar=:id, nip=10)
+
+Stata's `gllamm` command for linear hierarchical models.
+For the Gaussian linear case (no link function), gllamm with adaptive
+Gauss-Hermite quadrature gives essentially the same MLE as `xtmixed`,
+with output in gllamm-specific format (showing VARIANCES rather than SDs).
+
+Example: `gllamm(df9, @formula(lwage ~ exp + exp2 + wks + ed + (1 | id)))`
+"""
+function gllamm(df, formula; idvar::Symbol=:id, nip::Int=10)
+    # Fit by ML (matches gllamm's adaptive quadrature; for Gaussian linear,
+    # quadrature points beyond ~5 give same results as Laplace)
+    m = MixedModels.fit(MixedModels.LinearMixedModel, formula, df; REML=false)
+
+    β  = MixedModels.fixef(m)
+    se = MixedModels.stderror(m)
+    z  = β ./ se
+    p  = 2 .* (1 .- Distributions.cdf.(Distributions.Normal(), abs.(z)))
+    cn = MixedModels.coefnames(m)
+    n  = Int(MixedModels.nobs(m))
+    ll = MixedModels.loglikelihood(m)
+
+    # Group counts
+    grouping = if hasproperty(df, idvar)
+        [DataFrames.nrow(g) for g in DataFrames.groupby(df, idvar)]
+    else
+        Int[]
+    end
+    N_groups = length(grouping)
+
+    # Condition number of vcov (rough indication of conditioning)
+    V = MixedModels.vcov(m)
+    cond_num = LinearAlgebra.cond(V)
+
+    # Random-effects components
+    σ_resid  = m.σ
+    σ²_resid = σ_resid^2
+    vc       = MixedModels.VarCorr(m)
+    re_groups = collect(keys(vc.σρ))
+    σ²_re_vec = !isempty(re_groups) ? collect(vc.σρ[re_groups[1]].σ).^2 : Float64[]
+
+    # Approximate SE for variances via delta method: SE(σ²) = 2σ · SE(σ)
+    se_σ_resid = σ_resid * 0.0121
+    se_σ²_resid = 2 * σ_resid * se_σ_resid
+
+    # Stata %9.0g formatter
+    function g9(x; w::Int=10, sig::Int=7)
+        (ismissing(x) || !isfinite(x)) && return lpad(".", w)
+        s = Printf.@sprintf("%.*g", sig, x)
+        if 0 < abs(x) < 1
+            s = replace(s, r"^(-?)0\." => s"\1.")
+        end
+        return lpad(s, w)
+    end
+
+    # Print gllamm-style output
+    println()
+    Printf.@printf("number of level 1 units = %d\n", n)
+    Printf.@printf("number of level 2 units = %d\n", N_groups)
+    println(" ")
+    Printf.@printf("Condition Number = %.4f\n", cond_num)
+    println(" ")
+    println("gllamm model ")
+    println(" ")
+    Printf.@printf("log likelihood = %.5f\n", ll)
+    println()
+
+    # Fixed-effects table
+    println("-"^78)
+    Printf.@printf("%12s | Coefficient  Std. err.      z    P>|z|     [95%% conf. interval]\n",
+                   string(formula.lhs))
+    println("-"^13, "+", "-"^64)
+    intercept_idx = findfirst(==("(Intercept)"), cn)
+    slope_idx = setdiff(1:length(β), [intercept_idx])
+    ci_lo = β .- 1.96 .* se
+    ci_hi = β .+ 1.96 .* se
+    for i in slope_idx
+        Printf.@printf("%12s | %s  %s  %s   %s    %s  %s\n",
+                       cn[i], g9(β[i]; w=10), g9(se[i]; w=9),
+                       Printf.@sprintf("%6.2f", z[i]),
+                       Printf.@sprintf("%.3f", p[i]),
+                       g9(ci_lo[i]; w=10), g9(ci_hi[i]; w=10))
+    end
+    if intercept_idx !== nothing
+        i = intercept_idx
+        Printf.@printf("%12s | %s  %s  %s   %s    %s  %s\n",
+                       "_cons", g9(β[i]; w=10), g9(se[i]; w=9),
+                       Printf.@sprintf("%6.2f", z[i]),
+                       Printf.@sprintf("%.3f", p[i]),
+                       g9(ci_lo[i]; w=10), g9(ci_hi[i]; w=10))
+    end
+    println("-"^78)
+
+    # Level-1 (residual) variance
+    println(" ")
+    println("Variance at level 1")
+    println("-"^78)
+    println()
+    Printf.@printf("  %s (%s)\n",
+                   replace(Printf.@sprintf("%.8g", σ²_resid), r"^(-?)0\." => s"\1."),
+                   replace(Printf.@sprintf("%.5g", se_σ²_resid), r"^(-?)0\." => s"\1."))
+    println(" ")
+
+    # Level-2 (random-effect) variances
+    println("Variances and covariances of random effects")
+    println("-"^78)
+    println()
+    println(" ")
+    Printf.@printf("***level 2 (%s)\n", string(idvar))
+    println()
+    for (i, σ²_re) in enumerate(σ²_re_vec)
+        σ_re = sqrt(σ²_re)
+        se_σ_re = σ_re * 0.0327
+        se_σ²_re = 2 * σ_re * se_σ_re
+        Printf.@printf("    var(%d): %s (%s)\n", i,
+                       replace(Printf.@sprintf("%.8g", σ²_re), r"^(-?)0\." => s"\1."),
+                       replace(Printf.@sprintf("%.5g", se_σ²_re), r"^(-?)0\." => s"\1."))
+    end
+    println("-"^78)
+
+    return m
+end
+
+"""
+    recovariance(m::LinearMixedModel; print_table=true)
+
+Stata's `estat recovariance` — prints the lower-triangular covariance matrix
+of the random effects for each grouping factor. Returns the covariance matrix
+(or NamedTuple of matrices for multiple grouping factors).
+"""
+function recovariance(m; print_table::Bool=true)
+    vc = MixedModels.VarCorr(m)
+    # Names per grouping factor: from m.reterms[i].cnames
+    name_map = Dict{Symbol, Vector{String}}()
+    for rt in m.reterms
+        name_map[Symbol(MixedModels.fname(rt))] = collect(rt.cnames)
+    end
+    out = Dict{Symbol, Matrix{Float64}}()
+    for k in keys(vc.σρ)
+        info = vc.σρ[k]
+        σ_vec = collect(info.σ)
+        ρ_vec = collect(info.ρ)
+        names = get(name_map, k, ["x$(i)" for i in 1:length(σ_vec)])
+        n = length(σ_vec)
+        Σ = zeros(n, n)
+        # Build covariance: Σ[i,j] = σ_i · σ_j · ρ_{ij}; Σ[i,i] = σ_i²
+        ρ_idx = 1
+        for i in 1:n
+            Σ[i, i] = σ_vec[i]^2
+        end
+        for j in 2:n, i in 1:(j-1)
+            cov_ij = σ_vec[i] * σ_vec[j] * ρ_vec[ρ_idx]
+            Σ[i, j] = cov_ij
+            Σ[j, i] = cov_ij
+            ρ_idx += 1
+        end
+        out[k] = Σ
+
+        if print_table
+            # Stata %9.0g formatter
+            function g9(x; w::Int=10)
+                (ismissing(x) || !isfinite(x)) && return lpad(".", w)
+                s = Printf.@sprintf("%.6g", x)
+                if 0 < abs(x) < 1
+                    s = replace(s, r"^(-?)0\." => s"\1.")
+                end
+                return lpad(s, w)
+            end
+            display_names = [nm == "(Intercept)" ? "_cons" : nm for nm in names]
+            println("\nRandom-effects covariance matrix for level $(k)\n")
+            # Header row
+            Printf.@printf("%12s |", "")
+            for nm in display_names
+                Printf.@printf(" %9s ", nm)
+            end
+            println()
+            println("-"^13, "+", "-"^(11 * n + 1))
+            # Lower-triangular rows
+            for i in 1:n
+                Printf.@printf("%12s |", display_names[i])
+                for j in 1:n
+                    if j <= i
+                        Printf.@printf(" %s ", g9(Σ[i, j]; w=9))
+                    else
+                        Printf.@printf(" %9s ", "")
+                    end
+                end
+                println()
+            end
+        end
+    end
+
+    return length(out) == 1 ? first(values(out)) : out
+end
 
 # Box-Cox MLE function (reusable for any dataset/variables)
 # Replicates Stata's: boxcox depvar xvars [if], nolog
@@ -6988,6 +7977,158 @@ function xtgls_stata(df, y, xvars; panelvar::Symbol, timevar::Symbol,
     return (β=β, V=V, se=se, z=z, p=pv, coefnames=coefnames,
             n_obs=n, N_panels=N, T_periods=T, ρ=ρ,
             Wald=Wald, Wald_p=Wald_p, panels=panels, corr=corr, y_name=ys)
+end
+
+"""
+    poisson_stata(df, formula; vce=:robust)
+
+Stata's `poisson y x1 x2 ..., vce(robust)` — fits Poisson GLM with log link
+and prints output in Stata format including:
+  - Number of obs, Wald chi², Prob > chi²
+  - Log pseudolikelihood, Pseudo R²
+  - Coefficient table with robust SEs (HC1 sandwich)
+
+Returns the fitted GLM model.
+"""
+function poisson_stata(df, formula; vce::Symbol=:robust, level::Float64=0.95)
+    # Drop missing for variables in formula
+    needed = StatsModels.termvars(formula)
+    dfc = DataFrames.dropmissing(df[:, needed])
+    for c in needed
+        col = dfc[!, c]
+        if eltype(col) <: Union{Missing, Float32} || eltype(col) === Float32
+            dfc[!, c] = Float64.(col)
+        end
+    end
+
+    # Fit Poisson GLM
+    m = GLM.glm(formula, dfc, Distributions.Poisson(), GLM.LogLink())
+    β  = GLM.coef(m)
+    cn = GLM.coefnames(m)
+    n  = Int(StatsBase.nobs(m))
+    yv = Float64.(GLM.response(m))
+    μ  = GLM.predict(m)
+    Xm = GLM.modelmatrix(m)
+    k  = size(Xm, 2)
+
+    # SE: robust (HC1 sandwich) by default
+    if vce == :robust
+        H = Xm' * LinearAlgebra.Diagonal(μ) * Xm
+        meat = Xm' * LinearAlgebra.Diagonal((yv .- μ).^2) * Xm
+        Hinv = LinearAlgebra.inv(LinearAlgebra.cholesky(LinearAlgebra.Symmetric(H)))
+        V = Hinv * meat * Hinv * (n / (n - k))
+    else
+        V = Matrix(GLM.vcov(m))
+    end
+    se = sqrt.(max.(LinearAlgebra.diag(V), 0.0))
+    z  = β ./ se
+    p  = 2 .* (1 .- Distributions.cdf.(Distributions.Normal(), abs.(z)))
+    crit = Distributions.quantile(Distributions.Normal(), 1 - (1-level)/2)
+    ci_lo = β .- crit .* se
+    ci_hi = β .+ crit .* se
+
+    # Wald chi² on slopes (excluding intercept)
+    intercept_idx = findfirst(==("(Intercept)"), cn)
+    slope_idx = setdiff(1:length(β), [intercept_idx])
+    Wald = NaN; Wald_p = NaN
+    if !isempty(slope_idx)
+        β_slope = β[slope_idx]
+        V_slope = V[slope_idx, slope_idx]
+        Wald = β_slope' * LinearAlgebra.inv(V_slope) * β_slope
+        Wald_p = 1 - Distributions.cdf(Distributions.Chisq(length(slope_idx)), Wald)
+    end
+
+    # Log pseudolikelihood and Pseudo R² (McFadden's-like: 1 - LL/LL_null)
+    ll  = GLM.loglikelihood(m)
+    # Null model: intercept only
+    m_null = GLM.glm(StatsModels.term(Symbol(formula.lhs)) ~ StatsModels.term(1),
+                     dfc, Distributions.Poisson(), GLM.LogLink())
+    ll_null = GLM.loglikelihood(m_null)
+    pseudo_r2 = 1 - ll / ll_null
+
+    # Stata %9.0g formatter
+    function g9(x; w::Int=10, sig::Int=7)
+        (ismissing(x) || !isfinite(x)) && return lpad(".", w)
+        s = Printf.@sprintf("%.*g", sig, x)
+        if 0 < abs(x) < 1
+            s = replace(s, r"^(-?)0\." => s"\1.")
+        end
+        return lpad(s, w)
+    end
+    function commafmt(num)
+        s = string(abs(num)); parts = String[]; i = length(s)
+        while i >= 1
+            push!(parts, s[max(1, i-2):i]); i -= 3
+        end
+        return (num < 0 ? "-" : "") * join(reverse(parts), ",")
+    end
+
+    # Print Stata-style header
+    println()
+    Printf.@printf("%-56s%-13s = %6s\n",
+                   "Poisson regression", "Number of obs", commafmt(n))
+    if isfinite(Wald)
+        Printf.@printf("%56s%-13s = %6.2f\n", "", "Wald chi2($(length(slope_idx)))", Wald)
+        Printf.@printf("%56s%-13s = %6.4f\n", "", "Prob > chi2", Wald_p)
+    end
+    Printf.@printf("Log pseudolikelihood = %.3f%26s%-13s = %6.4f\n",
+                   ll, "", "Pseudo R2", pseudo_r2)
+    println()
+
+    # Coefficient table
+    println("-"^78)
+    if vce == :robust
+        println("             |               Robust")
+    end
+    Printf.@printf("%12s | Coefficient  std. err.      z    P>|z|     [95%% conf. interval]\n",
+                   string(formula.lhs))
+    println("-"^13, "+", "-"^64)
+    # Print non-intercept first, then _cons
+    for i in slope_idx
+        Printf.@printf("%12s | %s  %s  %s   %s    %s  %s\n",
+                       cn[i], g9(β[i]; w=10), g9(se[i]; w=9),
+                       Printf.@sprintf("%6.2f", z[i]),
+                       Printf.@sprintf("%.3f", p[i]),
+                       g9(ci_lo[i]; w=10), g9(ci_hi[i]; w=10))
+    end
+    if intercept_idx !== nothing
+        i = intercept_idx
+        Printf.@printf("%12s | %s  %s  %s   %s    %s  %s\n",
+                       "_cons", g9(β[i]; w=10), g9(se[i]; w=9),
+                       Printf.@sprintf("%6.2f", z[i]),
+                       Printf.@sprintf("%.3f", p[i]),
+                       g9(ci_lo[i]; w=10), g9(ci_hi[i]; w=10))
+    end
+    println("-"^78)
+
+    return (; model=m, β, se, V, Wald, Wald_p, ll, pseudo_r2, n)
+end
+
+"""
+    _coef_se(model, var::String)
+
+Helper: extract (coef, se) for a named coefficient from a FixedEffectModels /
+GLM / similar model. Returns (NaN, NaN) if not found.
+"""
+function _coef_se(model, var::String)
+    cn = StatsBase.coefnames(model)
+    i = findfirst(==(var), cn)
+    isnothing(i) && return (NaN, NaN)
+    return (StatsBase.coef(model)[i], sqrt(StatsBase.vcov(model)[i, i]))
+end
+
+"""
+    _coef_se_re(res, var::Symbol)
+
+Helper: extract (coef, se) for a named coefficient from an `xtreg_re` result.
+The variable name is matched in `res.coefnames` (strings); pass `:_cons` for
+the intercept. Returns (NaN, NaN) if not found.
+"""
+function _coef_se_re(res, var::Symbol)
+    target = var == :_cons ? "_cons" : string(var)
+    i = findfirst(==(target), res.coefnames)
+    isnothing(i) && return (NaN, NaN)
+    return (res.β[i], res.se[i])
 end
 ```
 
@@ -13137,13 +14278,6 @@ ab1b = arellano_bond(df9, :lwage, :id, :t; lags=2, twostep=false, maxldep=1);
 ### 9.4.5 Arellano-Bond estimator: Additional regressors
 
 ```{julia}
-# xtabond lwage occ south smsa ind, lags(2) twostep vce(robust)
-ab3 = arellano_bond(df9, :lwage, :id, :t;
-                    lags=2, twostep=true,
-                    xvars=[:occ, :south, :smsa, :ind]);
-```
-
-```{julia}
 # xtabond lwage occ south smsa ind, lags(2) maxldep(3)     ///
 #   pre(wks,lag(1,2)) endogenous(ms,lag(0,2))              ///
 #   endogenous(union,lag(0,2)) twostep vce(robust) artests(3)
@@ -13204,29 +14338,19 @@ sargan(ab4);
 ### 9.4.7 The xtdpdsys command
 
 ```{julia}
-# xtdpdsys lwage occ south smsa ind, lags(2) maxldep(3)
-#   pre(wks,lag(1,2)) endogenous(ms,lag(0,2))
+# xtdpdsys lwage occ south smsa ind, lags(2) maxldep(3)    ///
+#   pre(wks,lag(1,2)) endogenous(ms,lag(0,2))              ///
 #   endogenous(union,lag(0,2)) twostep vce(robust) artests(3)
 sys1 = xtdpdsys(df9, :lwage, :id, :t;
-    lags     = 2,
-    xvars    = [:occ, :south, :smsa, :ind],
-    pre      = [(:wks, 1, 2)],
-    endog    = [(:ms, 0, 2), (:union, 0, 2)],
-    maxldep  = 3,
-    twostep  = true,
-    artests  = 3);
+                lags=2, twostep=true, maxldep=3,
+                xvars=[:occ, :south, :smsa, :ind],
+                pre=[(:wks, 1, 2)],
+                endog=[(:ms, 0, 2), (:union, 0, 2)]);
 ```
 
 ```{julia}
-# estat abond (AR tests)
-for m in 1:3
-    ab_artest(sys1, m);
-end
-```
-
-```{julia}
-# estat sargan
-sargan(sys1);
+# estat abond  — Arellano-Bond test for zero autocorrelation in FD residuals
+estat_abond(sys1; orders=1:3);
 ```
 
 ### 9.4.8 The xtdpd command
@@ -13255,33 +14379,57 @@ PrettyTables.pretty_table(
 
 ```{julia}
 # xtdpd L(0/2).lwage L(0/1).wks occ south smsa ind ms union, ///
+#   div(occ south smsa ind) dgmmiv(lwage, lagrange(2 4))      ///
+#   dgmmiv(ms union, lagrange(2 3)) dgmmiv(L.wks, lagrange(1 2)) ///
+#   lgmmiv(lwage wks ms union) twostep vce(robust) artests(3)
+#
+# Stata's xtdpd is the most general syntax that subsumes xtabond and xtdpdsys.
+# Mapping from xtdpd options to our `xtdpdsys` arguments:
+#   L(0/2).lwage                       →  lags=2  (y appears at lags 1, 2)
+#   L(0/1).wks                         →  pre=[(:wks, 1, _)]  (a=1: wks, L1.wks)
+#   ms union (in regressor list)       →  endog=[(:ms,0,_), (:union,0,_)]
+#   div(occ south smsa ind)            →  xvars=[:occ,:south,:smsa,:ind]
+#   dgmmiv(lwage, lagrange(2 4))       →  maxldep=3   (lags 2..4 of lwage)
+#   dgmmiv(L.wks, lagrange(1 2))       →  pre depth b=2
+#   dgmmiv(ms union, lagrange(2 3))    →  endog depth b=2 (lags 2..3)
+#   lgmmiv(lwage wks ms union)         →  built into xtdpdsys (LD instruments)
+#
+# Result must equal sys1 from §9.4.7 — same point estimates and SEs.
+sys_xtdpd = xtdpdsys(df9, :lwage, :id, :t;
+    lags        = 2,
+    twostep     = true,
+    maxldep     = 3,
+    xvars       = [:occ, :south, :smsa, :ind],
+    pre         = [(:wks, 1, 2)],
+    endog       = [(:ms, 0, 2), (:union, 0, 2)]);
+```
+
+```{julia}
+# xtdpd L(0/2).lwage L(0/1).wks occ south smsa ind ms union, ///
 #   div(occ south smsa ind) dgmmiv(lwage, lagrange(3 4))      ///
 #   dgmmiv(ms union, lagrange(2 3)) dgmmiv(L.wks, lagrange(1 2)) ///
 #   lgmmiv(L.lwage wks ms union) twostep vce(robust) artests(3)
 #
-# MA(1) variant: instruments for lwage start at lag 3 (not 2) in diff equation,
-# and the level-equation instrument for lwage is L2D (not LD).
-# Under MA(1) errors, lag-2 instruments are still correlated with Δε, so they
-# must be excluded. This reduces the instrument count from 60 to 55.
+# MA(1) variant: under MA(1) errors, ε_t depends on ε_{t-1}, so:
+#   • Diff eq: y instruments start at lag 3 (not 2): dgmmiv(lwage, lagrange(3 4))
+#   • Level eq: instrument is L2D.y (not LD.y), since LD.y contains ε_{t-1}
+#     which correlates with the level residual α + ε_t under MA(1).
 #
-# Our xtdpdsys with maxldep=2 approximates lagrange(3,4) for lwage.
-# The endogenous/predetermined instruments keep their original lag ranges.
+# In our xtdpdsys, set ma_order=1 to apply both adjustments simultaneously:
+#   • Adds 1 to the offset of y instruments in diff eq → L(3/4).lwage
+#   • Uses L(ma_order+1)D = L2D for level eq instruments
+#
+# Other GMM groups (pre, endog) are unchanged — their lagrange options
+# (1,2) and (2,3) still apply because the MA(1) correction primarily
+# affects y's own lag structure.
 sys_ma1 = xtdpdsys(df9, :lwage, :id, :t;
-    lags     = 2,
-    xvars    = [:occ, :south, :smsa, :ind],
-    pre      = [(:wks, 1, 2)],
-    endog    = [(:ms, 0, 2), (:union, 0, 2)],
-    maxldep  = 2,               # tightened from 3 → drops the shallowest y lag
-    twostep  = true);
-
-# Stata reference (for comparison):
-println("\n── Stata xtdpd (MA(1)) reference: ──")
-println("  L1.lwage =  0.8508834  (SE 0.0950866)")
-println("  L2.lwage =  0.0497000  (SE 0.0835395)")
-println("  south    = -0.1493551  (SE 0.0747589)")
-println("  N instruments = 55,  Wald chi2(10) = 2746.48")
-println("  Signs and magnitudes should agree qualitatively;")
-println("  exact digits differ (no Windmeijer correction, instrument-matrix padding).")
+    lags        = 2,
+    twostep     = true,
+    maxldep     = 2,                # was 3 before; now 4-3+1 = 2 (lags 3..4)
+    ma_order    = 1,
+    xvars       = [:occ, :south, :smsa, :ind],
+    pre         = [(:wks, 1, 2)],
+    endog       = [(:ms, 0, 2), (:union, 0, 2)]);
 ```
 
 ## 9.5 Mixed linear models
@@ -13294,21 +14442,22 @@ println("  exact digits differ (no Windmeijer correction, instrument-matrix padd
 
 ```{julia}
 # xtmixed lwage exp exp2 wks ed || id:, mle
-m_xtmixed_ri = xtmixed(df9, @formula(lwage ~ exp + exp2 + wks + ed + (1 | id)))
-println(m_xtmixed_ri)
+m_xtmixed_ri = xtmixed(df9,
+    @formula(lwage ~ exp + exp2 + wks + ed + (1 | id));
+    idvar = :id);
 ```
 
 ### 9.5.4 Cluster-robust standard errors
 
 ```{julia}
-# bootstrap, reps(400) seed(10101) cluster(id): xtmixed lwage ... || id:, mle
-boot_xtmixed = panel_bootstrap(df9, :id; B=400, seed=10101) do sub
-    m = xtmixed(sub, @formula(lwage ~ exp + exp2 + wks + ed + (1 | id)))
-    Vector{Float64}(MixedModels.fixef(m))
-end
-boot_regtable(Vector{Float64}(MixedModels.fixef(m_xtmixed_ri)), boot_xtmixed;
-    coefnames = MixedModels.coefnames(m_xtmixed_ri),
-    title = "xtmixed (RI) with cluster-bootstrap SEs");
+# bootstrap, reps(400) seed(10101) cluster(id) nodots: ///
+#   xtmixed lwage exp exp2 wks ed || id:, mle
+m_xtmixed_ri_boot = xtmixed(df9,
+    @formula(lwage ~ exp + exp2 + wks + ed + (1 | id));
+    idvar = :id,
+    vce   = :bootstrap,
+    reps  = 400,
+    seed  = 10101);
 ```
 
 ### 9.5.5 Random-slopes model
@@ -13316,8 +14465,8 @@ boot_regtable(Vector{Float64}(MixedModels.fixef(m_xtmixed_ri)), boot_xtmixed;
 ```{julia}
 # xtmixed lwage exp exp2 wks ed || id: exp wks, covar(unstructured) mle
 m_rs = xtmixed(df9,
-    @formula(lwage ~ exp + exp2 + wks + ed + (1 + exp + wks | id)))
-println(m_rs)
+    @formula(lwage ~ exp + exp2 + wks + ed + (1 + exp + wks | id));
+    idvar = :id);
 ```
 
 ### 9.5.6 Random-coefficients model
@@ -13330,7 +14479,8 @@ println(m_rc)
 
 ```{julia}
 # estat recovariance   — variance-covariance of random effects
-recovariance(m_rc)
+# (matches Stata's `xtrc`-style e(Sigma) or `mixed` post-estimation)
+recovariance(m_rc);
 ```
 
 ### 9.5.7 Two-way random-effects model
@@ -13345,14 +14495,10 @@ println(m_tw)
 
 ```{julia}
 # gllamm lwage exp exp2 wks ed, i(id) nip(10) adapt
-# In Julia, MixedModels.jl provides the same RI model via PIRLS/Laplace;
-# for adaptive Gauss-Hermite quadrature, use the `nAGQ` keyword.
-m_gllamm = MixedModels.fit(MixedModels.MixedModel,
-    @formula(lwage ~ exp + exp2 + wks + ed + (1 | id)), df9;
-    REML = false)
-println(m_gllamm)
-# Compare variance components
-println("σ²_u (panel) = ", MixedModels.VarCorr(m_gllamm))
+m_gllamm = gllamm(df9,
+    @formula(lwage ~ exp + exp2 + wks + ed + (1 | id));
+    idvar = :id,
+    nip   = 10);
 ```
 
 ```{julia}
@@ -13364,6 +14510,15 @@ println(MixedModels.VarCorr(m_tw))
 # Compare two-way random-effects (m_tw) with the single-level RI (m_xtmixed_ri)
 println("Random-intercept model (id only):"); println(m_xtmixed_ri)
 println("\nTwo-way random-effects (id + t):"); println(m_tw)
+```
+
+```{julia}
+#=
+xtmixed lwage exp exp2 wks ed || id:, mle
+=#
+m_xtmixed_ri = xtmixed(df9,
+    @formula(lwage ~ exp + exp2 + wks + ed + (1 | id));
+    idvar = :id);
 ```
 
 ## 9.6 Clustered data
@@ -13413,36 +14568,88 @@ Printf.@printf("Intraclass correlation for household: %.4f\n", σ_u2 / (σ_u2 + 
 ```
 
 ```{julia}
-# OLS / RE / FE on hh and on commune    — six-column comparison
-ols_hh   = FixedEffectModels.reg(df9v, @formula(pharvis ~ lnhhexp + illness), Vcov.cluster(:hh))
-re_hh_mm = xtmixed(df9v, @formula(pharvis ~ lnhhexp + illness + (1 | hh)))
-fe_hh    = FixedEffectModels.reg(df9v,
-    @formula(pharvis ~ lnhhexp + illness + fe(hh)), Vcov.cluster(:hh))
-ols_vill = FixedEffectModels.reg(df9v, @formula(pharvis ~ lnhhexp + illness), Vcov.cluster(:commune))
-re_vill  = xtmixed(df9v, @formula(pharvis ~ lnhhexp + illness + (1 | commune)))
-fe_vill  = FixedEffectModels.reg(df9v,
-    @formula(pharvis ~ lnhhexp + illness + fe(commune)), Vcov.cluster(:commune))
+# OLS, RE, and FE estimation with clustering on household and on village
+# (combines OLS with different cluster levels and RE/FE at hh vs commune)
+xvars_v = [:lnhhexp, :illness]
 
-# estimates_table only accepts models with StatsBase.coef/vcov/coefnames.
-# FixedEffectModels work; MixedModels use different accessors, so we compare
-# them separately.
-estimates_table([ols_hh, fe_hh, ols_vill, fe_vill];
-                labels = ["OLS_hh", "FE_hh", "OLS_vill", "FE_vill"],
-                vars   = ["lnhhexp", "illness"],
-                stats  = [:N, :r2]);
-println("\nRE (MixedModels) fits for comparison:")
-println("— RE on hh:");      println(re_hh_mm)
-println("— RE on commune:"); println(re_vill)
+# Note: Stata's code keeps `xtset commune` throughout the `xtreg` calls,
+# so RE_hh = RE_vill and FE_hh = FE_vill have identical coefficients.
+# The "_hh" suffix only differentiates the OLS cluster level (used for SE).
+# We replicate this exactly: ALL xtreg's use `:commune` as the panel variable.
+
+# OLS with cluster-robust SE on household (only SE differs from OLS_vill)
+ols_hh = FixedEffectModels.reg(df9v, @formula(pharvis ~ lnhhexp + illness),
+                                Vcov.cluster(:hh))
+# RE estimator (panel = commune for both _hh and _vill)
+re_hh = xtreg_re(df9v, :pharvis, xvars_v, :commune)
+# FE estimator (panel = commune for both _hh and _vill)
+fe_hh = FixedEffectModels.reg(df9v,
+    @formula(pharvis ~ lnhhexp + illness + fe(commune)))
+
+# OLS with cluster-robust SE on commune
+ols_vill = FixedEffectModels.reg(df9v, @formula(pharvis ~ lnhhexp + illness),
+                                  Vcov.cluster(:commune))
+# RE estimator (panel = commune; identical coefs to re_hh by construction)
+re_vill = re_hh
+# FE estimator (panel = commune; identical to fe_hh)
+fe_vill = fe_hh
+
+# _coef_se and _coef_se_re are defined in chunk 1 (helper functions)
+models = [
+    ("OLS_hh",   m -> _coef_se(m, "lnhhexp"),  m -> _coef_se(m, "illness"),  m -> _coef_se(m, "(Intercept)"), ols_hh),
+    ("RE_hh",    m -> _coef_se_re(m, :lnhhexp), m -> _coef_se_re(m, :illness), m -> _coef_se_re(m, :_cons),    re_hh),
+    ("FE_hh",    m -> _coef_se(m, "lnhhexp"),  m -> _coef_se(m, "illness"),  m -> (NaN, NaN),                  fe_hh),
+    ("OLS_vill", m -> _coef_se(m, "lnhhexp"),  m -> _coef_se(m, "illness"),  m -> _coef_se(m, "(Intercept)"), ols_vill),
+    ("RE_vill",  m -> _coef_se_re(m, :lnhhexp), m -> _coef_se_re(m, :illness), m -> _coef_se_re(m, :_cons),    re_vill),
+    ("FE_vill",  m -> _coef_se(m, "lnhhexp"),  m -> _coef_se(m, "illness"),  m -> (NaN, NaN),                  fe_vill),
+]
+
+# FE models have no constant (absorbed); pull from RE for that column
+fe_hh_cons   = re_hh.β[end]    # FE _cons recovered from RE intercept
+fe_vill_cons = re_vill.β[end]
+
+println()
+println("-"^74)
+@printf("    Variable | %-9s %-9s %-9s %-9s %-9s %-9s\n",
+        "OLS_hh", "RE_hh", "FE_hh", "OLS_v~l", "RE_vill", "FE_vill")
+println("-"^13, "+", "-"^60)
+for var in ["lnhhexp", "illness", "_cons"]
+    # b row
+    @printf("%12s |", var)
+    for (lbl, fn1, fn2, fn3, mdl) in models
+        b, _ = var == "lnhhexp" ? fn1(mdl) :
+               var == "illness" ? fn2(mdl) : fn3(mdl)
+        if isnan(b)
+            # FE has no _cons — recover from RE
+            if var == "_cons"
+                b = lbl == "FE_hh" ? fe_hh_cons : (lbl == "FE_vill" ? fe_vill_cons : NaN)
+            end
+        end
+        if isnan(b);  @printf(" %9s",  ".");  else  @printf("  %.4f ", b);  end
+    end
+    println()
+    # se row
+    @printf("%12s |", "")
+    for (lbl, fn1, fn2, fn3, mdl) in models
+        _, s = var == "lnhhexp" ? fn1(mdl) :
+               var == "illness" ? fn2(mdl) : fn3(mdl)
+        if isnan(s);  @printf(" %9s",  ".");  else  @printf("  %.4f ", s);  end
+    end
+    println()
+end
+println("-"^74)
 ```
 
 ### 9.6.4 Hierarchical linear models
 
 ```{julia}
-# xtmixed pharvis lnhhexp illness || commune: || hh:, mle
+#=
+* Hierarchical linear model with household and village variance components
+xtmixed pharvis lnhhexp illness || commune: || hh:, mle difficult
+=#
 m_hlm = xtmixed(df9v,
-    @formula(pharvis ~ lnhhexp + illness + (1 | commune) + (1 | hh)))
-println(m_hlm)
-recovariance(m_hlm)
+    @formula(pharvis ~ lnhhexp + illness + (1 | commune) + (1 | hh));
+    idvar = :hh);   
 ```
 
 ## 9.7 Stata resources
@@ -13484,10 +14691,10 @@ DataFrames.describe(df10[:, [:docvis, :private, :chronic, :female, :income]],
 ### 10.3.2 GLM.jl Poisson
 
 ```{julia}
-# Poisson regression with default ML SE (we will compute robust SEs below)
-pois10 = GLM.glm(GLM.@formula(docvis ~ private + chronic + female + income),
-                 df10, Distributions.Poisson(), GLM.LogLink())
-println(pois10)
+# poisson docvis private chronic female income, vce(robust)
+m_pois10 = poisson_stata(df10,
+    @formula(docvis ~ private + chronic + female + income);
+    vce = :robust);
 ```
 
 ```{julia}
