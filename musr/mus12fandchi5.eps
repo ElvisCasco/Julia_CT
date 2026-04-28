@@ -1,1510 +1,1008 @@
-%!PS-Adobe-2.0 EPSF-2.0
-%% This is a Stata generated postscript file
-%%BoundingBox: 0 0 396 288
-%%HiResBoundingBox: 0.000 0.000 396.000 288.000
-%%DocumentNeededResources: font Helvetica
-/xratio 0.012375 def
-/yratio 0.012375 def
-/Sbgfill {
-	/y1 exch def
-	/x1 exch def
-	/y0 exch def
-	/x0 exch def
-	x0 y0 moveto
-	x0 y1 lineto x1 y1 lineto x1 y0 lineto x0 y0 lineto
-	fill
-} def
-/Spt {
-	yratio mul
-	/yp exch def
-	xratio mul
-	/xp exch def
-	Slrgb setrgbcolor
-	xp yp .5 0 360 arc fill
-} def
-/Sln {
-	yratio mul
-	/y1p exch def
-	xratio mul
-	/x1p exch def
-	yratio mul
-	/y0p exch def
-	xratio mul
-	/x0p exch def
-	Slw setlinewidth
-	Slrgb setrgbcolor
-	x0p y0p M x1p y1p lineto S
-} def
-/Scrv {
-	yratio mul
-	/y3p exch def
-	xratio mul
-	/x3p exch def
-	yratio mul
-	/y2p exch def
-	xratio mul
-	/x2p exch def
-	yratio mul
-	/y1p exch def
-	xratio mul
-	/x1p exch def
-	Slw setlinewidth
-	Slrgb setrgbcolor
-	x1p y1p x2p y2p x3p y3p curveto
-	S
-} def
-/Stxtl {
-	/sp exch def
-	yratio mul
-	/sizep exch def
-	dup
-	/anglep exch def
-	0 exch sub
-	/angle2p exch def
-	yratio mul
-	/y0p exch def
-	xratio mul
-	/x0p exch def
-	Strgb setrgbcolor
-	x0p y0p M anglep rotate sizep fntsize sp show stroke angle2p rotate
-} def
-/Stxtc {
-	/sp exch def
-	yratio mul
-	/sizep exch def
-	dup
-	/anglep exch def
-	0 exch sub
-	/angle2p exch def
-	yratio mul
-	/y0p exch def
-	xratio mul
-	/x0p exch def
-	Strgb setrgbcolor
-	x0p y0p M anglep rotate sizep fntsize sp stringwidth exch -2 div exch rm sp show stroke angle2p rotate
-} def
-/Stxtr {
-	/sp exch def
-	yratio mul
-	/sizep exch def
-	dup
-	/anglep exch def
-	0 exch sub
-	/angle2p exch def
-	yratio mul
-	/y0p exch def
-	xratio mul
-	/x0p exch def
-	Strgb setrgbcolor
-	x0p y0p M anglep rotate sizep fntsize sp stringwidth 1 index -1 mul exch rm pop sp show stroke angle2p rotate
-} def
-/Srect {
-	/sfill exch def
-	/sstroke exch def
-	yratio mul
-	/y1 exch def
-	xratio mul
-	/x1 exch def
-	yratio mul
-	/y0 exch def
-	xratio mul
-	/x0 exch def
-	newpath x0 y0 moveto x0 y1 lineto x1 y1 lineto x1 y0 lineto x0 y0 lineto closepath
-	sfill Sfill
-	sstroke Sstroke
-} def
-/Sellipse {
-	/sfill exch def
-	/sstroke exch def
-	yratio mul
-	/yrad exch def
-	xratio mul
-	/xrad exch def
-	yratio mul
-	/y exch def
-	xratio mul
-	/x exch def
-	/savematrix matrix currentmatrix def
-	x y translate
-	xrad yrad scale
-	0 0 1 0 360 arc
-	savematrix setmatrix
-	sfill Sfill
-	sstroke Sstroke
-} def
-/Stri {
-	/sfill exch def
-	/sstroke exch def
-	xratio mul
-	/r exch def
-	yratio mul
-	/y0 exch def
-	xratio mul
-	/x0 exch def
-	/xcen x0 def
-	y0 r add
-	/ytop exch def
-	r 2 div
-	y0 exch sub
-	/ybot exch def
-	r 3 sqrt 2 div mul dup
-	xcen exch sub
-	/xleft exch def
-	xcen add
-	/xright exch def
-	newpath xcen ytop moveto xright ybot lineto xleft ybot lineto xcen ytop lineto closepath
-	sfill Sfill
-	sstroke Sstroke
-} def
-/Soldtri {
-	/sfill exch def
-	xratio mul
-	/r exch def
-	yratio mul
-	/y0 exch def
-	xratio mul
-	/x0 exch def
-	x0 r sub
-	/x1 exch def
-	y0 r sub
-	/y1 exch def
-	x0 r add
-	/x2 exch def
-	y0 r sub
-	/y2 exch def
-	/x3 x0 def
-	y0 r add
-	/y3 exch def
-	newpath x1 y1 moveto x2 y2 lineto x3 y3 lineto x1 y1 lineto closepath
-	sfill 1 eq {
-		Ssrgb setrgbcolor
-		gsave
-		fill
-		grestore
-	} if
-	Slw setlinewidth
-	Slrgb setrgbcolor
-	S
-} def
-/Sdia {
-	/sfill exch def
-	/sstroke exch def
-	xratio mul
-	/r exch def
-	yratio mul
-	/y exch def
-	xratio mul
-	/x exch def
-	x r sub
-	/x0 exch def
-	/y0 y def
-	/x1 x def
-	y r sub
-	/y1 exch def
-	x r add
-	/x2 exch def
-	/y2 y def
-	/x3 x def
-	y r add
-	/y3 exch def
-	newpath x0 y0 moveto x1 y1 lineto x2 y2 lineto x3 y3 lineto closepath
-	sfill Sfill
-	sstroke Sstroke
-} def
-/Scc {
-	/sfill exch def
-	/sstroke exch def
-	xratio mul
-	/r0 exch def
-	yratio mul
-	/y0 exch def
-	xratio mul
-	/x0 exch def
-	x0 y0 r0 0 360 arc closepath
-	sfill Sfill
-	sstroke Sstroke
-} def
-/Spie {
-	/sfill exch def
-	/salign exch def
-	/a1 exch def
-	/a0 exch def
-	xratio mul
-	/r exch def
-	yratio mul
-	/y exch def
-	xratio mul
-	/x exch def
-	/Pie {
-		x y moveto x y r a0 a1 arc closepath
-	} def
-	newpath Pie
-	sfill Sfill
-	Slrgb setrgbcolor
-	salign 0 eq {
-		gsave
-		Slw 2 mul setlinewidth
-		clip
-		S
-		grestore
-	} if
-	salign 1 eq {
-		Slw setlinewidth
-		S
-	} if
-	salign 2 eq {
-		gsave
-		Slw 2 mul setlinewidth
-		strokepath
-		pathbbox
-		/ury exch def
-		/urx exch def
-		/lly exch def
-		/llx exch def
-		newpath llx lly moveto llx ury lineto urx ury lineto urx lly lineto closepath
-		Pie
-		eoclip
-		newpath Pie
-		S
-		grestore
-	} if
-	newpath
-} def
-/Splu {
-	xratio mul
-	/r exch def
-	yratio mul
-	/y exch def
-	xratio mul
-	/x exch def
-	x r sub
-	/x0 exch def
-	x r add
-	/x1 exch def
-	x0 y M x1 y L
-	y r sub
-	/y0 exch def
-	y r add
-	/y1 exch def
-	x y0 M x y1 L
-} def
-/Scro {
-	xratio mul
-	/r exch def
-	yratio mul
-	/y exch def
-	xratio mul
-	/x exch def
-	x r sub
-	/x0 exch def
-	y r sub
-	/y0 exch def
-	x r add
-	/x1 exch def
-	y r add
-	/y1 exch def
-	x0 y0 M x1 y1 L
-	x r add
-	/x0 exch def
-	y r sub
-	/y0 exch def
-	x r sub
-	/x1 exch def
-	y r add
-	/y1 exch def
-	x0 y0 M x1 y1 L
-} def
-/Sm {
-	yratio mul
-	/y exch def
-	xratio mul
-	/x exch def
-	x y M
-} def
-/Sl {
-	yratio mul
-	/y exch def
-	xratio mul
-	/x exch def
-	x y L
-} def
-/SPl {
-	yratio mul
-	/y exch def
-	xratio mul
-	/x exch def
-	x y PL
-} def
-/Sarr {
-	/sfill exch def
-	xratio mul
-	/r exch def
-	yratio mul
-	/y exch def
-	xratio mul
-	/x exch def
-	y r add
-	/ytop exch def
-	y r sub
-	/ybot exch def
-	gsave
-	Slrgb setrgbcolor
-	sfill 0 eq {
-		r 2 mul 3 div dup
-		x exch sub
-		/xleft exch def
-		x add
-		/xright exch def
-		newpath xleft y moveto x ytop lineto xright y lineto x ytop moveto x ybot lineto
-		Lcs
-		1 setlinejoin
-	} {
-		r 2 div dup
-		x exch sub
-		/xleft exch def
-		x add
-		/xright exch def
-		newpath xleft y moveto x ytop lineto xright y lineto x ytop closepath moveto x ybot lineto
-		gsave
-		fill
-		grestore
-	} ifelse
-	Slw setlinewidth
-	S
-	grestore
-} def
-/Spipe {
-	xratio mul
-	/r exch def
-	yratio mul
-	/y exch def
-	xratio mul
-	/x exch def
-	y r sub
-	/y0 exch def
-	y r add
-	/y1 exch def
-	x y0 M x y1 L
-} def
-/Sv {
-	xratio mul
-	/r exch def
-	yratio mul
-	/y0 exch def
-	xratio mul
-	/x0 exch def
-	/xcen x0 def
-	y0 r add
-	/ytop exch def
-	r 2 div
-	y0 exch sub
-	/ybot exch def
-	r 3 sqrt 2 div mul dup
-	xcen exch sub
-	/xleft exch def
-	xcen add
-	/xright exch def
-	newpath xleft ytop moveto xcen ybot lineto xright ytop lineto
-	Slw setlinewidth
-	Slrgb setrgbcolor
-	S
-} def
-/Lcs {
-	currentlinecap
-	1 setlinecap
-} def
-/Lcr {
-	setlinecap
-} def
-/Sbp {
-	newpath
-} def
-/Sep {
-	/sfill exch def
-	closepath
-	/salign exch def
-	Lcs
-	salign 0 eq {
-		sfill Sfill
-		gsave
-		Slw 2 mul setlinewidth
-		clip
-		Slrgb setrgbcolor
-		S
-		grestore
-	} if
-	salign 1 eq {
-		sfill Sfill
-		Slw setlinewidth
-		Slrgb setrgbcolor
-		S
-	} if
-	salign 2 eq {
-		gsave
-		Slw 2 mul setlinewidth
-		Slrgb setrgbcolor
-		S
-		grestore
-		sfill Sfill
-	} if
-	newpath
-	Lcr
-} def
-/Sbpa {
-	newpath
-} def
-/Sepa {
-	Slw setlinewidth
-	Slrgb setrgbcolor
-	currentlinejoin
-	1 setlinejoin
-	S
-	setlinejoin
-	newpath
-} def
-/Stransrot {
-	/anglep exch def
-	yratio mul
-	/y exch def
-	xratio mul
-	/x exch def
-	x y translate
-	anglep rotate
-	x neg y neg translate
-} def
-/cp {currentpoint} def 
-/M {moveto} def 
-/rm {rmoveto} def 
-/S {
-	Slw 0.000 eq {
-		newpath
-	} if
-	Slw 0.000 ne {
-		stroke
-	} if
-} def
-/L {Slw setlinewidth Slrgb setrgbcolor lineto Lcs S Lcr} def 
-/PL {Slw setlinewidth Slrgb setrgbcolor lineto} def 
-/MF-Helvetica {
-  /newfontname exch def
-  /fontname exch def
-  /fontdict fontname findfont def
-  /newfont fontdict maxlength dict def
-  fontdict {
-  exch dup /FID eq {pop pop} {exch newfont 3 1 roll put} ifelse
+%!PS-Adobe-3.0 EPSF-3.0
+%%Creator: cairo 1.18.4 (https://cairographics.org)
+%%CreationDate: Tue Apr 28 16:52:41 2026
+%%Pages: 1
+%%DocumentData: Clean7Bit
+%%LanguageLevel: 3
+%%BoundingBox: 0 0 630 390
+%%EndComments
+%%BeginProlog
+50 dict begin
+/q { gsave } bind def
+/Q { grestore } bind def
+/cm { 6 array astore concat } bind def
+/w { setlinewidth } bind def
+/J { setlinecap } bind def
+/j { setlinejoin } bind def
+/M { setmiterlimit } bind def
+/d { setdash } bind def
+/m { moveto } bind def
+/l { lineto } bind def
+/c { curveto } bind def
+/h { closepath } bind def
+/re { exch dup neg 3 1 roll 5 3 roll moveto 0 rlineto
+      0 exch rlineto 0 rlineto closepath } bind def
+/S { stroke } bind def
+/f { fill } bind def
+/f* { eofill } bind def
+/n { newpath } bind def
+/W { clip } bind def
+/W* { eoclip } bind def
+/BT { } bind def
+/ET { } bind def
+/BDC { mark 3 1 roll /BDC pdfmark } bind def
+/EMC { mark /EMC pdfmark } bind def
+/cairo_store_point { /cairo_point_y exch def /cairo_point_x exch def } def
+/Tj { show currentpoint cairo_store_point } bind def
+/TJ {
+  {
+    dup
+    type /stringtype eq
+    { show } { -0.001 mul 0 cairo_font_matrix dtransform rmoveto } ifelse
   } forall
-  newfont /FontName newfontname put
-  newfont /Encoding ISOLatin1Encoding put
-  newfontname newfont definefont pop
+  currentpoint cairo_store_point
+} bind def
+/cairo_selectfont { cairo_font_matrix aload pop pop pop 0 0 6 array astore
+    cairo_font exch selectfont cairo_point_x cairo_point_y moveto } bind def
+/Tf { pop /cairo_font exch def /cairo_font_matrix where
+      { pop cairo_selectfont } if } bind def
+/Td { matrix translate cairo_font_matrix matrix concatmatrix dup
+      /cairo_font_matrix exch def dup 4 get exch 5 get cairo_store_point
+      /cairo_font where { pop cairo_selectfont } if } bind def
+/Tm { 2 copy 8 2 roll 6 array astore /cairo_font_matrix exch def
+      cairo_store_point /cairo_font where { pop cairo_selectfont } if } bind def
+/g { setgray } bind def
+/rg { setrgbcolor } bind def
+/d1 { setcachedevice } bind def
+/cairo_data_source {
+  CairoDataIndex CairoData length lt
+    { CairoData CairoDataIndex get /CairoDataIndex CairoDataIndex 1 add def }
+    { () } ifelse
 } def
-/Helvetica /Helvetica-0 MF-Helvetica
-/Slw 0.120 def
-1.000 1.000 1.000 setrgbcolor
-0 0 396.000 288.000 Sbgfill
-/Sfill {
-	/sfill exch def
-	sfill 1 eq {
-		Ssrgb setrgbcolor
-		gsave
-		fill
-		grestore
-	} if
-} def
-/Sstroke {
-	/sstroke exch def
-	sstroke 1 eq {
-		Slw setlinewidth
-		Slrgb setrgbcolor
-		S
-	} if
-	newpath
-} def
-/Slrgb {1.000 1.000 1.000} def
-/Strgb {1.000 1.000 1.000} def
-/Ssrgb {1.000 1.000 1.000} def
-/Slw 0.576 def
-0 0 31999 23272 0 1 Srect
-23 23 31976 23249 1 0 Srect
-/Slw 0.691 def
-/Slrgb {0.000 0.000 0.000} def
-/Strgb {0.000 0.000 0.000} def
-/Slw 1.037 def
-/Slrgb {0.376 0.376 0.376} def
-Sbpa
-4822 5485 Sm
-4870 5581 SPl
-4917 5683 SPl
-4964 5791 SPl
-5012 5906 SPl
-5059 6028 SPl
-5107 6157 SPl
-5154 6293 SPl
-5201 6434 SPl
-5249 6584 SPl
-5296 6743 SPl
-5344 6912 SPl
-5391 7090 SPl
-5438 7278 SPl
-5486 7472 SPl
-5533 7673 SPl
-5581 7882 SPl
-5628 8098 SPl
-5676 8318 SPl
-5723 8543 SPl
-5770 8772 SPl
-5818 9006 SPl
-5865 9243 SPl
-5913 9482 SPl
-5960 9726 SPl
-6007 9974 SPl
-6055 10227 SPl
-6102 10482 SPl
-6150 10742 SPl
-6197 11006 SPl
-6244 11271 SPl
-6292 11537 SPl
-6339 11803 SPl
-6387 12069 SPl
-6434 12337 SPl
-6482 12605 SPl
-6529 12872 SPl
-6576 13140 SPl
-6624 13407 SPl
-6671 13673 SPl
-6719 13936 SPl
-6766 14199 SPl
-6813 14460 SPl
-6861 14721 SPl
-6908 14980 SPl
-6956 15234 SPl
-7003 15484 SPl
-7050 15729 SPl
-7098 15968 SPl
-7145 16200 SPl
-7193 16425 SPl
-7240 16645 SPl
-7288 16857 SPl
-7335 17059 SPl
-7382 17255 SPl
-7430 17445 SPl
-7477 17626 SPl
-7525 17794 SPl
-7572 17952 SPl
-7619 18099 SPl
-7667 18237 SPl
-7714 18367 SPl
-7762 18490 SPl
-7809 18601 SPl
-7856 18702 SPl
-7904 18791 SPl
-7951 18871 SPl
-7999 18942 SPl
-8046 19004 SPl
-8094 19056 SPl
-8141 19102 SPl
-8188 19138 SPl
-8236 19164 SPl
-8283 19182 SPl
-8331 19193 SPl
-8378 19196 SPl
-8425 19192 SPl
-8473 19180 SPl
-8520 19163 SPl
-8568 19139 SPl
-8615 19109 SPl
-8662 19069 SPl
-8710 19022 SPl
-8757 18970 SPl
-8805 18912 SPl
-8852 18847 SPl
-8899 18777 SPl
-8947 18699 SPl
-8994 18617 SPl
-9042 18534 SPl
-9089 18450 SPl
-9137 18364 SPl
-9184 18276 SPl
-9279 18092 SPl
-9326 17999 SPl
-9374 17903 SPl
-9421 17805 SPl
-9468 17703 SPl
-9516 17597 SPl
-9563 17490 SPl
-9611 17380 SPl
-9658 17266 SPl
-9705 17149 SPl
-9753 17029 SPl
-9800 16906 SPl
-9848 16782 SPl
-9895 16658 SPl
-9943 16533 SPl
-9990 16409 SPl
-10037 16283 SPl
-10085 16157 SPl
-10132 16028 SPl
-10180 15898 SPl
-10227 15768 SPl
-10274 15638 SPl
-10322 15510 SPl
-10369 15380 SPl
-10417 15251 SPl
-10464 15120 SPl
-10511 14992 SPl
-10559 14867 SPl
-10606 14744 SPl
-10654 14622 SPl
-10701 14501 SPl
-10749 14380 SPl
-10796 14262 SPl
-10843 14144 SPl
-10891 14025 SPl
-10938 13907 SPl
-10986 13790 SPl
-11033 13670 SPl
-11080 13552 SPl
-11128 13438 SPl
-11175 13327 SPl
-11223 13213 SPl
-11270 13099 SPl
-11317 12985 SPl
-11365 12870 SPl
-11412 12757 SPl
-11460 12648 SPl
-11507 12540 SPl
-11555 12433 SPl
-11602 12323 SPl
-11649 12213 SPl
-11697 12103 SPl
-11744 11996 SPl
-11792 11891 SPl
-11839 11787 SPl
-11886 11684 SPl
-11934 11579 SPl
-11981 11475 SPl
-12029 11373 SPl
-12076 11273 SPl
-12123 11172 SPl
-12171 11071 SPl
-12218 10971 SPl
-12266 10872 SPl
-12313 10774 SPl
-12360 10675 SPl
-12408 10577 SPl
-12455 10480 SPl
-12503 10384 SPl
-12550 10289 SPl
-12598 10194 SPl
-12645 10100 SPl
-12692 10005 SPl
-12740 9910 SPl
-12787 9816 SPl
-12835 9723 SPl
-12882 9633 SPl
-12929 9543 SPl
-12977 9456 SPl
-13024 9370 SPl
-13072 9286 SPl
-13119 9203 SPl
-13166 9122 SPl
-13214 9040 SPl
-13261 8960 SPl
-13309 8884 SPl
-13356 8810 SPl
-13404 8736 SPl
-13451 8662 SPl
-13498 8586 SPl
-13546 8510 SPl
-13593 8435 SPl
-13641 8361 SPl
-13688 8289 SPl
-13735 8221 SPl
-13783 8155 SPl
-13830 8089 SPl
-13878 8023 SPl
-13925 7959 SPl
-13972 7896 SPl
-14020 7836 SPl
-14067 7777 SPl
-14115 7718 SPl
-14162 7659 SPl
-14210 7602 SPl
-14257 7547 SPl
-14304 7493 SPl
-14352 7440 SPl
-14399 7390 SPl
-14447 7339 SPl
-14494 7292 SPl
-14541 7246 SPl
-14589 7202 SPl
-14636 7159 SPl
-14684 7116 SPl
-14731 7073 SPl
-14778 7032 SPl
-14826 6992 SPl
-14873 6955 SPl
-14921 6918 SPl
-14968 6882 SPl
-15016 6848 SPl
-15063 6813 SPl
-15110 6778 SPl
-15158 6743 SPl
-15205 6710 SPl
-15253 6679 SPl
-15300 6647 SPl
-15347 6615 SPl
-15395 6583 SPl
-15442 6550 SPl
-15490 6519 SPl
-15537 6488 SPl
-15584 6457 SPl
-15632 6427 SPl
-15679 6396 SPl
-15727 6365 SPl
-15774 6334 SPl
-15821 6304 SPl
-15869 6274 SPl
-15916 6245 SPl
-15964 6216 SPl
-16011 6188 SPl
-16059 6162 SPl
-16106 6135 SPl
-16153 6108 SPl
-16201 6083 SPl
-16248 6058 SPl
-16296 6033 SPl
-16343 6008 SPl
-16390 5983 SPl
-16438 5958 SPl
-16485 5933 SPl
-16533 5908 SPl
-16580 5883 SPl
-16627 5860 SPl
-16675 5837 SPl
-16722 5816 SPl
-16770 5794 SPl
-16817 5772 SPl
-16865 5750 SPl
-16912 5728 SPl
-16959 5706 SPl
-17007 5685 SPl
-17054 5665 SPl
-17102 5645 SPl
-17149 5626 SPl
-17196 5607 SPl
-17244 5588 SPl
-17291 5569 SPl
-17339 5551 SPl
-17386 5532 SPl
-17433 5514 SPl
-17481 5496 SPl
-17528 5479 SPl
-17576 5461 SPl
-17623 5444 SPl
-17671 5427 SPl
-17718 5411 SPl
-17765 5395 SPl
-17813 5380 SPl
-17860 5364 SPl
-17908 5349 SPl
-17955 5334 SPl
-18002 5320 SPl
-18050 5306 SPl
-18097 5293 SPl
-18145 5280 SPl
-18192 5267 SPl
-18239 5255 SPl
-18287 5242 SPl
-18334 5230 SPl
-18382 5218 SPl
-18429 5207 SPl
-18477 5196 SPl
-18524 5185 SPl
-18571 5175 SPl
-18619 5165 SPl
-18666 5155 SPl
-18714 5147 SPl
-18761 5139 SPl
-18808 5130 SPl
-18856 5122 SPl
-18903 5114 SPl
-18951 5107 SPl
-18998 5100 SPl
-19045 5094 SPl
-19093 5088 SPl
-19140 5082 SPl
-19188 5076 SPl
-19235 5070 SPl
-19282 5065 SPl
-19330 5059 SPl
-19377 5053 SPl
-19425 5048 SPl
-19520 5037 SPl
-19567 5032 SPl
-19614 5027 SPl
-19662 5022 SPl
-19709 5017 SPl
-19757 5013 SPl
-19804 5008 SPl
-19851 5004 SPl
-19899 5000 SPl
-19946 4996 SPl
-19994 4993 SPl
-20041 4989 SPl
-20088 4985 SPl
-20136 4981 SPl
-20183 4978 SPl
-20231 4974 SPl
-20278 4970 SPl
-20326 4967 SPl
-20373 4963 SPl
-20420 4960 SPl
-20468 4957 SPl
-20515 4954 SPl
-20563 4951 SPl
-20610 4949 SPl
-20657 4946 SPl
-20705 4944 SPl
-20752 4941 SPl
-20800 4939 SPl
-20847 4937 SPl
-20894 4935 SPl
-20942 4932 SPl
-20989 4930 SPl
-21037 4928 SPl
-21084 4926 SPl
-21132 4923 SPl
-21179 4921 SPl
-21226 4918 SPl
-21274 4916 SPl
-21321 4913 SPl
-21369 4910 SPl
-21416 4908 SPl
-21463 4905 SPl
-21511 4903 SPl
-21558 4900 SPl
-21606 4898 SPl
-21653 4896 SPl
-21700 4894 SPl
-21748 4892 SPl
-21795 4890 SPl
-21843 4888 SPl
-21890 4887 SPl
-21938 4886 SPl
-21985 4884 SPl
-22032 4883 SPl
-22080 4882 SPl
-22127 4880 SPl
-22175 4879 SPl
-22222 4878 SPl
-22269 4876 SPl
-22317 4875 SPl
-22364 4873 SPl
-22412 4872 SPl
-22459 4871 SPl
-22506 4870 SPl
-22554 4870 SPl
-22601 4869 SPl
-22649 4868 SPl
-22696 4867 SPl
-22743 4866 SPl
-22791 4866 SPl
-22838 4865 SPl
-22886 4865 SPl
-22933 4864 SPl
-22981 4864 SPl
-23028 4863 SPl
-23075 4863 SPl
-23123 4862 SPl
-23170 4862 SPl
-23218 4861 SPl
-23265 4860 SPl
-23312 4860 SPl
-23360 4859 SPl
-23407 4858 SPl
-23455 4857 SPl
-23502 4856 SPl
-23549 4856 SPl
-23597 4855 SPl
-23644 4855 SPl
-23692 4854 SPl
-23739 4853 SPl
-23787 4852 SPl
-23834 4851 SPl
-23881 4851 SPl
-23929 4850 SPl
-23976 4849 SPl
-24024 4848 SPl
-24071 4848 SPl
-24118 4847 SPl
-24166 4847 SPl
-24213 4846 SPl
-24261 4846 SPl
-24308 4845 SPl
-24355 4845 SPl
-24403 4845 SPl
-24450 4845 SPl
-24498 4845 SPl
-24545 4845 SPl
-24593 4844 SPl
-24640 4844 SPl
-24687 4844 SPl
-24735 4844 SPl
-24782 4844 SPl
-24830 4844 SPl
-24877 4844 SPl
-24924 4844 SPl
-24972 4843 SPl
-25019 4843 SPl
-25067 4843 SPl
-25114 4843 SPl
-25161 4843 SPl
-25209 4843 SPl
-25256 4843 SPl
-25304 4843 SPl
-25351 4843 SPl
-25399 4843 SPl
-25446 4843 SPl
-25493 4842 SPl
-25541 4842 SPl
-25588 4842 SPl
-25636 4842 SPl
-25683 4842 SPl
-25730 4842 SPl
-25778 4842 SPl
-25825 4842 SPl
-25873 4842 SPl
-25920 4842 SPl
-25967 4842 SPl
-26015 4842 SPl
-26062 4842 SPl
-26110 4842 SPl
-26157 4842 SPl
-26204 4842 SPl
-26252 4841 SPl
-26299 4841 SPl
-26347 4841 SPl
-26394 4841 SPl
-Sepa
-/Slrgb {0.000 0.000 0.000} def
-Sbpa
-4893 5695 4939 5802 Sln
-4998 5953 5002 5964 Sln
-5002 5964 5038 6063 Sln
-5092 6216 5112 6273 Sln
-5112 6273 5129 6327 Sln
-5177 6482 5211 6593 Sln
-5257 6750 5276 6816 Sln
-5276 6816 5288 6862 Sln
-5332 7019 5361 7131 Sln
-5402 7289 5431 7401 Sln
-5469 7560 5494 7665 Sln
-5494 7665 5496 7673 Sln
-5533 7832 5549 7902 Sln
-5549 7902 5558 7945 Sln
-5593 8104 5603 8148 Sln
-5603 8148 5618 8218 Sln
-5653 8377 5658 8401 Sln
-5658 8401 5677 8491 Sln
-5711 8650 5713 8660 Sln
-5713 8660 5734 8764 Sln
-5766 8924 5767 8928 Sln
-5767 8928 5789 9038 Sln
-5821 9197 5822 9205 Sln
-5822 9205 5843 9312 Sln
-5874 9472 5877 9486 Sln
-5877 9486 5896 9585 Sln
-5926 9745 5931 9770 Sln
-5931 9770 5948 9859 Sln
-5979 10019 5986 10056 Sln
-5986 10056 6001 10134 Sln
-6031 10294 6041 10347 Sln
-6041 10347 6052 10408 Sln
-6081 10568 6095 10644 Sln
-6095 10644 6102 10683 Sln
-6131 10843 6150 10943 Sln
-6150 10943 6152 10957 Sln
-6181 11117 6202 11232 Sln
-6231 11392 6251 11506 Sln
-6279 11667 6300 11781 Sln
-6328 11941 6348 12056 Sln
-6377 12216 6397 12331 Sln
-6425 12491 6445 12606 Sln
-6473 12767 6478 12794 Sln
-6478 12794 6493 12881 Sln
-6521 13041 6532 13106 Sln
-6532 13106 6541 13155 Sln
-6569 13316 6587 13419 Sln
-6587 13419 6589 13431 Sln
-6618 13591 6638 13706 Sln
-6666 13866 6686 13981 Sln
-6714 14142 6735 14256 Sln
-6764 14416 6784 14530 Sln
-6814 14691 6834 14805 Sln
-6863 14965 6884 15079 Sln
-6914 15239 6915 15246 Sln
-6915 15246 6936 15354 Sln
-6966 15514 6970 15535 Sln
-6970 15535 6988 15628 Sln
-7019 15788 7024 15817 Sln
-7024 15817 7041 15902 Sln
-7073 16062 7079 16090 Sln
-7079 16090 7097 16176 Sln
-7131 16335 7134 16352 Sln
-7134 16352 7155 16448 Sln
-7189 16608 7214 16721 Sln
-7251 16880 7277 16993 Sln
-7316 17151 7344 17264 Sln
-7385 17422 7407 17504 Sln
-7407 17504 7415 17534 Sln
-7459 17691 7461 17696 Sln
-7461 17696 7493 17802 Sln
-7544 17957 7571 18037 Sln
-7571 18037 7582 18067 Sln
-7639 18219 7680 18320 Sln
-7680 18320 7683 18327 Sln
-7753 18474 7789 18545 Sln
-7789 18545 7808 18576 Sln
-7898 18712 7899 18713 Sln
-7899 18713 7953 18781 Sln
-7953 18781 7973 18801 Sln
-8101 18900 8117 18909 Sln
-8117 18909 8172 18926 Sln
-8172 18926 8212 18932 Sln
-8369 18900 8390 18891 Sln
-8390 18891 8445 18857 Sln
-8445 18857 8468 18839 Sln
-8587 18729 8609 18706 Sln
-8609 18706 8663 18641 Sln
-8755 18507 8773 18480 Sln
-8773 18480 8818 18409 Sln
-8900 18269 8937 18203 Sln
-8937 18203 8956 18166 Sln
-9028 18020 9046 17983 Sln
-9046 17983 9078 17915 Sln
-9146 17767 9155 17746 Sln
-9155 17746 9193 17661 Sln
-9259 17511 9265 17497 Sln
-9265 17497 9304 17405 Sln
-9367 17254 9374 17237 Sln
-9374 17237 9411 17147 Sln
-9472 16995 9483 16966 Sln
-9483 16966 9515 16887 Sln
-9575 16736 9593 16688 Sln
-9593 16688 9616 16627 Sln
-9671 16474 9702 16390 Sln
-9702 16390 9711 16364 Sln
-9767 16211 9806 16101 Sln
-9861 15948 9866 15934 Sln
-9866 15934 9900 15839 Sln
-9954 15685 9993 15575 Sln
-10048 15422 10084 15318 Sln
-10084 15318 10086 15312 Sln
-10142 15159 10181 15050 Sln
-10237 14897 10248 14866 Sln
-10248 14866 10278 14788 Sln
-10337 14636 10358 14581 Sln
-10358 14581 10379 14528 Sln
-10438 14376 10467 14303 Sln
-10467 14303 10481 14268 Sln
-10542 14117 10576 14033 Sln
-10576 14033 10586 14010 Sln
-10650 13860 10685 13778 Sln
-10685 13778 10696 13754 Sln
-10761 13604 10795 13528 Sln
-10795 13528 10808 13498 Sln
-10873 13348 10904 13278 Sln
-10904 13278 10919 13243 Sln
-10984 13093 11013 13027 Sln
-11013 13027 11031 12987 Sln
-11097 12838 11123 12780 Sln
-11123 12780 11144 12732 Sln
-11210 12583 11232 12533 Sln
-11232 12533 11258 12477 Sln
-11324 12328 11341 12290 Sln
-11341 12290 11372 12222 Sln
-11440 12074 11451 12050 Sln
-11451 12050 11489 11969 Sln
-11558 11821 11560 11817 Sln
-11560 11817 11607 11716 Sln
-11679 11570 11724 11479 Sln
-11724 11479 11730 11466 Sln
-11803 11320 11833 11262 Sln
-11833 11262 11856 11217 Sln
-11931 11072 11942 11051 Sln
-11942 11051 11985 10969 Sln
-12061 10824 12106 10737 Sln
-12106 10737 12114 10721 Sln
-12192 10578 12216 10534 Sln
-12216 10534 12248 10476 Sln
-12330 10336 12379 10252 Sln
-12379 10252 12389 10235 Sln
-12472 10095 12489 10066 Sln
-12489 10066 12531 9995 Sln
-12617 9857 12653 9800 Sln
-12653 9800 12678 9759 Sln
-12765 9620 12817 9537 Sln
-12817 9537 12827 9522 Sln
-12916 9386 12926 9370 Sln
-12926 9370 12981 9290 Sln
-13074 9156 13090 9134 Sln
-13090 9134 13143 9062 Sln
-13240 8931 13254 8912 Sln
-13254 8912 13308 8838 Sln
-13308 8838 13309 8837 Sln
-13408 8708 13418 8695 Sln
-13418 8695 13472 8627 Sln
-13472 8627 13480 8617 Sln
-13583 8490 13636 8425 Sln
-13636 8425 13656 8400 Sln
-13760 8275 13800 8226 Sln
-13800 8226 13834 8186 Sln
-13944 8065 13964 8043 Sln
-13964 8043 14019 7987 Sln
-14019 7987 14024 7982 Sln
-14142 7869 14183 7830 Sln
-14183 7830 14226 7789 Sln
-14349 7681 14401 7636 Sln
-14401 7636 14437 7606 Sln
-14565 7504 14565 7504 Sln
-14565 7504 14620 7461 Sln
-14620 7461 14656 7432 Sln
-14784 7331 14784 7331 Sln
-14784 7331 14839 7286 Sln
-14839 7286 14874 7257 Sln
-15002 7156 15002 7156 Sln
-15002 7156 15057 7112 Sln
-15057 7112 15092 7083 Sln
-15219 6981 15221 6980 Sln
-15221 6980 15276 6935 Sln
-15276 6935 15309 6908 Sln
-15436 6806 15440 6802 Sln
-15440 6802 15494 6759 Sln
-15494 6759 15527 6734 Sln
-15659 6638 15713 6599 Sln
-15713 6599 15754 6570 Sln
-15888 6478 15931 6449 Sln
-15931 6449 15985 6414 Sln
-16125 6332 16150 6318 Sln
-16150 6318 16205 6289 Sln
-16205 6289 16228 6277 Sln
-16372 6202 16423 6174 Sln
-16423 6174 16475 6148 Sln
-16619 6074 16642 6062 Sln
-16642 6062 16696 6037 Sln
-16696 6037 16724 6024 Sln
-16873 5957 16915 5941 Sln
-16915 5941 16970 5919 Sln
-16970 5919 16981 5915 Sln
-17134 5859 17188 5841 Sln
-17188 5841 17243 5824 Sln
-17243 5824 17245 5824 Sln
-17400 5772 17407 5770 Sln
-17407 5770 17462 5751 Sln
-17462 5751 17510 5735 Sln
-17665 5686 17680 5681 Sln
-17680 5681 17735 5666 Sln
-17735 5666 17777 5655 Sln
-17936 5616 17953 5612 Sln
-17953 5612 18008 5599 Sln
-18008 5599 18049 5590 Sln
-18208 5555 18227 5551 Sln
-18227 5551 18281 5540 Sln
-18281 5540 18322 5532 Sln
-18481 5498 18500 5494 Sln
-18500 5494 18554 5481 Sln
-18554 5481 18594 5472 Sln
-18752 5435 18773 5430 Sln
-18773 5430 18828 5417 Sln
-18828 5417 18866 5408 Sln
-19024 5368 19046 5362 Sln
-19046 5362 19101 5348 Sln
-19101 5348 19136 5339 Sln
-19294 5302 19319 5296 Sln
-19319 5296 19374 5286 Sln
-19374 5286 19408 5279 Sln
-19568 5248 19593 5244 Sln
-19593 5244 19647 5235 Sln
-19647 5235 19683 5229 Sln
-19844 5204 19866 5201 Sln
-19866 5201 19921 5194 Sln
-19921 5194 19959 5189 Sln
-20121 5168 20139 5166 Sln
-20139 5166 20194 5160 Sln
-20194 5160 20236 5155 Sln
-20397 5138 20412 5136 Sln
-20412 5136 20467 5131 Sln
-20467 5131 20513 5127 Sln
-20675 5112 20686 5111 Sln
-20686 5111 20740 5107 Sln
-20740 5107 20792 5104 Sln
-20955 5093 20959 5093 Sln
-20959 5093 21013 5090 Sln
-21013 5090 21068 5087 Sln
-21068 5087 21071 5087 Sln
-21234 5076 21287 5072 Sln
-21287 5072 21341 5067 Sln
-21341 5067 21349 5066 Sln
-21512 5057 21560 5055 Sln
-21560 5055 21615 5052 Sln
-21615 5052 21629 5051 Sln
-21792 5043 21833 5040 Sln
-21833 5040 21888 5038 Sln
-21888 5038 21908 5037 Sln
-22071 5029 22106 5028 Sln
-22106 5028 22161 5025 Sln
-22161 5025 22187 5024 Sln
-22350 5015 22380 5013 Sln
-22380 5013 22434 5010 Sln
-22434 5010 22466 5008 Sln
-22629 4997 22653 4996 Sln
-22653 4996 22707 4993 Sln
-22707 4993 22745 4991 Sln
-22908 4981 22926 4980 Sln
-22926 4980 22981 4976 Sln
-22981 4976 23024 4974 Sln
-23187 4965 23199 4965 Sln
-23199 4965 23254 4962 Sln
-23254 4962 23303 4960 Sln
-23466 4952 23473 4951 Sln
-23473 4951 23527 4948 Sln
-23527 4948 23582 4946 Sln
-23582 4946 23583 4946 Sln
-23745 4937 23746 4937 Sln
-23746 4937 23800 4934 Sln
-23800 4934 23855 4931 Sln
-23855 4931 23862 4930 Sln
-24025 4923 24074 4920 Sln
-24074 4920 24128 4917 Sln
-24128 4917 24141 4917 Sln
-24304 4910 24347 4909 Sln
-24347 4909 24401 4906 Sln
-24401 4906 24420 4905 Sln
-24583 4899 24620 4898 Sln
-24620 4898 24675 4896 Sln
-24675 4896 24699 4895 Sln
-24862 4890 24893 4889 Sln
-24893 4889 24948 4887 Sln
-24948 4887 24978 4886 Sln
-25141 4881 25167 4880 Sln
-25167 4880 25221 4879 Sln
-25221 4879 25257 4877 Sln
-25420 4873 25440 4873 Sln
-25440 4873 25494 4871 Sln
-25494 4871 25536 4870 Sln
-25699 4868 25713 4868 Sln
-25713 4868 25768 4867 Sln
-25768 4867 25816 4866 Sln
-25979 4865 25986 4865 Sln
-25986 4865 26041 4864 Sln
-26041 4864 26095 4864 Sln
-26258 4864 26259 4864 Sln
-26259 4864 26314 4864 Sln
-26314 4864 26369 4865 Sln
-26369 4865 26374 4865 Sln
-26537 4866 26587 4867 Sln
-26587 4867 26642 4867 Sln
-26642 4867 26653 4867 Sln
-26816 4868 26861 4868 Sln
-26861 4868 26915 4869 Sln
-26915 4869 26932 4869 Sln
-27095 4869 27134 4869 Sln
-27134 4869 27188 4869 Sln
-27188 4869 27211 4869 Sln
-27374 4869 27407 4869 Sln
-27407 4869 27462 4868 Sln
-27462 4868 27490 4868 Sln
-27653 4867 27680 4867 Sln
-27680 4867 27735 4867 Sln
-27735 4867 27770 4866 Sln
-27933 4865 27953 4865 Sln
-27953 4865 28008 4865 Sln
-28008 4865 28049 4864 Sln
-28212 4863 28227 4863 Sln
-28227 4863 28281 4863 Sln
-28281 4863 28328 4862 Sln
-28491 4861 28500 4861 Sln
-28500 4861 28555 4860 Sln
-28555 4860 28607 4860 Sln
-28770 4858 28773 4858 Sln
-28773 4858 28828 4858 Sln
-28828 4858 28882 4857 Sln
-28882 4857 28886 4857 Sln
-29049 4856 29101 4855 Sln
-29101 4855 29156 4855 Sln
-29156 4855 29165 4855 Sln
-29328 4853 29374 4853 Sln
-29374 4853 29429 4852 Sln
-29429 4852 29444 4852 Sln
-29607 4851 29647 4850 Sln
-29647 4850 29702 4850 Sln
-29702 4850 29724 4850 Sln
-Sepa
-/Slw 0.691 def
-4208 4208 4208 20765 Sln
-4208 4823 3820 4823 Sln
-3336 4823 0
-/Helvetica-0 findfont 970 yratio mul scalefont setfont
-(0) stringwidth pop add
-2 div xratio div
-dup 4 3 roll exch 90.000 cos mul sub 3 1 roll 90.000 sin mul sub 2 copy
-/fntsize {/Helvetica-0 findfont exch scalefont setfont } def
-90.000 970
-(0) Stxtl
-(0) stringwidth pop xratio div
-dup 4 3 roll exch 90.000 cos mul add 3 1 roll 90.000 sin mul add 2 copy
-pop pop pop pop
-4208 9932 3820 9932 Sln
-3336 9932 0
-/Helvetica-0 findfont 970 yratio mul scalefont setfont
-(.05) stringwidth pop add
-2 div xratio div
-dup 4 3 roll exch 90.000 cos mul sub 3 1 roll 90.000 sin mul sub 2 copy
-/fntsize {/Helvetica-0 findfont exch scalefont setfont } def
-90.000 970
-(.05) Stxtl
-(.05) stringwidth pop xratio div
-dup 4 3 roll exch 90.000 cos mul add 3 1 roll 90.000 sin mul add 2 copy
-pop pop pop pop
-4208 15041 3820 15041 Sln
-3336 15041 0
-/Helvetica-0 findfont 970 yratio mul scalefont setfont
-(.1) stringwidth pop add
-2 div xratio div
-dup 4 3 roll exch 90.000 cos mul sub 3 1 roll 90.000 sin mul sub 2 copy
-/fntsize {/Helvetica-0 findfont exch scalefont setfont } def
-90.000 970
-(.1) Stxtl
-(.1) stringwidth pop xratio div
-dup 4 3 roll exch 90.000 cos mul add 3 1 roll 90.000 sin mul add 2 copy
-pop pop pop pop
-4208 20150 3820 20150 Sln
-3336 20150 0
-/Helvetica-0 findfont 970 yratio mul scalefont setfont
-(.15) stringwidth pop add
-2 div xratio div
-dup 4 3 roll exch 90.000 cos mul sub 3 1 roll 90.000 sin mul sub 2 copy
-/fntsize {/Helvetica-0 findfont exch scalefont setfont } def
-90.000 970
-(.15) Stxtl
-(.15) stringwidth pop xratio div
-dup 4 3 roll exch 90.000 cos mul add 3 1 roll 90.000 sin mul add 2 copy
-pop pop pop pop
-1823 12487 0
-/Helvetica-0 findfont 1164 yratio mul scalefont setfont
-(Density f\(y\)) stringwidth pop add
-2 div xratio div
-dup 4 3 roll exch 90.000 cos mul sub 3 1 roll 90.000 sin mul sub 2 copy
-/fntsize {/Helvetica-0 findfont exch scalefont setfont } def
-90.000 1164
-(Density f\(y\)) Stxtl
-(Density f\(y\)) stringwidth pop xratio div
-dup 4 3 roll exch 90.000 cos mul add 3 1 roll 90.000 sin mul add 2 copy
-pop pop pop pop
-4208 4208 31184 4208 Sln
-5617 4208 5617 3820 Sln
-5617 2948 0
-/Helvetica-0 findfont 970 yratio mul scalefont setfont
-(0) stringwidth pop add
-2 div xratio div
-dup 4 3 roll exch 0.000 cos mul sub 3 1 roll 0.000 sin mul sub 2 copy
-/fntsize {/Helvetica-0 findfont exch scalefont setfont } def
-0.000 970
-(0) Stxtl
-(0) stringwidth pop xratio div
-dup 4 3 roll exch 0.000 cos mul add 3 1 roll 0.000 sin mul add 2 copy
-pop pop pop pop
-13935 4208 13935 3820 Sln
-13935 2948 0
-/Helvetica-0 findfont 970 yratio mul scalefont setfont
-(10) stringwidth pop add
-2 div xratio div
-dup 4 3 roll exch 0.000 cos mul sub 3 1 roll 0.000 sin mul sub 2 copy
-/fntsize {/Helvetica-0 findfont exch scalefont setfont } def
-0.000 970
-(10) Stxtl
-(10) stringwidth pop xratio div
-dup 4 3 roll exch 0.000 cos mul add 3 1 roll 0.000 sin mul add 2 copy
-pop pop pop pop
-22252 4208 22252 3820 Sln
-22252 2948 0
-/Helvetica-0 findfont 970 yratio mul scalefont setfont
-(20) stringwidth pop add
-2 div xratio div
-dup 4 3 roll exch 0.000 cos mul sub 3 1 roll 0.000 sin mul sub 2 copy
-/fntsize {/Helvetica-0 findfont exch scalefont setfont } def
-0.000 970
-(20) Stxtl
-(20) stringwidth pop xratio div
-dup 4 3 roll exch 0.000 cos mul add 3 1 roll 0.000 sin mul add 2 copy
-pop pop pop pop
-30570 4208 30570 3820 Sln
-30570 2948 0
-/Helvetica-0 findfont 970 yratio mul scalefont setfont
-(30) stringwidth pop add
-2 div xratio div
-dup 4 3 roll exch 0.000 cos mul sub 3 1 roll 0.000 sin mul sub 2 copy
-/fntsize {/Helvetica-0 findfont exch scalefont setfont } def
-0.000 970
-(30) Stxtl
-(30) stringwidth pop xratio div
-dup 4 3 roll exch 0.000 cos mul add 3 1 roll 0.000 sin mul add 2 copy
-pop pop pop pop
-17696 1357 0
-/Helvetica-0 findfont 1164 yratio mul scalefont setfont
-(y) stringwidth pop add
-2 div xratio div
-dup 4 3 roll exch 0.000 cos mul sub 3 1 roll 0.000 sin mul sub 2 copy
-/fntsize {/Helvetica-0 findfont exch scalefont setfont } def
-0.000 1164
-(y) Stxtl
-(y) stringwidth pop xratio div
-dup 4 3 roll exch 0.000 cos mul add 3 1 roll 0.000 sin mul add 2 copy
-pop pop pop pop
-22558 17329 30849 20430 0 1 Srect
-22586 17357 30821 20402 1 0 Srect
-/Slw 1.037 def
-/Slrgb {0.376 0.376 0.376} def
-22977 19526 26607 19526 Sln
-/Slrgb {0.000 0.000 0.000} def
-22977 18233 23093 18233 Sln
-23256 18233 23372 18233 Sln
-23535 18233 23651 18233 Sln
-23814 18233 23931 18233 Sln
-24094 18233 24210 18233 Sln
-24373 18233 24489 18233 Sln
-24652 18233 24768 18233 Sln
-24931 18233 25047 18233 Sln
-25210 18233 25326 18233 Sln
-25489 18233 25605 18233 Sln
-25768 18233 25885 18233 Sln
-26048 18233 26164 18233 Sln
-26327 18233 26443 18233 Sln
-26606 18233 26607 18233 Sln
-27092 19255 2 copy
-/fntsize {/Helvetica-0 findfont exch scalefont setfont } def
-0.000 776
-(Chi\(5\)) Stxtl
-(Chi\(5\)) stringwidth pop xratio div
-dup 4 3 roll exch 0.000 cos mul add 3 1 roll 0.000 sin mul add 2 copy
-pop pop pop pop
-27092 17962 2 copy
-/fntsize {/Helvetica-0 findfont exch scalefont setfont } def
-0.000 776
-(5*F\(5,30\)) Stxtl
-(5*F\(5,30\)) stringwidth pop xratio div
-dup 4 3 roll exch 0.000 cos mul add 3 1 roll 0.000 sin mul add 2 copy
-pop pop pop pop
-17696 21339 0
-/Helvetica-0 findfont 1358 yratio mul scalefont setfont
-(Chisquared\(5\) and 5*F\(5,30\) Densities) stringwidth pop add
-2 div xratio div
-dup 4 3 roll exch 0.000 cos mul sub 3 1 roll 0.000 sin mul sub 2 copy
-/fntsize {/Helvetica-0 findfont exch scalefont setfont } def
-0.000 1358
-(Chisquared\(5\) and 5*F\(5,30\) Densities) Stxtl
-(Chisquared\(5\) and 5*F\(5,30\) Densities) stringwidth pop xratio div
-dup 4 3 roll exch 0.000 cos mul add 3 1 roll 0.000 sin mul add 2 copy
-pop pop pop pop
-S showpage
+/cairo_flush_ascii85_file { cairo_ascii85_file status { cairo_ascii85_file flushfile } if } def
+/cairo_image { image cairo_flush_ascii85_file } def
+/cairo_imagemask { imagemask cairo_flush_ascii85_file } def
+%%EndProlog
+%%BeginSetup
+%%BeginResource: font f-0-0
+%!FontType1-1.1 f-0-0 1.0
+11 dict begin
+/FontName /f-0-0 def
+/PaintType 0 def
+/FontType 1 def
+/FontMatrix [0.001 0 0 0.001 0 0] readonly def
+/FontBBox {0 -217 677 747                                    } readonly def
+/Encoding 256 array
+0 1 255 {1 index exch /.notdef put} for
+dup 32 /space put
+dup 40 /parenleft put
+dup 41 /parenright put
+dup 42 /asterisk put
+dup 44 /comma put
+dup 46 /period put
+dup 48 /zero put
+dup 49 /one put
+dup 50 /two put
+dup 51 /three put
+dup 53 /five put
+dup 67 /C put
+dup 68 /D put
+dup 70 /F put
+dup 101 /e put
+dup 102 /f put
+dup 104 /h put
+dup 105 /i put
+dup 110 /n put
+dup 115 /s put
+dup 116 /t put
+dup 121 /y put
+readonly def
+currentdict end
+currentfile eexec
+f983ef0097ece636fb4a96c74d26ab84185f6dfa4a16a7a1c27bbe3f1156aea698df336d20b467
+b10e7f33846656653c5ac6962759d3056cbdb3190bac614b984bf5a132dc418192443014ba63de
+800d392b6fea026574bb2535fd7bb5338f35bf15a88ea328fdaa49670c7852e3d060f3c5d6b07f
+2ef6d0f22646c5d18e19a2ae3ee120390f6dd96f76dcf1e127de5e9299077a00c17c0d71e36e5b
+9d5ec58fceda57739a6a4214d4b79d6c48d2784b60c320323c7acddddf34db833cac0cf109f799
+69d114a330d372e5c978a66acc84e3fe5557f6240856a013ffaa0199444e5c5036f775eba4a5c5
+8cde66cf604b9aca2178431127b8a1ff7ed633a65c04600af5f573483112251caf3509f22c229c
+4b50e4a8f7c40b0590a7b36219d8025ae0ab21298430af8038c03c574183e313dcc1abfedd14a9
+f7f5ad3eb2bd1ab2dd112316e0dd9e8539103c5821f392469318893ee4c470b23af306174b45b2
+f38a0b2545d619bd31b549cccf7510b23e8cd6505aa669c38e581ad436bf6583106c65da87b5f5
+556378600cc343e26bb6c87f39d05055ed63675391be0162b47a6e92159c172c56e84009949b04
+d6b371692fcf77d75cbd2fe4a951781d36622292f98094ca256306a76f57159c2a2f949ed0b462
+034abf914fd65174ce12492b8d718a4e9a01dbcdd3280bfb78939d9439def396ae4acc5b3ffb96
+a1681e2ac232d7a671eccaab5d06db970381f4281f425f9409954df1682bf59fd5327a09b31c26
+28984e9dcc77a36163941ff3e74854aaeb87a7dbee70ae56cdfeb6fc3961e7b0b3c8f99926e821
+dbabc54263b34317e2ae894b39b5b34778db32df6b4be984daf521b4483fd1d9e23cb21ea6a853
+6796fb590b38fde189a83c8309d800f3f6b0e45e4be3e27c16b21127398b7a176790a1973ab2c5
+d093c912d4935d2f65982f4558ab91452efbb343968ad4ca34b0a7df7207242e648c79c2a5147b
+d90bc6d6535ef0b6e6cab2ac5dab2de2d94792f337de23aa3602a8f0f834395b17df67199837c7
+f12ca861e365207920a263efec64b7e96f232242348b2085668bbc9080f13f5fcbf2acf3777612
+f06a5ab54e52e6d6f7a20f82732e9f29f58bced6785577d0c9674765123e2aebfecdd549daa92e
+5c1e6b49acde73e59dca9122932df650186d4aeb48238738d27742e02fa7d13dae247d3e25131d
+ac70ebfe82728447416f1e43de2d2bc3cfd181277d37f86593267d831101590706d592b55cc4e5
+72c293d1594afaeac4c4f7aae2c297238c17dceadde88d263627b28cefc1adac84b3279ca60d40
+d412e3b64f0899b52a6c275046145640cae3480bade91ca7276e9ee7312c7caa9560fe52c1a4d1
+1ac619528361d2a96e3011a3f7318f7666978fee6cd9cb076f46fc88e18e019b3608646fd49f99
+cb2d79763599738bdb034c5fa72acbb6c35a7dfd62c59261691e9a3dfca1ab531880407d0ac9d2
+fd66dcafe16db83f9044f04f3f55e6c50de2606068c6dbd8483aea331b9cbc5c2f4b72aec3924a
+67cb59d5ae770e8b9a8e99389c3b5784151a0e91cfd8743141e006d7dd3b2bf6538513c8c108db
+1aff4cf50a9613edec8689a98633c9ea5aa8b7d0acc8fc11c4f586d9b525dd648ba49b2e3f0208
+71862248760ea72279429d61bbbd78abb739379bbee0d11ef9d1ac622c027d5db785c71e106d29
+74fb546ca10900620d7f687ef5aa646869cb6e1fb3bd4d765c8ee6a03431b91f7f14bb0bc4abc6
+ff455a35f68cfe68919488be3dd4eb3e437da8c0473d60ecfbe6a759707148c661e94efcaed175
+d3faed03a53171578cb646b57cbca848d6d147d7e905b6b5e88f339db5e735d55539121dd79bee
+371731249e28f9e8a85bf025f7523a9a1d3085a07ee328c7137dba03ac32ea8b5e2483c5fc64dd
+d0098f5db6286e551d03cd0e9dc21c96c49c18a513f1f9132b6bdd0e31e5c2379a695550905f73
+330ffe7976734e6bc2a9f68ddcf9d866786441f6909f3a2cc86dfc2dc86bb6357633beb31a44cd
+412eb8155d02e6c4f9948f2af1ddd999af8c16ed3d5eebb80a045cd39d1c19a36996d0029d1c76
+fb8d925d7e4a5b81fc3bd37444973f6054b668b30e47caf0daeb500dc032ae9195146d00217454
+614151ac27e7d6d021e54791cf028f029943e553495bbab668ca0d86e04a0a7b9ee9756bac69e5
+2ef145258be3c579f0f4614668c3e7f13c11728b4bc3756a71c709462ad86038a11ba2ec5ec08e
+894665c9a536cc2213663caa3fee30294efc636beb17fc2dc3e9c74bcdc97ca3aa2df6ebbae78d
+43ac39e9b0bb808c0016a4307a6dcf4a75b8b6315220a62d10b73c29990fdaf925a91e54a80230
+3c74a90214a06bb8517d9846911c6779a481d3cd1d9348e892823bf2241a30feb03e453b50ad34
+8a15fe6671541e5166509411ca505449407bb358425236018f48218b3054c9b29c99bbd5c39476
+4ac7b23e2e42cbd1a4c3126889e8bc2ce8579c55562264400d67fdc89aeea612351cdcf1f43a53
+800668629d6d15ca932c200ecc38b811a637885cc5d6b5502becb122c8f3102afe074c50b202c9
+80f1a1b34d0efd9e4405b0cdd5ae2cfcaf3a2e90042315ccc30bdedf16b9487457212651079f79
+97b38e72ccdb7e23eaaa88fb55fa73513fe50aa820aaffee7ce3ec74600e4023d859bfb5d05103
+e947eb83c132100e2275290a77f14d5350ce98fd3fb924874bdb37c0fd8d730216129fda99cb1b
+d4f628025bf66502a3fce5778007dee07fcd47fb446742667174f653147ab22f27660c6c443c89
+e53e1836464272a8bd4d3e39046fe97a45d8cad27bf7bba6a5b1a766e4b56db87daa7f402b56b2
+d159b6b2503958ba187935bbc37d250082a5ad2ea6f896a2340f8bf052618f08628d5ad0e54d7d
+4be0fe810aeaebeb6e5022ea96e609280734ab113387599084b1e1eb9c0a919e2a4c99d3e19049
+9511ae10ea87604c4e32eefc832d83d77b6512fc2e5f61f367d3fd42d04c24be4fb0bcddbfce9a
+a4ee30987d8b60a0602d9a2cb8d5a5ecc35c12688dff858829bf79efe8f0d5e1f6882791fd03de
+a34e76a9a6be5152938dca3a85bc4c7ae465fc817f8fc79d28bb68f1e0f2160fc87ed7738e7355
+8fe81a3d6bac11f8f8a001501ef7d2a16ecbb6cdedc166f084f29ebf3868c4335546838d07f6d1
+354a354be5662c9bf0333800eb6b71ef33bb68131a6a591173cdbab8838a9bf64ce8a65aedd977
+d3d122b45ce80b89dee76b4ce7ed6ba16e62de9f5466629d505c4c9b8bff95ea43be1b30b2afc8
+2ed97f0dd4be566f6e595c93275feccb34642b14f1b6b3cf805503c4b78e6534f8f49ba4ba42ac
+9083f1420767f3ed8de06ab2e1bf6806a0fdc184c699ef386c68e4f691d68a8f3b1b57c9719b41
+11963eef3bff7d82b749070b8430e2f3125eeedafa17910e7fc7fa405c4f90e468d4cd32622da6
+bb8ec35b9fe2f686c70a24da2db53bdc68ec01133c74a85940de927f2d67723dbbcea38c61cb6e
+57a7d80f03026881480990cd5d264a457cb32439df106ee39020fcdf4ca6f6d8fa67076a8c3654
+1109197c165e5e54cea9d3fc635151a38fba7bb25bb99e49937279202de8dd0e1fbbbf74691926
+b63fb8ba466494448c625caabfbaf06d24fb1d0b5dd93294c8affc9feb6c8443ceb82b6463af1a
+b3364db692cf9f8a75db23fca016cf7084a491ea3fbc34a564a78fdf6abb2967cb1899f1837517
+d46350db7b464d75879465bb4366e1ace0e10db6b9660d5c4e4327d105892a9ae2dcdbc2160586
+732add5f75977d6dfa7afce5cea6d23520682bff20b9c1b6b98c7fa367f9c95e9a371c5fc4536a
+0c60ef13d275e5e611ac46754a0a3e8f4656f3f8f802d2a2c79fe8be42fa63b19ff29a71aa3a15
+06bb973f48c83e7d69efd747b1bcb35ec43bcaf6e503b0fa12f6d1a2d5c543688e3b75630bf41e
+1223cb375f82cb38a9174983a6e932b66f462aa4de43ae437b7c4c466864240390dc47dd64b872
+1a4baa34c6c70aba6f8b3b9a6a18b2339223dc051a767678912706aa38fdf37cdb8ef31accda56
+1959c228e7ed511ab10d88031e3ac021103bff6e12c4909e3bbddc0676530ee7134ca540cd8961
+3019685676a41f6c1ed518e43a5e47427cc08b6e02dd29e377260a0918bd12f55531943c890b4e
+1faef836b4a907f694644037e58b2603d43ae3534dd782974e6d33ebfebd81af6187ece5e404ad
+2eb3ecc19fb04cabe228186d58af894b047c8af250e13070489396bd10ef4c9aa8476e442351d5
+a7e981394c8507aa406f55944054aa8e8ae145a6c7e93cba0f13c896702c8145b948b897bfaa83
+0f1363f85a5123be89fc5a2fc1270765e68521bb7b3bd36b9c437f1e0000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+cleartomark
+%%EndResource
+%%BeginResource: font f-1-0
+%!FontType1-1.1 f-1-0 1.0
+11 dict begin
+/FontName /f-1-0 def
+/PaintType 0 def
+/FontType 1 def
+/FontMatrix [0.001 0 0 0.001 0 0] readonly def
+/FontBBox {0 -217 685 745                                    } readonly def
+/Encoding 256 array
+0 1 255 {1 index exch /.notdef put} for
+dup 32 /space put
+dup 40 /parenleft put
+dup 41 /parenright put
+dup 42 /asterisk put
+dup 44 /comma put
+dup 48 /zero put
+dup 51 /three put
+dup 53 /five put
+dup 67 /C put
+dup 68 /D put
+dup 70 /F put
+dup 97 /a put
+dup 100 /d put
+dup 101 /e put
+dup 104 /h put
+dup 105 /i put
+dup 110 /n put
+dup 113 /q put
+dup 114 /r put
+dup 115 /s put
+dup 116 /t put
+dup 117 /u put
+readonly def
+currentdict end
+currentfile eexec
+f983ef0097ece636fb4a96c74d26ab84185f6dfa4a16a7a1c27bbe3f1156aea698df336d20b467
+b10e7f33846656653c5ac6962759d3056cbdb3190bac614b984bf5a132dc418192443014ba63de
+800d392b6fea026574bb2535fd7bb5338f35bf15a88ea328fdaa49670c7852e3d060f3c5d6b07f
+2ef6d0f22646c5d18e19a2ae3ee120390f6dd96f76dcf1e127de5e9299077a00c17c0d71e36e5b
+9d5ec58fceda57739a6a4214d4b79d6c48d2784b60c320323c7acddddf34db833cac0cf109f799
+69d114a330d372e5c978a66acc84e3fe5557f6240856a013ffaa0199444e5c5036f775eba4a5c5
+8cde66cf604b9aca2178431127b8a1ff7ed633a65c04600af5f573483112251caf3509f22c229c
+4b50e4a8f7c40b0590a7b36219d8025ae0ab21298430af8038c03c574183e313dcc1abfedd14a9
+f7f5ad3eb2bd1ab2dd112316e0dd9e8539103c5821f392469318893ee4c470b23af306174b45b2
+f38a0b2545d619bd31b549cccf7510b23e8cd6505aa669c38e581ad436bf6583106c65da87b5f5
+5563785a75cf39de6f09568fd192e619e51fb6b9353bf5984f4d50b301cf887c5bff16a02d6051
+77ff16bb03d236050aeb045ec9a51e17948e8887e42edcd704ee42ae270e47a0e59cdbd3f303ad
+40314e09dc1fb64241d4b838b7823305fe6322ea1e1cb52d89ce3e6b75a5f800bd4135a1098aca
+66858917eca0997ac112762749ffcc1e2a8380e74f8d4d4f6a94d0e42f1c8cc32d2bf9eb677916
+8b9ba51db56b83fc4805135fedfdfe3a1d7af61afc8525bf4deb23195fc649f81b9046c514b0a0
+e63a38609bcfa5e3e797a136256d47e22a6ba1d53a5b5cd09c0fe2bcdfac58d175b9a249b382e1
+ff1081b956c75d8642fa6fa4db717276649d2477e5b5b342a27afc6164414f8262ee8df469010c
+60983c8011d269ff4e9dc2cec5aa14fb0ee926c94d7c83e396f10d9176229fc1fa18b718bbee3b
+5c495c58fbb7add2a56ddd3325efe2c0c31c34ad921a459adce84e5b93deab8ba01dfbcaff26ba
+12cd75b2909e3b68f3216c7ea884c1a171a728ad56560add8e11edcd7d8cc60576da014edafa5f
+77a46daac0590d0f42f9320de42ab3c9acc2d788739eb18f857988d1aaaa3bbccd0f407e37d923
+bcc13b39c654c00dcf6430a8d0a54337a80d762366430724dab91270e9315c4a1f5e46441157ca
+ed8089bb75c791ae1f4e19a652c1894c401edb677f1ef52cf15e8ccf910c3c9d7854da839a7ffb
+47161454811a9aedf5e42e34319fb46b548c1c94090771f86ce98994e1bfd49400cd29a5907ad7
+f551a2240dc7e17501da5fd0e874be62ab63976daad5fd7dace781071780fe17b7677fb9943a91
+4635eb5e5705a3a99541f5fc01d0a10239e567b467cf07b3290e2c1df6fc0745271e46cfba555b
+35da6b46dced39384cd8258041f69cd5ce2f649f8b9bb0e337210cd3cd394eccdd854f391f4feb
+9c5bd339fe826f9f292adf54ba199085f2a08779646c00c31026afefef75e05749648978c7940b
+ffcf96e412b89e03c97627287c75655a7f5da2135cd42759741765584ca63c81bf7fb0394e20c4
+f79d3259262840158c83722c691c73da3e01496e784c7718e818a09a72dd0953ea3dfb86f99228
+be5f7306cad0b4b30be383e4d8f47e82af31fb2a32a4c0367f901d5121cd645d1933e6cb3c6050
+2180e5fb28d5cb69fe27380ee2f97e24369073951f327822451f0da95ca59a4e001017b7db2993
+8da465e07704ef5663b892473c43d5e413f4fff632e3d0a174649a58fcaa031df3de2b5f12fb09
+8a8abf5e1d416e631535bf385e97b982bfe5d26e8625aeec866f5794d114085a9c371ea662c523
+d2812c1f5bb2bf91d2b1fd2af8f77c5e5c49410e49f2287271238c647c94c1a236ca15890e6266
+ff2bdd7bc5a55a0bdb1bc4bd16ede58381b4dd8789e1d39c7adf756a5043eaee48346d0ea5720a
+6e7f0bce484123a89749349fd037cccda78e240ef0dec39a4b1f7aea4fef0a01c4df2b640cee4b
+862264d0f21af652071633f5eceff1ed5a03838acc0cee6a0700455485065957e7821efbc3d634
+363a2f5c1f0940e46e6a16131ca22aba5d5f2b7eaf92e376fd9d60b81b2757e2e11effd665831c
+933da4cc4e5481107bd0ccca3706959f3849a0e675ff4a9e815b77426d85467914263673e6a998
+8e3c2ddb021eaba2bd53572015cd8c6e6433f04ce792cc57097ed6ec0bf9e6739c6a50841e66f9
+ed6ed9b081c496c4f2815eae3e407cd9f8aa27218202eaea31cff82a54c3ee8257a700b97dc4ab
+9f8382e4d154460127dc7bf8b551a3f4b2016ca74c70c66cb53621d8bac500b0df38bbce461361
+cd3387d374e1d14f2fd3a6b8a7066958bfc3d53a8162acbca0b320f4355a2849bff7f94bad5995
+8d333a7f4a21af91934b4351dd23c6802a676c57fd193121eb16762be8ee63fcbf3f15f3af5d7c
+ce352ebe25b73843cdb341158004d1f55779c9f910524eee46f1f776a70ab081765c195a341d8c
+5c54a3ab36726b2baef9b98b0c4e68d6858af7a5cca45dd11d3fca59dc275a6af0af429169af67
+9ebc231785c31416a90e940913288b2bed044934445892d023ef5de1bf2d74c4b8bf1f53ad21c3
+2584a3e0fe1d610133e05453860d9e9b14a2c0c96d43cb93af839b13af28218bb64a059b57c4cd
+721ad440e24e8bc256e6757ea1002cbe45ede15d5835bd40eb6496686a85e960b2ef1b65aece71
+bbedaf8bba216e23a2b93ed5bc694d74389ec63cf026b6c4051f9a5f4fceb9db94675c5a2321f5
+1be70e8fa0bf97f3200635e1fe6b20b067c03a373918e7f6ecffcfca7e2b51e1db7104d51922cc
+64dfec115bcda3591fd86bdef5d887c1663bdf9ae2cb2ed8540553915b3e8e066dc1be70cb48f9
+d07f5c76bd5f95dcd85114e6002745e2e37e35ece18fd72406caf9d42d9938cb98669d1edd5b8d
+bbb430f4d27c03a6f62da35f050f4073bee0c33618f76e5c0a773ad30d14e242e37c49beb06fb1
+2a8bf77fd745edf39bd132365478a33372d75c6d685402ac153fef5c07f09196f0c072dea8d05f
+ef74ce74ce94e9b094ec1185fd03ff8f18a38d79d56ceccbcf3d40f537970b25f99d4455bb1153
+c90d6b3389b3667198c1176140f1e360b0482f5fff416f4335944b4eba91b72ff51887d98b74ca
+2e34432a19439db73990dea3ed2410fd5efcc1178554e5b65b92a6310e1a5db9fbf9a49f914fa9
+118f9945d995e50ab2f094e4a267f9053a12eee5209e00dffeaf1ab946803cb7e4b810d38a1f55
+8d3d3d8afa8fd053352a26f3d8a7f351634d9c01047df239034da5fb802dd9d508b1695b4abf9f
+c741e14f5ac62f4804a82d4cb8a8a1c20f5b2cdb472d26e4435675b5b42108c9404adeef2f57f6
+25b849613d2ce95873473268dc1ec49ed61144002aea0eb836ac96d05a883bc58d6f0e66801b28
+65a1e9826d2d6cd0f6711a42e9270b2da72941e69fc86da2c81b97dc14f14f7d6f4ad96ef1b606
+a9d5f93497429adf5b8365a546603714fd65532ed8f575d64a22515999f28f98eabfe7014797bb
+0947ac99cf2e94ff468036d48b761a7c070ea75140f361e008b7cc274632764f27069b02760ffb
+b36f919556125d26174c774b8c7396db7c7d020d8d6962140766a3c078c11c9d9137c8efc10735
+31193f179232e016830a3fc0e1f6aadc471c56252d161c9cb800bf80b807fed9d083ea9b52b671
+238e3132c7499fe4278ebe5af31e114d00333446e838a9cafe6b821552a67500ba34cb73d5f71b
+1af938efffac1a9eda71cbe6b2ac196bfd9547517bf27536c37a62680c4bed8e26e81ccdc82e3d
+f1d37440a042b3c9a3a646b177147cd6827c1540929f0b1299f1e7dc7766ae23a3922ffaf2f07f
+c327b221d5cdc0def43c012065d7dce7ea30f026c45bbde14d07ef3db527d65dd92ebf50e3d3b4
+5097434642d7394a8e2bed461cf1e7447e0d79368c220ad67edc03936eb00a58490140a8ea3a6b
+acb495a61d8ec51ccffbfa9f0b315f837254d5ec58750b2581189c8a322e370a189f9a8638e1fb
+940dd087181452847cd87147d51bb8ad5558696c2e624d9de18347de0e880eea96fb628309094e
+6a3d5dbfd5ead06ed8e44bc7b08e982810d0f94a3426a642b22c6d03437a7bd696b9d4a28a0e17
+e4df974f3a060f837e4227290fac6116f8f29b82f64bae0ec0fa8abf1bdf90e58e6b389d0ece7a
+f72ade75c2601ddeebd0d9ef3af7ae153150a3ff0d34cfe24711297afabe1035a3a9c2e6c4ad73
+970c0e1774d3e84b1e1bdbe033bea8343a4c70b9adba8c24fe9afce9c04545ec61e191338fb336
+50477096100dbd81731c80a61dfebe4994bbd3d79d1fea02f29cb12fe4c8d6dd3d01bf7797e79e
+1c4f3ff7c290614b880476c40841a777704f49e16ce424fc02d143e7cb1ea85977cae0f03a3a0a
+1bc8e30a50314aacd5c2098d3bc47a71ef312dae7f13e4e1182b261d47bf5001c3b7dd57072cfd
+39e1e95288fe54fd1463e9bf0228ae36a093b33d278f5c31484c3dffcf494be0d75e36ed73a2d0
+a8a9279e85e4191881e4da1786870078f4ec6b95eeeea3579d85fad644d97eefef1f2901970011
+b69f302d1d885939351d5cf34da8a75dc40b8baf14e4c0a4d1d59be61a14156922781a285f0000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+cleartomark
+%%EndResource
+%%EndSetup
+%%Page: 1 1
+%%BeginPageSetup
+%%PageBoundingBox: 0 0 630 390
+%%EndPageSetup
+q 0 0 630 390 rectclip
+1 0 0 -1 0 390 cm q
+1 g
+0 0 630 390 rectfill
+55.5 27 562.5 318.75 re f
+0 g
+BT
+10.5 0 0 -10.5 334.125013 376.176 Tm
+/f-0-0 1 Tf
+(y)Tj
+-17.752978 1.379286 Td
+(0)Tj
+16.557214 0 Td
+(10)Tj
+16.835212 0 Td
+(20)Tj
+0.000000625849 -10.499999 -10.5 -0.000000625849 21.528 212.918996 Tm
+(D)Tj
+0.000000625849 -10.499999 -10.5 -0.000000625849 21.528 205.337997 Tm
+(e)Tj
+0.000000625849 -10.499999 -10.5 -0.000000625849 21.528001 199.499997 Tm
+(n)Tj
+0.000000625849 -10.499999 -10.5 -0.000000625849 21.528001 193.661997 Tm
+(s)Tj
+0.000000625849 -10.499999 -10.5 -0.000000625849 21.528001 188.411996 Tm
+(i)Tj
+0.000000625849 -10.499999 -10.5 -0.000000625849 21.528001 186.080995 Tm
+(t)Tj
+0.000000625849 -10.499999 -10.5 -0.000000625849 21.528002 183.161997 Tm
+(y)Tj
+0.000000625849 -10.499999 -10.5 -0.000000625849 21.528002 177.911997 Tm
+( )Tj
+0.000000625849 -10.499999 -10.5 -0.000000625849 21.528002 174.992999 Tm
+(f)Tj
+0.000000625849 -10.499999 -10.5 -0.000000625849 21.528002 172.074001 Tm
+(\()Tj
+0.000000625849 -10.499999 -10.5 -0.000000625849 21.528002 168.577502 Tm
+(y)Tj
+0.000000625849 -10.499999 -10.5 -0.000000625849 21.528003 163.327504 Tm
+(\))Tj
+10.5 0 0 -10.5 27.567001 335.089945 Tm
+(0.00)Tj
+0 9.902695 Td
+(0.05)Tj
+0 9.902695 Td
+(0.10)Tj
+/f-1-0 1 Tf
+20.471501 10.040224 Td
+(Chisquared\(5\) and 5*F\(5,30\))Tj
+10.5 0 0 -10.5 381.380267 21.711 Tm
+( )Tj
+10.5 0 0 -10.5 384.299266 21.711 Tm
+(Densities)Tj
+ET
+0.27451 0.509804 0.705882 rg
+1.8 w
+0 J
+0 j
+[] 0.0 d
+2 M q 1 0 0 1 0 0 cm
+81.371 331.262 m 83.672 331.262 l 84.824 331.258 l 87.125 331.258 l 88.277
+ 331.254 l 89.43 331.254 l 90.578 331.25 l 92.883 331.242 l 94.031 331.238
+ l 96.336 331.223 l 97.484 331.211 l 98.637 331.199 l 99.789 331.18 l 100.938
+ 331.16 l 102.09 331.137 l 103.242 331.105 l 104.391 331.066 l 105.543 331.02
+ l 106.695 330.965 l 107.844 330.898 l 108.996 330.816 l 110.148 330.719
+ l 111.297 330.605 l 112.449 330.469 l 113.602 330.305 l 114.75 330.113 
+l 115.902 329.891 l 117.055 329.629 l 118.203 329.324 l 119.355 328.973 
+l 120.508 328.563 l 121.656 328.094 l 122.809 327.555 l 123.961 326.938 
+l 125.109 326.234 l 126.262 325.441 l 127.414 324.543 l 128.563 323.531 
+l 129.715 322.395 l 130.867 321.129 l 132.016 319.715 l 133.168 318.152 
+l 134.32 316.422 l 135.469 314.516 l 136.621 312.426 l 137.773 310.141 l
+ 138.922 307.652 l 140.074 304.949 l 141.227 302.027 l 142.375 298.875 l
+ 143.527 295.492 l 144.68 291.867 l 145.828 288.004 l 146.98 283.895 l 148.133
+ 279.539 l 149.281 274.941 l 150.434 270.105 l 151.586 265.031 l 152.734
+ 259.723 l 153.887 254.195 l 155.039 248.457 l 156.188 242.516 l 157.34 
+236.383 l 158.492 230.078 l 159.641 223.617 l 160.793 217.012 l 161.945 
+210.289 l 163.094 203.461 l 164.246 196.555 l 165.398 189.586 l 166.547 
+182.582 l 167.699 175.563 l 168.852 168.551 l 170 161.57 l 171.152 154.645
+ l 172.305 147.797 l 173.453 141.043 l 174.605 134.414 l 175.758 127.922
+ l 176.906 121.59 l 178.059 115.434 l 179.211 109.473 l 180.359 103.723 
+l 181.512 98.199 l 182.66 92.91 l 183.813 87.867 l 184.965 83.082 l 186.113
+ 78.559 l 187.266 74.305 l 188.418 70.328 l 189.566 66.621 l 190.719 63.195
+ l 191.871 60.043 l 193.02 57.164 l 194.172 54.551 l 195.324 52.203 l 196.473
+ 50.113 l 197.625 48.277 l 198.777 46.68 l 199.926 45.316 l 201.078 44.176
+ l 202.23 43.25 l 203.379 42.531 l 204.531 42.004 l 205.684 41.66 l 206.832
+ 41.492 l 207.984 41.488 l 209.137 41.641 l 210.285 41.938 l 211.438 42.371
+ l 212.59 42.938 l 213.738 43.625 l 214.891 44.426 l 216.043 45.344 l 217.191
+ 46.363 l 218.344 47.484 l 219.496 48.703 l 220.645 50.016 l 221.797 51.418
+ l 222.949 52.906 l 224.098 54.484 l 225.25 56.145 l 226.402 57.887 l 227.551
+ 59.711 l 228.703 61.613 l 229.855 63.594 l 231.004 65.648 l 232.156 67.781
+ l 233.309 69.98 l 234.457 72.254 l 235.609 74.59 l 236.762 76.992 l 237.91
+ 79.457 l 239.063 81.98 l 240.215 84.559 l 241.363 87.188 l 242.516 89.867
+ l 243.668 92.59 l 244.816 95.352 l 245.969 98.152 l 247.121 100.984 l 248.27
+ 103.848 l 249.422 106.734 l 250.574 109.648 l 251.723 112.578 l 252.875
+ 115.527 l 254.027 118.488 l 255.176 121.461 l 256.328 124.441 l 257.48 
+127.434 l 258.629 130.426 l 260.934 136.426 l 262.082 139.426 l 263.234 
+142.43 l 264.387 145.43 l 265.535 148.43 l 267.84 154.414 l 268.988 157.398
+ l 270.141 160.379 l 271.293 163.352 l 272.441 166.313 l 273.594 169.262
+ l 274.746 172.199 l 275.895 175.121 l 277.047 178.027 l 278.199 180.914
+ l 279.348 183.781 l 280.5 186.621 l 281.652 189.434 l 282.801 192.219 l
+ 283.953 194.973 l 285.105 197.691 l 286.254 200.371 l 287.406 203.016 l
+ 288.559 205.613 l 289.707 208.172 l 290.859 210.684 l 292.012 213.145 l
+ 293.16 215.563 l 294.313 217.926 l 295.465 220.242 l 296.613 222.508 l 
+297.766 224.723 l 298.918 226.883 l 300.066 228.996 l 301.219 231.059 l 
+302.371 233.074 l 303.52 235.039 l 304.672 236.961 l 305.824 238.836 l 306.973
+ 240.668 l 308.125 242.457 l 309.277 244.207 l 310.426 245.918 l 311.578
+ 247.598 l 312.73 249.238 l 313.879 250.848 l 315.031 252.426 l 316.184 
+253.977 l 317.332 255.5 l 318.484 256.992 l 319.637 258.465 l 320.785 259.91
+ l 321.938 261.332 l 323.09 262.734 l 324.238 264.113 l 325.391 265.473 
+l 326.543 266.809 l 327.691 268.125 l 328.844 269.426 l 329.996 270.703 
+l 331.145 271.961 l 332.297 273.199 l 333.449 274.418 l 334.598 275.617 
+l 335.75 276.801 l 336.902 277.961 l 338.051 279.102 l 339.203 280.223 l
+ 340.355 281.328 l 341.504 282.41 l 342.656 283.477 l 343.809 284.523 l 
+344.957 285.551 l 346.109 286.559 l 347.262 287.551 l 348.41 288.523 l 349.563
+ 289.477 l 350.715 290.418 l 351.863 291.34 l 353.016 292.246 l 354.168 
+293.137 l 355.316 294.012 l 356.469 294.871 l 357.621 295.719 l 358.77 296.551
+ l 359.922 297.367 l 361.074 298.172 l 362.223 298.965 l 363.375 299.742
+ l 364.527 300.508 l 365.676 301.262 l 366.828 302.004 l 367.98 302.73 l
+ 369.129 303.449 l 370.281 304.152 l 371.434 304.844 l 372.582 305.527 l
+ 373.734 306.195 l 374.887 306.852 l 376.035 307.496 l 377.188 308.129 l
+ 378.34 308.75 l 379.488 309.359 l 380.641 309.953 l 381.793 310.539 l 382.941
+ 311.109 l 384.094 311.672 l 385.246 312.219 l 386.395 312.75 l 387.547 
+313.273 l 388.699 313.781 l 389.848 314.277 l 391 314.762 l 392.152 315.23
+ l 393.301 315.688 l 394.453 316.129 l 395.605 316.563 l 396.754 316.977
+ l 397.906 317.383 l 399.059 317.773 l 400.207 318.148 l 401.359 318.516
+ l 402.512 318.867 l 403.66 319.207 l 404.813 319.531 l 405.965 319.848 
+l 407.113 320.152 l 408.266 320.445 l 409.418 320.727 l 410.566 320.996 
+l 411.719 321.258 l 412.871 321.512 l 414.02 321.754 l 415.172 321.988 l
+ 416.324 322.215 l 417.473 322.434 l 418.625 322.648 l 419.777 322.855 l
+ 420.926 323.055 l 422.078 323.25 l 423.23 323.441 l 424.379 323.629 l 425.531
+ 323.813 l 426.684 323.988 l 427.832 324.164 l 430.137 324.508 l 431.285
+ 324.676 l 432.438 324.84 l 433.59 325 l 434.738 325.16 l 437.043 325.473
+ l 438.191 325.625 l 440.496 325.922 l 441.645 326.066 l 442.797 326.211
+ l 443.949 326.352 l 445.098 326.488 l 447.402 326.754 l 448.551 326.883
+ l 449.703 327.008 l 450.855 327.129 l 452.004 327.25 l 454.309 327.477 
+l 455.457 327.586 l 456.609 327.691 l 457.762 327.793 l 458.91 327.891 l
+ 461.215 328.078 l 462.363 328.168 l 463.516 328.25 l 464.668 328.336 l 
+465.816 328.414 l 466.969 328.492 l 468.121 328.566 l 469.27 328.637 l 470.422
+ 328.707 l 471.574 328.773 l 472.723 328.84 l 473.875 328.906 l 475.027 
+328.969 l 476.176 329.027 l 477.328 329.09 l 478.48 329.148 l 479.629 329.203
+ l 480.781 329.262 l 481.934 329.316 l 483.082 329.375 l 485.387 329.484
+ l 486.535 329.535 l 488.84 329.645 l 489.988 329.695 l 491.141 329.746 
+l 492.293 329.801 l 493.441 329.852 l 494.594 329.902 l 495.746 329.949 
+l 496.895 330 l 499.199 330.094 l 500.348 330.141 l 501.5 330.188 l 502.652
+ 330.23 l 503.801 330.273 l 506.105 330.352 l 507.254 330.391 l 509.559 
+330.461 l 510.707 330.492 l 513.012 330.555 l 514.16 330.582 l 516.465 330.629
+ l 517.613 330.652 l 519.918 330.691 l 521.066 330.707 l 523.371 330.738
+ l 524.52 330.75 l 526.824 330.773 l 527.973 330.781 l 530.277 330.797 l
+ 531.426 330.801 l 532.578 330.809 l 533.73 330.813 l 534.879 330.816 l 
+537.184 330.824 l 538.332 330.828 l 540.637 330.836 l 541.785 330.84 l 544.09
+ 330.848 l 545.238 330.852 l 547.543 330.859 l 548.691 330.867 l 550.996
+ 330.875 l 552.145 330.883 l 553.297 330.887 l 554.449 330.895 l 555.598
+ 330.902 l 556.75 330.906 l 557.902 330.914 l 559.051 330.922 l 561.355 
+330.938 l 562.504 330.949 l 564.809 330.965 l 565.957 330.973 l 567.109 
+330.984 l 568.262 330.992 l 569.41 331 l 570.563 331.012 l 571.715 331.02
+ l 572.863 331.027 l 574.016 331.039 l 575.168 331.047 l 576.316 331.055
+ l 578.621 331.07 l 579.77 331.078 l 582.074 331.094 l 583.223 331.102 l
+ 585.527 331.117 l 586.676 331.125 l 587.828 331.129 l 588.98 331.137 l 
+590.129 331.145 l 591.281 331.148 l 592.434 331.156 l S Q
+1 0.54902 0 rg
+q 1 0 0 1 0 0 cm
+81.066 331.262 m 82.805 331.262 l 84.539 331.258 l 86.277 331.258 l 88.012
+ 331.254 l 89.75 331.25 l 91.484 331.246 l 93.223 331.238 l 94.957 331.227
+ l 96.695 331.211 l 98.43 331.191 l 100.164 331.16 l 101.902 331.121 l 103.637
+ 331.066 l 105.375 330.996 l 107.109 330.898 l 108.848 330.773 l 110.582
+ 330.605 l 112.32 330.391 l 114.055 330.113 l 115.793 329.766 l 117.527 
+329.32 l 119.262 328.77 l 121 328.082 l 122.734 327.238 l 124.473 326.211
+ l 126.207 324.973 l 127.945 323.484 l 129.68 321.723 l 131.418 319.645 
+l 133.152 317.215 l 134.891 314.406 l 136.625 311.18 l 138.363 307.504 l
+ 140.098 303.352 l 141.832 298.699 l 143.57 293.523 l 145.305 287.82 l 147.043
+ 281.582 l 148.777 274.809 l 150.516 267.52 l 152.25 259.727 l 153.988 251.465
+ l 155.723 242.773 l 157.461 233.699 l 159.195 224.293 l 160.93 214.613 
+l 162.668 204.734 l 164.402 194.715 l 166.141 184.637 l 167.875 174.566 
+l 169.613 164.578 l 171.348 154.742 l 173.086 145.129 l 174.82 135.797 l
+ 176.559 126.809 l 178.293 118.219 l 180.027 110.063 l 181.766 102.391 l
+ 183.5 95.227 l 185.238 88.602 l 186.973 82.527 l 188.711 77.023 l 190.445
+ 72.09 l 192.184 67.73 l 193.918 63.938 l 195.656 60.707 l 197.391 58.023
+ l 199.125 55.871 l 200.863 54.234 l 202.598 53.09 l 204.336 52.418 l 206.07
+ 52.195 l 207.809 52.391 l 209.543 52.988 l 211.281 53.961 l 213.016 55.273
+ l 214.754 56.914 l 216.488 58.844 l 218.227 61.047 l 219.961 63.492 l 221.695
+ 66.156 l 223.434 69.016 l 225.168 72.051 l 226.906 75.238 l 228.641 78.555
+ l 230.379 81.984 l 232.113 85.512 l 233.852 89.113 l 235.586 92.781 l 237.324
+ 96.504 l 239.059 100.266 l 240.793 104.059 l 242.531 107.879 l 244.266 
+111.719 l 246.004 115.57 l 247.738 119.438 l 249.477 123.316 l 251.211 127.207
+ l 252.949 131.105 l 254.684 135.012 l 256.422 138.93 l 258.156 142.855 
+l 259.891 146.789 l 261.629 150.73 l 263.363 154.676 l 265.102 158.621 l
+ 266.836 162.563 l 268.574 166.496 l 270.309 170.414 l 272.047 174.309 l
+ 273.781 178.176 l 275.52 182.008 l 277.254 185.789 l 278.988 189.523 l 
+280.727 193.195 l 282.461 196.797 l 284.199 200.328 l 285.934 203.781 l 
+287.672 207.148 l 289.406 210.43 l 291.145 213.621 l 292.879 216.727 l 294.617
+ 219.738 l 296.352 222.66 l 298.09 225.496 l 299.824 228.25 l 301.559 230.926
+ l 303.297 233.523 l 305.031 236.051 l 306.77 238.512 l 308.504 240.914 
+l 310.242 243.258 l 311.977 245.547 l 313.715 247.789 l 315.449 249.984 
+l 317.188 252.141 l 318.922 254.254 l 320.656 256.332 l 322.395 258.367 
+l 324.129 260.371 l 325.867 262.332 l 327.602 264.262 l 329.34 266.148 l
+ 331.074 268 l 332.813 269.813 l 334.547 271.586 l 336.285 273.316 l 338.02
+ 275.004 l 339.754 276.648 l 341.492 278.246 l 343.227 279.801 l 344.965
+ 281.309 l 346.699 282.766 l 348.438 284.176 l 350.172 285.539 l 351.91 
+286.855 l 353.645 288.117 l 355.383 289.332 l 357.117 290.5 l 358.852 291.617
+ l 360.59 292.688 l 362.324 293.711 l 364.063 294.695 l 365.797 295.633 
+l 367.535 296.535 l 369.27 297.398 l 371.008 298.23 l 372.742 299.031 l 
+374.48 299.805 l 376.215 300.555 l 377.953 301.285 l 379.688 301.996 l 381.422
+ 302.691 l 383.16 303.375 l 384.895 304.047 l 386.633 304.707 l 388.367 
+305.363 l 390.105 306.008 l 391.84 306.645 l 393.578 307.273 l 395.313 307.895
+ l 397.051 308.504 l 398.785 309.105 l 400.52 309.695 l 402.258 310.273 
+l 403.992 310.836 l 405.73 311.387 l 407.465 311.922 l 409.203 312.441 l
+ 410.938 312.949 l 412.676 313.438 l 414.41 313.914 l 416.148 314.379 l 
+417.883 314.828 l 419.617 315.262 l 421.355 315.688 l 423.09 316.102 l 424.828
+ 316.504 l 426.563 316.895 l 428.301 317.281 l 430.035 317.656 l 431.773
+ 318.027 l 433.508 318.391 l 435.246 318.746 l 436.98 319.094 l 438.715 
+319.434 l 440.453 319.773 l 442.188 320.102 l 443.926 320.426 l 445.66 320.742
+ l 447.398 321.055 l 449.133 321.363 l 450.871 321.66 l 452.605 321.957 
+l 454.344 322.246 l 456.078 322.527 l 457.813 322.805 l 459.551 323.074 
+l 461.285 323.34 l 463.023 323.598 l 464.758 323.855 l 466.496 324.102 l
+ 468.23 324.348 l 469.969 324.586 l 471.703 324.816 l 473.441 325.047 l 
+475.176 325.27 l 476.914 325.484 l 478.648 325.699 l 480.383 325.902 l 482.121
+ 326.105 l 483.855 326.301 l 485.594 326.488 l 487.328 326.672 l 489.066
+ 326.848 l 490.801 327.02 l 492.539 327.184 l 494.273 327.344 l 496.012 
+327.496 l 497.746 327.641 l 499.48 327.777 l 501.219 327.906 l 502.953 328.031
+ l 504.691 328.145 l 506.426 328.254 l 508.164 328.352 l 509.898 328.445
+ l 511.637 328.531 l 513.371 328.609 l 515.109 328.68 l 516.844 328.746 
+l 518.578 328.801 l 520.316 328.855 l 522.051 328.902 l 523.789 328.945 
+l 525.523 328.984 l 527.262 329.023 l 528.996 329.055 l 530.734 329.09 l
+ 532.469 329.121 l 534.207 329.156 l 535.941 329.188 l 537.676 329.223 l
+ 539.414 329.258 l 541.148 329.297 l 542.887 329.336 l 544.621 329.375 l
+ 546.359 329.414 l 548.094 329.453 l 549.832 329.496 l 551.566 329.535 l
+ 553.305 329.574 l 555.039 329.609 l 556.777 329.645 l 560.246 329.707 l
+ 561.984 329.73 l 563.719 329.754 l 565.457 329.773 l 567.191 329.789 l 
+568.93 329.801 l 570.664 329.809 l 572.402 329.813 l 574.137 329.816 l 575.875
+ 329.82 l 582.816 329.82 l 584.555 329.824 l 586.289 329.828 l 588.027 329.832
+ l 589.762 329.844 l 591.5 329.852 l S Q
+1 g
+60 31.5 71.25 41.25 re f
+0 g
+0.75 w
+q 1 0 0 1 0 0 cm
+60 31.5 71.25 41.25 re S Q
+1.154701 M q 1 0 0 1 0 0 cm
+150.637 346.125 m 150.637 349.875 l S Q
+q 1 0 0 1 0 0 cm
+327.406 346.125 m 327.406 349.875 l S Q
+q 1 0 0 1 0 0 cm
+504.176 346.125 m 504.176 349.875 l S Q
+q 1 0 0 1 0 0 cm
+55.125 331.262 m 51.375 331.262 l S Q
+q 1 0 0 1 0 0 cm
+55.125 227.285 m 51.375 227.285 l S Q
+q 1 0 0 1 0 0 cm
+55.125 123.305 m 51.375 123.305 l S Q
+0.27451 0.509804 0.705882 rg
+1.8 w
+2 M q 1 0 0 1 0 0 cm
+64.367 43.5 m 79.367 43.5 l S Q
+1 0.54902 0 rg
+q 1 0 0 1 0 0 cm
+64.367 60.75 m 79.367 60.75 l S Q
+0 g
+BT
+10.5 0 0 -10.5 83.118008 47.32725 Tm
+/f-0-0 1 Tf
+(Chi\(5\))Tj
+0 -1.642857 Td
+(5*)Tj
+10.5 0 0 -10.5 93.040504 64.57725 Tm
+(F)Tj
+10.5 0 0 -10.5 99.456005 64.57725 Tm
+(\(5,30\))Tj
+ET
+0.75 w
+1.154701 M q 1 0 0 1 0 0 cm
+55.125 345.75 m 618.375 345.75 l S Q
+q 1 0 0 1 0 0 cm
+55.5 346.125 m 55.5 26.625 l S Q
+q 1 0 0 1 0 0 cm
+55.125 27 m 618.375 27 l S Q
+q 1 0 0 1 0 0 cm
+618 346.125 m 618 26.625 l S Q
+Q q
+150 27 2 95 re W n
+q
+150 27 2 95 re W n
+% Fallback Image: x=150 y=27 w=2 h=95 res=300ppi size=10692
+[ 2.16 0 0 -95.04 150 122.04 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceGray setcolorspace
+<<
+  /ImageType 1
+  /Width 9
+  /Height 396
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 9 0 0 -396 0 396 ]
+>>
+cairo_image
+ Gb"0@\Hr6Y&-+EIZk.%kmqZb\^^"+28?.pF7'!`9Yt!k\Q\^HRLkplbR148#5re~>
+Q
+Q q
+326 27 2 95 re W n
+q
+326 27 2 95 re W n
+% Fallback Image: x=326 y=27 w=2 h=95 res=300ppi size=10692
+[ 2.16 0 0 -95.04 326 122.04 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceGray setcolorspace
+<<
+  /ImageType 1
+  /Width 9
+  /Height 396
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 9 0 0 -396 0 396 ]
+>>
+cairo_image
+ Gb"0@YmCCQ$ii!M/8g&h]D-tfmGJXE18VBkQ4_MWQF#.;&J5Te&J=gq(LELq3<~>
+Q
+Q q
+503 27 2 95 re W n
+q
+503 27 2 95 re W n
+% Fallback Image: x=503 y=27 w=2 h=95 res=300ppi size=10692
+[ 2.16 0 0 -95.04 503 122.04 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceGray setcolorspace
+<<
+  /ImageType 1
+  /Width 9
+  /Height 396
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 9 0 0 -396 0 396 ]
+>>
+cairo_image
+ Gb"0@Ymg[U#QQRHA2aA1*=g6M'.3+rLo3^SXu`>ipCRuL&J5V;:NHP*J3U1~>
+Q
+Q q
+55 122 563 2 re W n
+q
+55 122 563 2 re W n
+% Fallback Image: x=55 y=122 w=563 h=2 res=300ppi size=63342
+[ 563.04 0 0 -2.16 55 124.16 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceRGB setcolorspace
+<<
+  /ImageType 1
+  /Width 2346
+  /Height 9
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 0 1 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 2346 0 0 -9 0 9 ]
+>>
+cairo_image
+ Gb"0W:Ip[h*63%,\c`W*+Zaf1?C*9M6p]>Y!kUisQS'$'Xb(H>6qn$kT:dJE7;7HP:)#0[B
+ dtm-@cH+3DS"N*5<*ZUR+#VnAdA:fiUMc^1S=E"S\KP)5PajJlo.pE/]_rnSJ_F3Sp3@=c-
+ eFCG*`'4\?tV(l6pe#:/s2bl3d`emVB*a!o)PkUZ0bcCG7ZMrl*7LU#,QYpI3:8%cAGWl#_
+ $,lmr,:!'.#X9#$uD&dd5o!5R/"78[dV!*C3-gK"Gik4H'/<V9A^r]f$^4!Uuc"eU]Khq\C
+ &jWt$#7]*m+gUHeBDUYoofF7-d!!'5Gg,B#9#hh3;ejoVG'j^efI4a>[F'QBX:U2bZrj.l3
+ k2&Do!=Z=P)gOpG$4FB6cUi2a"5"%L)ZTlB+PJaSYR&rA!7j[;[M="t7eN>MLYBXtc%"2+f
+ `;,#(i0nqD\%mGS(ILc>hHbJFac/+3.T9#^&\36$_i%O!/jYfV50nTDr6G1Ml-TkH@.n`Io
+ \NKQCT?%>]g!k+B.E;T>.XDj6$C)UE\@l!F(@S#*s2r'c(bpr\ai\7miKc8jW>tXJRcnM41
+ "X^daGWUjnBj/-#YM3Pf*"^Rt<"Ib@j(^t'J87q#i"hS'^>'h&/=H3OQXqQ`G]OR+OoVkU>
+ peE&\rkn^H#k;k6:%LC]UdW8H6$r]sEN"*FIs./ZTgGA<&\]FjX9h\7QXc].X!!",h&.%Lo
+ PJP($fi\<jenEq@=<Hq"@7+P8hkn"lI7=(tVUmC],@D=m^qe+;?%S9mYVSK>f"f(f4X7i;m
+ ?64>G'3ieZu5pE^k-7W!5Kcu%S'f1S_h)GQ^9?+JG$#CYmP+q/1elfP%T(C1\s$/Bha;cI9
+ ZP3.6Ab^,:f@L_NVM-lC<E>g>]:L[pEuhho]2qkqDY*LBk&DVJ5!HZEjN2!9>Dh8c=)NMoB
+ 4>!<?>&'Lc#%]mXr_S[/8)*<6A`j)P#*".H+/cB;gDH?*r]L2%5*G5gcUf`;,CR2sT&mgpJ
+ Y`nd%)?Ob4pIPW<urq=/)an4p"ek)dgJ%sG\3su#g5Y`eoddJQ?6pc&4!3e=L;18TLMUs]~>
+Q
+Q q
+150 124 2 102 re W n
+q
+150 124 2 102 re W n
+% Fallback Image: x=150 y=124 w=2 h=102 res=300ppi size=11502
+[ 2.16 0 0 -102.24 150 226.24 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceGray setcolorspace
+<<
+  /ImageType 1
+  /Width 9
+  /Height 426
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 9 0 0 -426 0 426 ]
+>>
+cairo_image
+ Gb"0@0b"*_#Qld\13n-W0S0b^?;4KqNeiLILkpl.a"36$;&9~>
+Q
+Q q
+326 124 2 102 re W n
+q
+326 124 2 102 re W n
+% Fallback Image: x=326 y=124 w=2 h=102 res=300ppi size=11502
+[ 2.16 0 0 -102.24 326 226.24 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceGray setcolorspace
+<<
+  /ImageType 1
+  /Width 9
+  /Height 426
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 9 0 0 -426 0 426 ]
+>>
+cairo_image
+ Gb"0@0bFC>#QQUZ10J@Cn`tg#VGus,.hN@*&J5V;Mtruf;&9~>
+Q
+Q q
+503 124 2 102 re W n
+q
+503 124 2 102 re W n
+% Fallback Image: x=503 y=124 w=2 h=102 res=300ppi size=11502
+[ 2.16 0 0 -102.24 503 226.24 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceGray setcolorspace
+<<
+  /ImageType 1
+  /Width 9
+  /Height 426
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 9 0 0 -426 0 426 ]
+>>
+cairo_image
+ Gb"0@0bFC>&-O0V1/CDtI30?*W7pr;6psF26q$+V*5;YQD#~>
+Q
+Q q
+55 226 563 2 re W n
+q
+55 226 563 2 re W n
+% Fallback Image: x=55 y=226 w=563 h=2 res=300ppi size=63342
+[ 563.04 0 0 -2.16 55 228.16 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceRGB setcolorspace
+<<
+  /ImageType 1
+  /Width 2346
+  /Height 9
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 0 1 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 2346 0 0 -9 0 9 ]
+>>
+cairo_image
+ Gb"0W0k_4t*67SI6j0E43k.5\#u1s;-&']bMh@\/9?3'EK8XS_[;Dkh)ODYT6O,1KRNg`fY
+ hFgiTgDUkg8%g1@2ctHaJIM^dTCOHK=PlDIF$+2_p.ZMgYUuh/sfZkelJQGC)$a0U[.bgNG
+ 4iQ%%+\4*H(c;=Wb<'eJnOg(Hn/l!.`f2c[sErg#98%I%l]sMGE>%Q=XnkLs?&%!)R;FL4)
+ 8-kOYFS!'j1U'I?6G#!d(_[Vs`7Fl[*)?00grTlAo5cCX.s6i[3L:ta\ZUSf(>3.:-koq3K
+ iT\n,1!<<*+dCoX3,\Z'8aNrW7XmjI&U@N#Jp[,4gpW!:7i0fT"4i^:an0uRE(7i`hB\rdi
+ J:qUn!'h1(DZJk]D>X$P_XWr_c@c,nchU<P!8r?I:ta0S>]ecQbin<Vn*ctQq?lU/!!&)lm
+ 2H$r6;`tD-tKf*SXl<3!0Bu3R7u+@1)\[[0>6Xo]VW9o2tc6Sde.S[!-i6mp-iQ&h/R6-0q
+ jJ"k:<!u,oT0a!<<+u9;g84q.+br=`bDZBPE#_TVJ:"DVp&^i$JHFB5qp2Tk8.Yc1T&"-Ef
+ ;a:];=pgXR6mq0p<UE<#u`D/T!c;;\#$RNE?:c9JVflp??g/-#YMFfVRDpA#u!8r:gp!%j3
+ (%=n@=D;Qh<B::J$'9B;<ou<>!d]SW5!5NB,V,UmeS7DG.N1U'8q'%km:XHfV!!!>Q^&`a0
+ !eET^'!^3#E&bK<!:nMoD7ufG._31^hCm.DEcPpQf(FSQVJ3V'%KM%>0g-C;lK<)4ms7C"o
+ 8.Lu]\Xbl$NL/l?*RM=cR68.:376OBPE?u`*tI5I8a-Go\\!rJ-0*/m2#t#dr]m"m#9uLA>
+ K6CchIa3B)r!O>dh)ao7L*bpUGihHWC(o3hRQsQM(!C7aY?=!!)9m_m%H7q0ZLj('&#^MPC
+ "L;m$K(~>
+Q
+Q q
+150 228 2 102 re W n
+q
+150 228 2 102 re W n
+% Fallback Image: x=150 y=228 w=2 h=102 res=300ppi size=11502
+[ 2.16 0 0 -102.24 150 330.24 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceRGB setcolorspace
+<<
+  /ImageType 1
+  /Width 9
+  /Height 426
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 0 1 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 9 0 0 -426 0 426 ]
+>>
+cairo_image
+ Gb"0P>=d4?*!^FU#[[YN[tl(M%-jr9US=&?jGQPAV%8:P:gehd?"j6uGPR<BYpdO.3A#1.A
+ ^f#6m)EQqVTjs$6eBhV;k$Nn?M6V^-CXB#c[k;ZLYq&QI6[6$o/h._aQ2Dm@')km;3K^rOH
+ >QcOH>QcOH>S'S`V<0oW=NS+)c5"rZm7E@SCF`oH4`Ef]7Cq--%kq<?GYul4SB,`hji\7*[
+ '=M+d73>cQ"Ye']d%ChH\^^7NNi.<)7@MaMR(Pej/LTR/IjVO760O-XYY4GoUaR2#;jL`r$
+ T+dXK(ha3J!+s&=>NcA_h?C&m4M1,]#DpVIMSk%2[kBXF>^7S!UEBdaq#"ACR)>P2qgP^?a
+ o^[Yt?du!i<g&ERjOC4n8>ZWZ?`PX#-/JtUh(?0-3\JTs8_fUV<0PH,EZ3Eq5,GW(0&nP>X
+ uW'rerRu'=*[cD1,9/n4frO/P"0^%nk2Hlj?g+:\u&eGYs>ESUT@p?JG_WE.Jg4%"*q?K9j
+ Ei0C==S]DHXOaq`U@Sl6;n$pVV$_-r^2WrF(T#q@(F[Jo)[>6BOWV'WCNSL\:752QDgT?9)
+ :gR=OX2`[I;)mo1]>JL4tE-us&56_8)WgcWnAW*EU.oUr?W:=iJi:kR4m;,#bb7bIo$2#`C
+ W=K@OU<O]*K-&S]po71^Bs%Kl02(DY+JBXS_'Wm7lkCa$^k<P-'6/=`GZNTUD9SB-pdd4oN
+ 5']fYQ"%o7Oukp``bp\5XHSrG?A\fq]ntuP>(+;;MQE6tTE:loIP5Ke2h9Dc:,uSkbWp=>q
+ W%c>FO.a(-KRDW@(lXSe+_#,UY;l"*dNJA9Zdr/6Cde);"*O07@IL,4;nONnOWKu*_T$p84
+ Z9B84Z9B84Z9B84Z9B84Z9B8:Nq?!>=>S'*~>
+Q
+Q q
+326 228 2 102 re W n
+q
+326 228 2 102 re W n
+% Fallback Image: x=326 y=228 w=2 h=102 res=300ppi size=11502
+[ 2.16 0 0 -102.24 326 330.24 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceRGB setcolorspace
+<<
+  /ImageType 1
+  /Width 9
+  /Height 426
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 0 1 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 9 0 0 -426 0 426 ]
+>>
+cairo_image
+ Gb"0NcRZnQ*63%Z\1$J(,(G-,J&.2Q69."baMGjKc,m/*nnTXV.o%'(QC*XD2Er+tUp`1E[
+ 5Nas%'sR'O8"TMf))5t?a$'1a5KtSGC>1d/f'B@^(q+]`UA@C+:ne]!eETZ&.%oH;Nar3mZ
+ Q";JT-Q>Br"RM(3uXoMSuoV-YfA$m^MdE>bFcW"l'>6;2L\J^\<C-l@$,+`dbs*8f)511;Q
+ kgoaWEJ9?gB2Ll95eSnRR)0iuI1/K,23niStG\GOj]9:7?UV'_2tlLlZdEM#rC0@!C2mn2p
+ @k/26kI?`++]J<ZT+f\IRI>]K$8%H*'VCqX2<;4'(jn13RPfFee/lC>6BD,[/4h3uF9uiZK
+ j\]<Ud9o+MM,Fd"Xj.<?W9,7E+T0(heNUCkW&DiKmL@_@)d/ou<ZK^HU?OVl1/`eP(f"5.,
+ sIJtF*fIcmN^+;XbA&^MUQ_$1:"n4IG<RV:W&i^-/,66UDd7"r;eH^IMn"""+`][&-rC?JN
+ t=h#Qt3[5TgUD"9O/RVGGLdhmE~>
+Q
+Q q
+503 228 2 102 re W n
+q
+503 228 2 102 re W n
+% Fallback Image: x=503 y=228 w=2 h=102 res=300ppi size=11502
+[ 2.16 0 0 -102.24 503 330.24 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceRGB setcolorspace
+<<
+  /ImageType 1
+  /Width 9
+  /Height 426
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 0 1 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 9 0 0 -426 0 426 ]
+>>
+cairo_image
+ Gb"0C]ahkd(dMM^CNE-<M9/S;Z!(8?JMoeNNVEYH'7rVP2'HgGkgt,`6mQRQ_`9a3,P#UH9
+ PZ6K5nF/b&-P91"@3S%5nF/b&-P91"@3S%5nF/b&-P91oRX*VoLkpY12@lsqI/%1:J;dTE_
+ F?lr;2cG=*bQN'(3\>T%!>D[D4Us].BM)20B/iPM--IpX2u]B=o5/<p/Zb-Y]a9rp=n@->c
+ N~>
+Q
+Q q
+55 330 563 2 re W n
+q
+55 330 563 2 re W n
+% Fallback Image: x=55 y=330 w=563 h=2 res=300ppi size=63342
+[ 563.04 0 0 -2.16 55 332.16 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceRGB setcolorspace
+<<
+  /ImageType 1
+  /Width 2346
+  /Height 9
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 0 1 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 2346 0 0 -9 0 9 ]
+>>
+cairo_image
+ Gb"0WI8JDe!QX`5\!qlS]bT5flE8mt*pe%8D7A?(kB>H;lgCRYHDfEeU"-^!.^%(^fm,R=X
+ Ha@fnDcfg+AX0l+t+p?@X(FW!\ksO,Q].M!>5GZne`SX&s7tJ_A>1,5qQ8iUjQMCrnI=Aq=
+ -8-&,@Xc#[Wl0)B(XHnEmbN1d9t=^XG*hCE..lhDPXdlghXJaW2*Np6,H`?2h4ur0EALCMk
+ H5h0XJD5l?[uA!`-Q00K7=podY9<ZdB_geM.5]2l*hG56k_R/X^%ll6LjI=ff.A,7_V!!!"
+ J,9nH,.86?;!!".'%$->Wg`:RL#$Z!$BsdW8/DX4;6`@7s;RC%/9e#1YKT_)RbM$J%[1PFA
+ ]kQ"Y"k!np`*p<a2()!-HCD]GjO7t)]!-gP:ATX/]U+mKqOGN]@'SpU7NZ9J&!Q#+q\%Q]T
+ hAjMVmHCpGE297+b/emr[,4[pgN:^[Jm,O)uPts>5jD*l45-JogT=s]Tl[W&c;0kfO]0<e8
+ *pn=%K+9Mi<&YM9t;KWFu(bMXQ/Ti*ZT:\#2/G4?his]"=S_[iL+WVO@+$2KddI:L7stWn/
+ f"lS;Mop!T7NkcT&CMb"Up+iu4[ZrUhd=eoa98P4%mU:HLYf-KDoMB\$]%b'Yq*GiG$:1qf
+ *Bfrl(3HLDKlpaY5)KX%>Hh*f28LkdYhf>67ZT%krI;qLA`4gOVp*Jki(m"#IomK!l2n:YI
+ ,%<Ne195Jsb_FEt@q0"B?W\uglPfg(!%]s/hZ*WVT"ho3m^kSFVeaZGF>qqNCKl*q9hphZr
+ JJad=)CMF2kMX8i"kQP>cN_';=;blLSn,=3*l=\^O.&+`;&tWcs3\7EJ5rrS"k#G/@^mdL2
+ ;J==VTNl,GW!rK-6M/O:6`_m+l1`b`1:Z_"iM`R.J%Ro,aHio<+&D%\8LS[[-Z73WnhF1[e
+ Ce*W4N[][uB&r#^6`QTb8#rin%aUrt('oGs2bhftR'pBN1LDpO/<aS8O6qPK6M0:I./06/r
+ lMi!<N.o*3#W%C/"pmTrhK_5cS!!!cQXD\(=!.e]tI,$M7gc$qZ^j&q\CG/`C$?!4]8=B^Y
+ qY4k!X?oWlT))9,%Jf/Bp/@,.?J4&rl\oa=#^q'urPV^A!.GcM72E[X<[(ZHru4,sXh`uEO
+ ^nKgfE\8h^g1IOb_k(C(;PNhNFW'cX5pE-,G9Yc-SbbKg]?Z\%S53hs,hd<SB+2To/nidZe
+ _^Yl"e2u`TOMtK_=`c_"nfh3Vgj/gqTZ*I*=TBEUor[26BRnY2PL?VCs':%'4@I!!'7M@!r
+ +W!*F&,a2U5/_nC8K3r6L$Vu*?n:M&s[2*%jUlrR2Nqd"5F'7"W\(BsdcBC8EZn!WtMh<)5
+ )0O@lfdgHOM!S@3I?OS2sNQRiAE9IDM%OE-+n]4c+5h"3@>k+]*<4J#_AFC[_k>O9!Q-S4J
+ W8-X(i3rA$ds'\7'c\4+G3rJ=^9(_Tg&^fn?^J\*Y(RkA7kM"8ITaegCF8d_EJYAWYP`4):
+ 0_G;f\2b-ADis)C:3=52Of]jZN't*!;Nt2\#ZD\I22e_!!jEYm@>"s]<9hef!jG5[ts?DV5
+ iZ%H.,2rj*=4ERRhcpW(e\?jVFkj0.N%Fa<Su1+%Vac8Zpj6,h\J[Z&'r7cOmi,-"MB:5mT
+ '*N3.9#Dk)A.-n&cjb*?Lc>IA42*Tj1gFcQ!gBot>DIBStZgrOh8`!OPZG+T@c&p"H0Y1FH
+ 4)sd-^[^J)kY7Z"/C:1WbK#M2-qCDUH!!%IKX0lOHdq8[]!.`%efj`L$>3ker<J.hSCD<fY
+ V95Zn&l!\7/?r$?I'l"(=@X0O77G8>=%).#Nau35cDoTj-N,LglWm)F:D1Vg`L#%ji/6*,7
+ %l/jH3g2L1RP:<hsCI[f!f8nle?L(_gfeRqe84^[pSb,<ZJk+0CdE"b_3&jQh/AM6A8b!?u
+ E5YB_r:Vq??p"!"07e2ZNgX=Fc?",C+d5d:h\:-WjPhbnb*T`3)U3XYosQ]itHC-`Uml/8L
+ oj+M!n=U!#(?P(E($Z'oKVm"--V^4PcdNr2Fk2;RG.Ac'rPFSet4]94H=aY-4P-9o)$][HH
+ m&II26645UGL@B"t;i=.B:scIWa2n)m&eZr&o5`0%Q18!,d(;gHi&:VcG2DNhhQQ8?/*-4D
+ Q)?Q@UkG(H7U49#':%WYaJ;i/AmK2=m?Yr_nM:'3_fKCs>0R`9DE$$W!<<*"nFLt>js`ur"
+ TSN&?rDK(5C%`f\(d<7bP\p=Gl$3ZFh7io[p7Bb3rAPd4k&5'm8=iC1TSrJLi:uhW*%_N1g
+ :-(o6HaDY0N7i5'a%ul=5`po8"mII9E57?\`];%V7*OdGEBQJ#CAZV!p1GJ"2Za\rRKB)n;
+ `*%8TY,d-)Q=VJcclC?a0C!eGm'DkWku9`I%n!Qus'I(ak*q5>S\l=IOjrmEFu1--BI$X;s
+ :`jjnDir@Ymn;cqt]:-[b>/>r^eEo+2469TMDWDh#(OW4Wl=A04<2HBUUF=[K<&^7>QHl)I
+ I]pr\]6Aahl.6O`,)='%IUU%To.bY/z^QFY@l/-2cqCDUH!!&2e#7&BJPHM&@VU#>5UrLEo
+ 4@@#m2K3lmko-)"Q<SRW:A:iXS8PI:pYcg`/m4BZeq=t=X;0?q(#3JJ\88,n?/.PX.HQ;;P
+ (pO,?Ic:f200M#ViJhqcIHPFo"AbfZhA*JeW/+DO)7Np72W5pdB-o:B!-')^ACT2+Fu"%3;
+ EM,XD*%~>
+Q
+Q q
+150 332 2 14 re W n
+q
+150 332 2 14 re W n
+% Fallback Image: x=150 y=332 w=2 h=14 res=300ppi size=1593
+[ 2.16 0 0 -14.16 150 346.16 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceGray setcolorspace
+<<
+  /ImageType 1
+  /Width 9
+  /Height 59
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 9 0 0 -59 0 59 ]
+>>
+cairo_image
+ Gb"[2lJ]Y,s$:%W0p3BnqRX7m`^%=i!<<Uqj*:~>
+Q
+Q q
+326 332 2 14 re W n
+q
+326 332 2 14 re W n
+% Fallback Image: x=326 y=332 w=2 h=14 res=300ppi size=1593
+[ 2.16 0 0 -14.16 326 346.16 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceGray setcolorspace
+<<
+  /ImageType 1
+  /Width 9
+  /Height 59
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 9 0 0 -59 0 59 ]
+>>
+cairo_image
+ Gb"[2s8W,f%j+"4s*p7fOr22(@&U-,B?Yl,!)u_RGQ~>
+Q
+Q q
+503 332 2 14 re W n
+q
+503 332 2 14 re W n
+% Fallback Image: x=503 y=332 w=2 h=14 res=300ppi size=1593
+[ 2.16 0 0 -14.16 503 346.16 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceGray setcolorspace
+<<
+  /ImageType 1
+  /Width 9
+  /Height 59
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 9 0 0 -59 0 59 ]
+>>
+cairo_image
+ Gb"[2s8W+S%j1fMs*p7fOr22(TW>,/AB]Q)!!u]d5Q~>
+Q
+Q Q
+showpage
+%%Trailer
+end
 %%EOF

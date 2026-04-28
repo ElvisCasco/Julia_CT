@@ -456,6 +456,117 @@ function wald_test(model, vars::AbstractVector; values=zeros(length(vars)))
 end
 
 """
+    test_stata(model, vars; values=zeros(length(vars)), depvar="docvis", V=nothing)
+    test_stata(model; restrictions, depvar="docvis", V=nothing)
+
+Stata-style `test` for ML-based estimators (Poisson, logit, …). Two call
+forms:
+
+1. **Simple form** — pass coef name(s) and (optionally) RHS values. Each
+   variable is tested = its `values[k]` (default 0). Equivalent to Stata's
+   `test female` / `test female private`.
+
+2. **Joint linear-restrictions form** — pass `restrictions = [r1, r2, …]`
+   where each `r_i` is a `Pair{Vector{Pair}, Number}` (use a Vector — not a
+   Dict — so display ordering is deterministic). Example:
+
+       ["female" => 1.0]                    => 0.0   #  female = 0
+       ["private" => 1.0, "chronic" => 1.0] => 1.0   #  private + chronic = 1
+
+   The LHS vector lists `coefname => weight` pairs in the order they should
+   appear in the printed equation; the pair value is the RHS. Equivalent to
+   Stata's `test (female) (private + chronic = 1)`. Display strings are
+   auto-generated to match Stata's exact format (`[depvar]name`, sign-aware
+   coefficients, `+`/`-` joiners).
+
+`V` overrides `vcov(model)` — pass the robust V from `poisson_stata` /
+`setup_mus10().V_robust` to match Stata's `test` after `vce(robust)`.
+"""
+function test_stata(model, vars=nothing; values=nothing,
+                    depvar::AbstractString="docvis",
+                    V=nothing, restrictions=nothing,
+                    mtest::Bool=false)
+    β     = StatsBase.coef(model)
+    Vmat  = V === nothing ? Matrix(StatsBase.vcov(model)) : Matrix(V)
+    names = string.(StatsBase.coefnames(model))
+    p_idx(v) = (i = findfirst(==(string(v)), names);
+                i === nothing && error("'$(v)' not in model coefnames=$(names)");
+                i)
+
+    # Build R (q × k), r (q-vector), and a display label for each restriction.
+    # The LHS of each restriction is a Vector of `coefname => weight` pairs
+    # (we accept Dict too for convenience, but ordering is unspecified).
+    if restrictions !== nothing
+        q = length(restrictions); k = length(β)
+        R = zeros(q, k); r = zeros(q); labels = String[]
+        for (row, restr) in enumerate(restrictions)
+            coefs, rhs = restr.first, restr.second
+            pairs = coefs isa AbstractDict ? collect(coefs) : collect(coefs)
+            terms = String[]
+            for (vname, c) in pairs
+                R[row, p_idx(vname)] = float(c)
+                cf = float(c)
+                if cf == 1.0
+                    push!(terms, "[$depvar]$vname")
+                elseif cf == -1.0
+                    push!(terms, "-[$depvar]$vname")
+                else
+                    push!(terms, Printf.@sprintf("%g*[%s]%s", cf, depvar, vname))
+                end
+            end
+            r[row] = float(rhs)
+            # Join with " + " but turn "+ -" into " - " for nicer display
+            push!(labels, replace(join(terms, " + "), " + -" => " - ") *
+                          " = " * Printf.@sprintf("%g", r[row]))
+        end
+    else
+        vs   = vars isa AbstractVector ? string.(vars) : [string(vars)]
+        vals = values === nothing ? zeros(length(vs)) : collect(values)
+        q = length(vs); k = length(β)
+        R = zeros(q, k); r = vals
+        labels = String[]
+        for (row, v) in enumerate(vs)
+            R[row, p_idx(v)] = 1.0
+            push!(labels, "[$depvar]$v = " * Printf.@sprintf("%g", vals[row]))
+        end
+    end
+
+    Rβ_r = R * β .- r
+    chi2 = (Rβ_r' * (LinearAlgebra.Symmetric(R * Vmat * R') \ Rβ_r))::Float64
+    df   = size(R, 1)
+    pval = 1 - Distributions.cdf(Distributions.Chisq(df), chi2)
+    println()
+    for (k_, lab) in enumerate(labels)
+        Printf.@printf(" ( %d)  %s\n", k_, lab)
+    end
+    if mtest
+        # `mtest` mode (Stata `test ..., mtest`): each row tested in isolation
+        # plus the joint test, in a single table. Default is unadjusted p-values
+        # — the matching Stata footnote prints "* Unadjusted p-values".
+        chi2_each = [let row = R[i:i, :]; rb = row * β .- r[i:i];
+                         (rb' * (LinearAlgebra.Symmetric(row * Vmat * row') \ rb))::Float64
+                     end for i in 1:df]
+        p_each = [1 - Distributions.cdf(Distributions.Chisq(1), c) for c in chi2_each]
+        println()
+        println("-"^38)
+        Printf.@printf("%6s |  %10s  %5s  %9s\n", "", "chi2", "df", "p > chi2")
+        println("-"^7, "+", "-"^30)
+        for i in 1:df
+            Printf.@printf("   (%d) |  %10.2f  %5d  %9.4f*\n",
+                           i, chi2_each[i], 1, p_each[i])
+        end
+        println("-"^7, "+", "-"^30)
+        Printf.@printf("%6s |  %10.2f  %5d  %9.4f\n", "All", chi2, df, pval)
+        println("-"^38)
+        println("* Unadjusted p-values")
+    else
+        Printf.@printf("\n           chi2(%3d) = %7.2f\n", df, chi2)
+        Printf.@printf("         Prob > chi2 = %9.4f\n", pval)
+    end
+    return (; chi2=chi2, df=df, p=pval)
+end
+
+"""
     margins_stata(β, V, X; at=nothing, at_labels=nothing,
                   over=nothing, over_levels=nothing,
                   mean_fn=:exp, vce_label="Robust", level=0.95,
@@ -613,31 +724,58 @@ function margins_stata(β::AbstractVector, V::AbstractMatrix, X::AbstractMatrix;
 end
 
 """
-    setup_mus10(df10; quiet=true)
+    setup_mus10(df10=nothing; vars=nothing, formula=nothing,
+                vce=:robust, quiet=true) -> NamedTuple
 
-Convenience helper for chapter 10: fits the standard mus10 Poisson model
-(docvis ~ private + chronic + female + income, vce(robust)) once and returns
-a NamedTuple with everything downstream chunks need:
+Universal helper for any chapter that uses the mus10 dataset (`mus10data.dta`,
+filtered to `year02 == 1`). Loads the data internally if `df10` is omitted,
+drops missings on `vars`, fits Poisson via `poisson_stata`, and returns a
+NamedTuple covering everything downstream chunks need — both **Stata-display
+order** (`β`, `V`, `X` — slopes first, `_cons` last; for margins / dydx /
+lincom / nlcom helpers) and **GLM order** (`model`, `V_robust = fit.V_glm`;
+for `test_stata` and other helpers that go through `coefnames(model)`).
 
-  - `.df` — cleaned subset of df10 with non-missing docvis/private/chronic/
-    female/income/age (so panels with `age` for cluster SE also work)
-  - `.fit` — full poisson_stata return (model, β_glm, V_glm, X_glm, etc.)
-  - `.β`, `.V`, `.X`, `.n`, `.k` — convenience aliases in Stata-display order
-    (slopes first, _cons last) for direct use with margins_stata,
-    margins_dydx_stata, nlcom_stata, lincom_stata, etc.
+Because the helper auto-loads when `df10` is `nothing`, **any chapter chunk
+can call `s = setup_mus10()` without first running a chapter-10 data-load
+chunk** — i.e. running just chunk 1 + any chapter chunk works.
 
-Re-running any §10.5 / §10.6 chunk after a chunk-1 helper change picks up
-the new helpers automatically — every downstream chunk starts with this
-helper, so there's no stale β_v / V_rob / X_v hiding in some other cell.
+Defaults:
+  - `vars`    = `[:docvis, :private, :chronic, :female, :income, :age]`
+                (chapter 10 / 11 set; pass an explicit shorter list for
+                chapter-12 Wald tests where `:age` isn't a regressor)
+  - `formula` = `docvis ~ private + chronic + female + income`
+  - `vce`     = `:robust`
+  - `quiet`   = `true` (set `false` to print the regression table)
+
+Examples (indented for clarity):
+    s = setup_mus10()                           # load + fit, default 6 vars
+    s = setup_mus10(; quiet = false)            # also print the table
+    s = setup_mus10(df10)                       # reuse an already-loaded df10
+    s = setup_mus10(; vars = [:docvis, :private, :chronic, :female, :income])
 """
-function setup_mus10(df10; quiet::Bool=true)
-    df10c = DataFrames.dropmissing(df10[:,
-        [:docvis, :private, :chronic, :female, :income, :age]])
-    fit = poisson_stata(df10c,
-        GLM.@formula(docvis ~ private + chronic + female + income);
-        vce = :robust, quiet = quiet)
+function setup_mus10(df10=nothing;
+                    vars=nothing, formula=nothing,
+                    vce::Symbol=:robust, quiet::Bool=true)
+    if df10 === nothing
+        df10 = DataFrames.DataFrame(ReadStatTables.readstat("musr/mus10data.dta"))
+        for c in DataFrames.names(df10)
+            if eltype(df10[!, c]) <: Union{Missing, Float32}
+                df10[!, c] = convert.(Union{Missing, Float64}, df10[!, c])
+            end
+        end
+        df10 = DataFrames.filter(r -> r.year02 == 1, df10)
+    end
+    cols = vars === nothing ?
+        [:docvis, :private, :chronic, :female, :income, :age] : vars
+    fml  = formula === nothing ?
+        GLM.@formula(docvis ~ private + chronic + female + income) : formula
+    df10c = DataFrames.dropmissing(df10[:, cols])
+    fit = poisson_stata(df10c, fml; vce = vce, quiet = quiet)
     return (; df = df10c, fit,
-              β = fit.β, V = fit.V, X = fit.X, n = fit.n, k = fit.k)
+              model = fit.model, V_robust = fit.V_glm,
+              β = fit.β, V = fit.V, X = fit.X,
+              n = fit.n, k = fit.k, coefnames = fit.coefnames,
+              coefnames_glm = fit.coefnames_glm)
 end
 
 """
@@ -18085,48 +18223,116 @@ mata_matrix_print(vcat(b_gmm', seb'))
 ### 12.2.3 Plotting densities
 
 ```{julia}
-# 10,000 draws from χ²(5) and 5·F(5,30)
+#=
+* Create many draws from chi(5) and 5*F(5,30) distributions
+set seed 10101
+quietly set obs 10000 
+generate chi5 = rchi2(5)           // result xc ~ chisquared(10) 
+generate xfn = rchi2(5)/5          // result numerator of F(5,30)
+generate xfd = rchi2(30)/30        // result denominator of F(5,30)
+generate f5_30 = xfn/xfd           // result xf ~ F(5,30)
+generate five_x_f5_30 = 5*f5_30
+summarize chi5 five_x_f5_30
+=#
+
+using Random, Distributions, Statistics, Printf
+
 Random.seed!(10101)
-N12 = 10_000
-chi5 = Distributions.rand(Distributions.Chisq(5),  N12)
-xfn  = Distributions.rand(Distributions.Chisq(5),  N12) ./ 5
-xfd  = Distributions.rand(Distributions.Chisq(30), N12) ./ 30
+n = 10_000
+
+chi5 = rand(Chisq(5), n)
+xfn = rand(Chisq(5), n) ./ 5
+xfd = rand(Chisq(30), n) ./ 30
 f5_30 = xfn ./ xfd
-five_f = 5 .* f5_30
-@printf("chi5  : mean=%.4f sd=%.4f\n", Statistics.mean(chi5), Statistics.std(chi5))
-@printf("5·F   : mean=%.4f sd=%.4f\n", Statistics.mean(five_f), Statistics.std(five_f))
+five_x_f5_30 = 5 .* f5_30
+
+sim = DataFrames.DataFrame(
+    chi5 = chi5,
+    five_x_f5_30 = five_x_f5_30,
+)
+summarize_stata(sim, [:chi5, :five_x_f5_30])
+
 ```
 
 ```{julia}
-# Plot the two densities (use kernel density)
-chi5_keep = chi5[chi5 .< 25]
-fF_keep   = five_f[five_f .< 25]
-kd1 = KernelDensity.kde(chi5_keep)
-kd2 = KernelDensity.kde(fF_keep)
+#=
+* Plot the densities for these two distributions using kdensity
+label var chi5 "chi(5)"
+label var five_x_f5_30 "5*F(5,30)"
+kdensity chi5, bw(1.0) generate (kx1 kd1) n(500)
+kdensity five_x_f5_30, bw(1.0) generate (kx2 kd2) n(500)
+quietly drop if (chi5 > 25  |  five_x_f5_30 > 25)
+graph twoway (line kd1 kx1) if kx1 < 25, name(chi)
+graph twoway (line kd2 kx2) if kx2 < 25, name(F)
+graph twoway (line kd1 kx1) (line kd2 kx2, clstyle(p3)) if kx1 < 25,  ///
+  scale(1.2) plotregion(style(none))     ///
+  title("Chisquared(5) and 5*F(5,30) Densities")                ///
+  xtitle("y", size(medlarge)) xscale(titlegap(*5))              ///
+  ytitle("Density f(y)", size(medlarge)) yscale(titlegap(*5))   ///
+  legend(pos(1) ring(0) col(1)) legend(size(small))             ///
+  legend(label(1 "Chi(5)") label(2 "5*F(5,30)"))
+quietly graph export musr/mus12fandchi5.eps, replace
+=#
 
-fig12 = CairoMakie.Figure(size = (700, 450))
-ax = CairoMakie.Axis(fig12[1, 1],
-    title = "χ²(5) vs 5·F(5,30) densities",
-    xlabel = "y", ylabel = "Density f(y)")
-CairoMakie.lines!(ax, kd1.x, kd1.density, color = :steelblue,
-                  linewidth = 2, label = "χ²(5)")
-CairoMakie.lines!(ax, kd2.x, kd2.density, color = :tomato,
-                  linewidth = 2, label = "5·F(5,30)")
-CairoMakie.axislegend(ax, position = :rt)
-fig12
+# Kernel densities with Stata-like settings: bw(1.0), n(500)
+kd1 = KernelDensity.kde(chi5, bandwidth = 1.0, npoints = 500)
+kd2 = KernelDensity.kde(five_x_f5_30, bandwidth = 1.0, npoints = 500)
+
+# Restrict plotted support to x < 25 (matching graph if kx < 25)
+keep1 = kd1.x .< 25
+keep2 = kd2.x .< 25
+
+# graph twoway (line kd1 kx1)
+fig_chi = CairoMakie.Figure(size = (700, 450))
+ax_chi = CairoMakie.Axis(fig_chi[1, 1], xlabel = "y", ylabel = "Density f(y)",
+                         title = "Chi(5) Density")
+CairoMakie.lines!(ax_chi, kd1.x[keep1], kd1.density[keep1], linewidth = 2.2, color = :steelblue)
+
+# graph twoway (line kd2 kx2)
+fig_f = CairoMakie.Figure(size = (700, 450))
+ax_f = CairoMakie.Axis(fig_f[1, 1], xlabel = "y", ylabel = "Density f(y)",
+                       title = "5*F(5,30) Density")
+CairoMakie.lines!(ax_f, kd2.x[keep2], kd2.density[keep2], linewidth = 2.2, color = :darkorange)
+
+# Combined graph (line kd1 kx1) (line kd2 kx2)
+fig = CairoMakie.Figure(size = (840, 520))
+ax = CairoMakie.Axis(fig[1, 1],
+    xlabel = "y",
+    ylabel = "Density f(y)",
+    title = "Chisquared(5) and 5*F(5,30) Densities",
+)
+CairoMakie.lines!(ax, kd1.x[keep1], kd1.density[keep1], linewidth = 2.4,
+                  color = :steelblue, label = "Chi(5)")
+CairoMakie.lines!(ax, kd2.x[keep2], kd2.density[keep2], linewidth = 2.4,
+                  color = :darkorange, label = "5*F(5,30)")
+CairoMakie.axislegend(ax, position = :lt)
+
+# Export like: graph export musr/mus12fandchi5.eps, replace
+mkpath("musr")
+CairoMakie.save("musr/mus12fandchi5.eps", fig)
+
+fig
+
 ```
 
 ### 12.2.4 Computing p-values and critical values
 
 ```{julia}
-# p-values at y = 2 for t(30), F(1,30), Z, χ²(1)
+# Two-sided p-values from each distribution at y = 2.
+# Stata        Julia
+# ttail(d, y)   1 − cdf(TDist(d), y)
+# Ftail(d1,d2,y²) 1 − cdf(FDist(d1,d2), y²)
+# 1 − normal(y) 1 − cdf(Normal(), y)
+# chi2tail(d,y²)  1 − cdf(Chisq(d), y²)
+# (For y=2, t(30) and F(1,30) match because F(1,n) ≡ t(n)²; z and χ²(1)
+# match for the same reason.)
 y = 2.0
-p_t30  = 2 * (1 - Distributions.cdf(Distributions.TDist(30), y))
-p_f130 = 1 - Distributions.cdf(Distributions.FDist(1, 30), y^2)
-p_z    = 2 * (1 - Distributions.cdf(Distributions.Normal(),  y))
-p_chi1 = 1 - Distributions.cdf(Distributions.Chisq(1), y^2)
-@printf("p-values:  t(30)=%.4f  F(1,30)=%.4f  z=%.4f  χ²(1)=%.4f\n",
-        p_t30, p_f130, p_z, p_chi1)
+p_t30     = 2 * (1 - Distributions.cdf(Distributions.TDist(30), y))
+p_f1and30 = 1 - Distributions.cdf(Distributions.FDist(1, 30), y^2)
+p_z       = 2 * (1 - Distributions.cdf(Distributions.Normal(),  y))
+p_chi1    = 1 - Distributions.cdf(Distributions.Chisq(1), y^2)
+@printf("p-values  t(30) =%7.4f  F(1,30)=%7.4f  z =%7.4f  chi(1)=%7.4f\n",
+        p_t30, p_f1and30, p_z, p_chi1)
 ```
 
 ```{julia}
@@ -18149,79 +18355,124 @@ c_chi1 = Distributions.quantile(Distributions.Chisq(1), 1 - α)
 ### 12.3.2 Wald tests in Julia
 
 ```{julia}
-# Re-fit the Poisson model from Ch 10 / 11
-df12 = DataFrames.DataFrame(ReadStatTables.readstat("musr/mus10data.dta"))
-df12 = filter(r -> r.year02 == 1, df12)
-pois12 = GLM.glm(GLM.@formula(docvis ~ private + chronic + female + income),
-                 df12, Distributions.Poisson(), GLM.LogLink())
-println(pois12)
+# Stata's `poisson` (as opposed to `ml maximize`) prints the "Poisson
+# regression" header with Pseudo R² — that's the default `header_style =
+# :poisson` in `poisson_stata`. `setup_mus10` (chunk 1) auto-loads
+# `mus10data.dta`, filters `year02==1`, drops missings on `vars`, and fits
+# Poisson with `vce(robust)`. We pass the chapter-12 5-variable set
+# explicitly so n matches Stata's expected 4,412.
+s = setup_mus10(;
+    vars  = [:docvis, :private, :chronic, :female, :income],
+    quiet = false)
+
+# Convenience aliases used by the downstream chapter-12 chunks (Wald F,
+# nonlinear delta, lincom, nlcom, asymmetric CIs, …). Everything is in
+# GLM column order so `coefnames(s.model)` lookups are valid.
+β          = GLM.coef(s.model)
+V          = s.V_robust
+cn         = GLM.coefnames(s.model)
+i_f        = findfirst(==("female"),  cn)
+i_p        = findfirst(==("private"), cn)
+i_c        = findfirst(==("chronic"), cn)
+i_inc      = findfirst(==("income"),  cn)
+slope_idx  = setdiff(1:length(β), [findfirst(==("(Intercept)"), cn)]);
 ```
 
 #### Test single coefficient
 
 ```{julia}
-# Wald test of H0: β_female = 0
-β  = GLM.coef(pois12); V = GLM.vcov(pois12); cn = GLM.coefnames(pois12)
-i  = findfirst(==("female"), cn)
-W  = β[i]^2 / V[i, i]
-@printf("Wald χ²(1) = %.3f, p = %.4f\n",
-        W, 1 - Distributions.cdf(Distributions.Chisq(1), W))
+test_stata(s.model, "female"; V = s.V_robust);
 ```
 
 #### Test several hypotheses
 
 ```{julia}
-# Variations of the same single test
-@printf("β_female = %.6f, se = %.6f, z = %.3f, p = %.4f\n",
-        β[i], sqrt(V[i, i]), β[i]/sqrt(V[i, i]),
-        2 * (1 - Distributions.cdf(Distributions.Normal(), abs(β[i]/sqrt(V[i, i])))))
-```
-
-```{julia}
-# Joint test: β_female = 0 AND β_private + β_chronic = 1
-i_f = findfirst(==("female"),  cn)
-i_p = findfirst(==("private"), cn)
-i_c = findfirst(==("chronic"), cn)
-R = [zeros(1, length(β)); zeros(1, length(β))]
-R[1, i_f] = 1
-R[2, i_p] = 1; R[2, i_c] = 1
-r = [0.0; 1.0]
-diff = R * β .- r
-W = diff' * LinearAlgebra.inv(R * V * R') * diff
-@printf("Joint Wald χ²(2) = %.3f, p = %.4f\n",
-        W, 1 - Distributions.cdf(Distributions.Chisq(2), W))
-```
-
-```{julia}
-# Each hypothesis in isolation
-for (label, R_row, r_val) in [("β_female=0", [1, 0], 0.0),
-                                ("β_private+β_chronic=1", [0, 1], 1.0)]
-    Rh = zeros(1, length(β))
-    if label == "β_female=0"
-        Rh[1, i_f] = 1
-    else
-        Rh[1, i_p] = 1; Rh[1, i_c] = 1
-    end
-    diff = (Rh * β)[1] - r_val
-    W = diff^2 / (Rh * V * Rh')[1]
-    @printf("%-25s W=%7.3f  p=%.4f\n", label, W,
-            1 - Distributions.cdf(Distributions.Chisq(1), W))
+# Stata accepts four equivalent syntaxes for "test β_female = 0":
+#   test female                — short form, defaults to "= 0"
+#   test female = 0            — explicit RHS
+#   test [docvis]female = 0    — equation-prefixed name
+#   test _b[female] = 0        — coefficient-vector reference
+# All four resolve to the same chi² test, so we just print the Stata command
+# line as a header before each call.
+for stata_cmd in (". test female",
+                  ". test female = 0",
+                  ". test [docvis]female = 0",
+                  ". test _b[female] = 0")
+    println(stata_cmd)
+    test_stata(s.model, "female"; V = s.V_robust)
+    println()
 end
 ```
 
 ```{julia}
-# Same as above (using bracketed equation specification has no Julia analogue)
-println("Equation-bracket notation [docvis] is Stata-specific.")
+# Joint Wald: H0: β_female = 0  AND  β_private + β_chronic = 1.
+# `restrictions` accepts a vector of `Vector(coef => weight) => RHS` pairs;
+# `test_stata` builds R (q×k) and r (q-vector), computes
+#   χ² = (Rβ − r)' (R V R')⁻¹ (Rβ − r),  df = q,
+# and prints the equation list in Stata's "[depvar]name + [depvar]name = c"
+# format. Use a Vector (not a Dict) for the LHS so the printed term order
+# matches what you wrote.
+test_stata(s.model;
+    V = s.V_robust,
+    restrictions = [
+        ["female"  => 1.0]                    => 0.0,
+        ["private" => 1.0, "chronic" => 1.0]  => 1.0,
+    ]);
 ```
 
 ```{julia}
-# Wald test of overall significance (all 4 slopes = 0)
-slope_idx = [findfirst(==(v), cn) for v in ("private","chronic","female","income")]
-βs = β[slope_idx]; Vs = V[slope_idx, slope_idx]
-W = βs' * LinearAlgebra.inv(Vs) * βs
-@printf("Overall Wald χ²(4) = %.3f, p = %.6f\n",
-        W, 1 - Distributions.cdf(Distributions.Chisq(4), W))
+# Stata `mtest` option: report each hypothesis tested in isolation alongside
+# the joint test. Each row's chi² is computed via the same Wald formula but
+# using just that row of R; df = 1 per row. Unadjusted p-values (the default;
+# Stata's `mtest(bonferroni)` etc. would Bonferroni-/Sidak-/Holm-correct).
+test_stata(s.model;
+    V = s.V_robust,
+    restrictions = [
+        ["female"  => 1.0]                    => 0.0,
+        ["private" => 1.0, "chronic" => 1.0]  => 1.0,
+    ],
+    mtest = true);
 ```
+
+```{julia}
+# Both variants below resolve to the same restrictions as the prior chunk —
+# Stata accepts the equation-prefixed `[depvar]varname` syntax and the
+# `_b[varname]` coefficient-vector form interchangeably with bare names. In
+# Julia we just call `test_stata` with the same `restrictions` argument; the
+# Stata command line is printed as a header so the parallel is explicit.
+for stata_cmd in (". test ([docvis]female = 0) ([docvis]private + [docvis]chronic = 1)",
+                  ". test (_b[female] = 0) (_b[private] + _b[chronic] = 1)")
+    println(stata_cmd)
+    test_stata(s.model;
+        V = s.V_robust,
+        restrictions = [
+            ["female"  => 1.0]                    => 0.0,
+            ["private" => 1.0, "chronic" => 1.0]  => 1.0,
+        ])
+    println()
+end
+```
+
+```{julia}
+#=
+* Wald test of overall significance
+test private chronic female income
+=#
+test_stata(s.model, ["private", "chronic", "female", "income"]; V = s.V_robust);
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 #### Test calculated from retrieved coefficients and VCE
 
