@@ -3,7 +3,7 @@
        log:  c:\EC\BSE\DSDM\Term 2\24DM021_Causal Inference and Machine Learnin
 > g\References\Cameron & Trivedi\musr/mus01p2template.txt
   log type:  text
- opened on:  18 Apr 2026, 01:08:27
+ opened on:  27 Apr 2026, 13:34:53
 
 . * 3. Stata version
 . version 10.1 // so will still run in a later version o f Stata
@@ -82,5 +82,5 @@ r-squared = .93612523
        log:  c:\EC\BSE\DSDM\Term 2\24DM021_Causal Inference and Machine Learnin
 > g\References\Cameron & Trivedi\musr/mus01p2template.txt
   log type:  text
- closed on:  18 Apr 2026, 01:08:29
+ closed on:  27 Apr 2026, 13:34:54
 -------------------------------------------------------------------------------

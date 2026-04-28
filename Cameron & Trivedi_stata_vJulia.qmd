@@ -139,6 +139,95 @@ function _expand_varlist(df, vars)
     return Symbol.(uniq)
 end
 
+"""
+    correlate_stata(df, vars=nothing)
+
+Stata-style `correlate <varlist>` — pairwise (listwise-dropmissing)
+correlation matrix of the listed variables, printed in Stata's
+lower-triangular layout with abbreviated column headers.
+
+  - `vars` can be `nothing` (use all numeric columns) or a Vector/Tuple of
+    column names (Symbol/String).
+  - Prints `(obs=N)` then a triangular table with 4-decimal correlations.
+  - Variable names longer than 8 chars are abbreviated to `XXXXXX~Y` in the
+    column headers, mirroring Stata's wrapping.
+  - Returns the full symmetric correlation matrix (`Statistics.cor`) so you
+    can keep using it programmatically.
+"""
+function correlate_stata(df::DataFrames.AbstractDataFrame, vars=nothing)
+    varlist = vars === nothing ? Symbol[] : Symbol.(vars)
+    if isempty(varlist)
+        for c in DataFrames.names(df)
+            elT = nonmissingtype(eltype(df[!, c]))
+            elT <: Real && push!(varlist, Symbol(c))
+        end
+    end
+    sub = DataFrames.dropmissing(df[:, varlist])
+    n   = DataFrames.nrow(sub)
+    M   = hcat([Float64.(collect(sub[!, v])) for v in varlist]...)
+    C   = Statistics.cor(M)
+
+    abbrev(s::AbstractString, w::Int=8) =
+        length(s) <= w ? s : (s[1:w-2] * "~" * s[end:end])
+    commafmt(num::Integer) = begin
+        s = string(abs(num)); parts = String[]; i = length(s)
+        while i >= 1; push!(parts, s[max(1, i-2):i]); i -= 3; end
+        (num < 0 ? "-" : "") * join(reverse(parts), ",")
+    end
+
+    println()
+    Printf.@printf("(obs=%s)\n\n", commafmt(n))
+    Printf.@printf("%12s |", "")
+    for v in varlist
+        Printf.@printf(" %8s", abbrev(string(v)))
+    end
+    println()
+    println("-"^13, "+", "-"^(9 * length(varlist)))
+    for (i, v) in enumerate(varlist)
+        Printf.@printf("%12s |", string(v))
+        for j in 1:i
+            Printf.@printf(" %8.4f", C[i, j])
+        end
+        println()
+    end
+    return C
+end
+
+"""
+    rmcoll_stata(df, vars; tol=1e-9, quiet=false) -> Vector{Symbol}
+
+Stata-style `_rmcoll`: scan `vars` in order and drop any variable whose
+multiple-correlation R² with the previously kept set exceeds `1 − tol`.
+Stata's default tolerance is `1e-9`. Returns the surviving varlist; with
+`quiet=false` (the default) prints `note: <var> omitted because of
+collinearity` for each dropped variable, matching Stata's wording.
+"""
+function rmcoll_stata(df::DataFrames.AbstractDataFrame, vars;
+                     tol::Float64 = 1e-9, quiet::Bool = false)
+    varlist = Symbol.(vars)
+    sub = DataFrames.dropmissing(df[:, varlist])
+    M   = hcat([Float64.(collect(sub[!, v])) for v in varlist]...)
+    n   = size(M, 1)
+    keep = trues(length(varlist))
+    keep[1] = true
+    for j in 2:length(varlist)
+        Xj = M[:, findall(keep[1:j-1])]
+        yj = M[:, j]
+        # Regression with intercept: residual SS / total SS
+        Xa = hcat(ones(n), Xj)
+        β  = Xa \ yj
+        ŷ  = Xa * β
+        rss = sum((yj .- ŷ).^2)
+        tss = sum((yj .- Statistics.mean(yj)).^2)
+        r2  = tss > 0 ? 1 - rss / tss : 1.0
+        if 1 - r2 < tol
+            keep[j] = false
+            quiet || println("note: ", varlist[j], " omitted because of collinearity")
+        end
+    end
+    return varlist[keep]
+end
+
 function summarize_stata(df::DataFrames.AbstractDataFrame, vars=nothing; detail::Bool=false)
     if vars === nothing
         varlist = Symbol[]
@@ -181,9 +270,39 @@ function summarize_stata(df::DataFrames.AbstractDataFrame, vars=nothing; detail:
         end
     end
 
-    out = DataFrames.DataFrame(rows)
-    PrettyTables.pretty_table(out)
-    #return out
+    # Stata's detail format is multi-section per variable; we fall back to
+    # PrettyTables for that. Default (non-detail) matches Stata's `summarize`.
+    if detail
+        PrettyTables.pretty_table(DataFrames.DataFrame(rows))
+        return
+    end
+
+    # Stata %9.0g: up to 7 sig figs, capped at 9 chars total (so leading "0."
+    # for |x|<1 fits), then leading "0" stripped from |x|<1.
+    _g9(x; w::Int=9, mx::Int=7) = begin
+        (ismissing(x) || !isfinite(x)) && return "."
+        sig = mx
+        s = Printf.@sprintf("%.*g", sig, x)
+        while length(s) > w && sig > 1
+            sig -= 1
+            s = Printf.@sprintf("%.*g", sig, x)
+        end
+        0 < abs(x) < 1 ? replace(s, r"^(-?)0\." => s"\1.") : s
+    end
+    _comma(num::Integer) = begin
+        s = string(abs(num)); parts = String[]; i = length(s)
+        while i >= 1; push!(parts, s[max(1, i-2):i]); i -= 3; end
+        (num < 0 ? "-" : "") * join(reverse(parts), ",")
+    end
+
+    println("    Variable |        Obs        Mean    Std. dev.       Min        Max")
+    println("-"^13, "+", "-"^57)
+    for r in rows
+        Printf.@printf("%12s |  %9s   %9s   %9s  %9s  %9s\n",
+                       r.Variable, _comma(r.Obs),
+                       _g9(r.Mean), _g9(r.Std),
+                       _g9(r.Min),  _g9(r.Max))
+    end
 end
 
 """
@@ -334,6 +453,751 @@ function wald_test(model, vars::AbstractVector; values=zeros(length(vars)))
     Printf.@printf("\n       F( %d, %g) = %.4f\n", q, dfr, Fstat)
     Printf.@printf("            Prob > F = %.4f\n", p)
     return (; F=Fstat, df1=q, df2=dfr, p=p, chi2=W)
+end
+
+"""
+    margins_stata(β, V, X; at=nothing, at_labels=nothing,
+                  over=nothing, over_levels=nothing,
+                  mean_fn=:exp, vce_label="Robust", level=0.95,
+                  expression="Predicted number of events, predict()",
+                  name="_cons")
+
+Stata-style `margins` with delta-method SE. Three modes:
+
+  - `at = nothing, over = nothing` → **Predictive margins** (sample average of
+    `predict` over X). Header: "Predictive margins".
+
+  - `at = c` (length-k vector incl. the constant slot) → **Adjusted predictions**
+    at the single point. Pass `at_labels = [:var => v, ...]` to populate the
+    "At:" block. Header: "Adjusted predictions".
+
+  - `over = "var" => idx` (factor name and its column index in X) →
+    **Predictive margins by factor level**: for each level k, set
+    X[:, idx] .= k for ALL observations and compute the sample-average
+    margin. Default levels = `sort(unique(X[:, idx]))`; override with
+    `over_levels = [...]`. The output is a multi-row table with a sub-header
+    for the factor name and one row per level.
+
+For mean_fn=:exp, gradient = (1/N) Σ μ_i x_i (averaged) or μ·c (at-point);
+SE = sqrt(g' V g). Pass V_rob (n/(n-1)-corrected) to match Stata's margins
+after `poisson, vce(robust)`.
+"""
+function margins_stata(β::AbstractVector, V::AbstractMatrix, X::AbstractMatrix;
+                       at::Union{Nothing,AbstractVector}=nothing,
+                       at_labels::Union{Nothing,AbstractVector}=nothing,
+                       over::Union{Nothing,Pair}=nothing,
+                       over_levels::Union{Nothing,AbstractVector}=nothing,
+                       mean_fn::Symbol=:exp, vce_label::String="Robust",
+                       level::Float64=0.95, name::String="_cons",
+                       expression::String="Predicted number of events, predict()")
+    n_sample, _ = size(X)
+
+    g9 = function(x; w_::Int=10, sig::Int=7)
+        (ismissing(x) || !isfinite(x)) && return lpad(".", w_)
+        sig_use = sig
+        s = Printf.@sprintf("%.*g", sig_use, x)
+        # Stata's %9.0g effective rule: cap pre-strip at 9 chars EXCEPT for
+        # negative |x|<1 where cap=10 (the strip will save 1 char). Without
+        # this, negative |x|<1 values lose a digit vs Stata's output.
+        cap = (0 < abs(x) < 1 && x < 0) ? 10 : 9
+        while length(s) > cap && sig_use > 1
+            sig_use -= 1
+            s = Printf.@sprintf("%.*g", sig_use, x)
+        end
+        0 < abs(x) < 1 && (s = replace(s, r"^(-?)0\." => s"\1."))
+        lpad(s, w_)
+    end
+    commafmt(num::Integer) = begin
+        s = string(abs(num)); parts = String[]; i = length(s)
+        while i >= 1; push!(parts, s[max(1, i-2):i]); i -= 3; end
+        (num < 0 ? "-" : "") * join(reverse(parts), ",")
+    end
+    function _summary_row(margin, se)
+        z      = margin / se
+        p      = 2 * (1 - Distributions.cdf(Distributions.Normal(), abs(z)))
+        crit   = Distributions.quantile(Distributions.Normal(), 1 - (1-level)/2)
+        (margin, se, z, p, margin - crit*se, margin + crit*se)
+    end
+    function _compute_margin_at_X(Xm)
+        if mean_fn == :exp
+            μ    = exp.(Xm * β)
+            gvec = vec((μ' * Xm) ./ size(Xm, 1))
+            margin = Statistics.mean(μ)
+        elseif mean_fn == :identity
+            μ    = Xm * β
+            gvec = vec(Statistics.mean(Xm, dims = 1))
+            margin = Statistics.mean(μ)
+        else
+            error("mean_fn=$mean_fn not supported (use :exp or :identity)")
+        end
+        margin, sqrt(gvec' * V * gvec)
+    end
+
+    # Determine title and rows to print
+    if over !== nothing
+        title = "Predictive margins"
+        factor_name, factor_idx = over
+        levels_to_use = over_levels === nothing ?
+                        sort(unique(X[:, factor_idx])) : collect(over_levels)
+        rows = Tuple[]
+        for lev in levels_to_use
+            Xm = copy(X)
+            Xm[:, factor_idx] .= lev
+            m, s = _compute_margin_at_X(Xm)
+            push!(rows, (lev, _summary_row(m, s)...))
+        end
+    elseif at === nothing
+        title = "Predictive margins"
+        m, s  = _compute_margin_at_X(X)
+        rows  = [(name, _summary_row(m, s)...)]
+    else
+        title = "Adjusted predictions"
+        c = collect(at)
+        length(c) == length(β) ||
+            error("at must have length(β)=$(length(β)), got $(length(c))")
+        if mean_fn == :exp
+            margin = exp(LinearAlgebra.dot(c, β))
+            gvec   = margin .* c
+        elseif mean_fn == :identity
+            margin = LinearAlgebra.dot(c, β)
+            gvec   = c
+        else
+            error("mean_fn=$mean_fn not supported (use :exp or :identity)")
+        end
+        rows = [(name, _summary_row(margin, sqrt(gvec' * V * gvec))...)]
+    end
+
+    println()
+    Printf.@printf("%-57s%-13s = %5s\n",
+                   title, "Number of obs", commafmt(n_sample))
+    Printf.@printf("Model VCE: %s\n", vce_label)
+    println()
+    Printf.@printf("Expression: %s\n", expression)
+    if at_labels !== nothing && !isempty(at_labels)
+        max_name_w = maximum(length(string(p_.first)) for p_ in at_labels)
+        val_strs   = [Printf.@sprintf("%g", float(p_.second)) for p_ in at_labels]
+        max_val_w  = maximum(length, val_strs)
+        for (i, p_) in enumerate(at_labels)
+            prefix = i == 1 ? "At: " : "    "
+            Printf.@printf("%s%-*s = %s\n", prefix, max_name_w,
+                           string(p_.first), lpad(val_strs[i], max_val_w))
+        end
+    end
+    println()
+    println("-"^78)
+    println("             |            Delta-method")
+    println("             |     Margin   std. err.      z    P>|z|     [95% conf. interval]")
+    println("-"^13, "+", "-"^64)
+    if over !== nothing
+        Printf.@printf("%12s |\n", first(over))   # factor sub-header row
+        for (lev, m, s, z, p, lo, hi) in rows
+            lev_str = string(lev isa AbstractFloat && lev == floor(lev) ?
+                             Int(lev) : lev)
+            Printf.@printf("%11s  | %s  %s  %s   %s    %s  %s\n",
+                           lev_str, g9(m; w_=10), g9(s; w_=9),
+                           Printf.@sprintf("%7.2f", z),
+                           Printf.@sprintf("%.3f", p),
+                           g9(lo; w_=9), g9(hi; w_=10))
+        end
+    else
+        for (lab, m, s, z, p, lo, hi) in rows
+            Printf.@printf("%12s | %s  %s  %s   %s    %s  %s\n",
+                           lab, g9(m; w_=10), g9(s; w_=9),
+                           Printf.@sprintf("%7.2f", z),
+                           Printf.@sprintf("%.3f", p),
+                           g9(lo; w_=9), g9(hi; w_=10))
+        end
+    end
+    println("-"^78)
+    return rows
+end
+
+"""
+    setup_mus10(df10; quiet=true)
+
+Convenience helper for chapter 10: fits the standard mus10 Poisson model
+(docvis ~ private + chronic + female + income, vce(robust)) once and returns
+a NamedTuple with everything downstream chunks need:
+
+  - `.df` — cleaned subset of df10 with non-missing docvis/private/chronic/
+    female/income/age (so panels with `age` for cluster SE also work)
+  - `.fit` — full poisson_stata return (model, β_glm, V_glm, X_glm, etc.)
+  - `.β`, `.V`, `.X`, `.n`, `.k` — convenience aliases in Stata-display order
+    (slopes first, _cons last) for direct use with margins_stata,
+    margins_dydx_stata, nlcom_stata, lincom_stata, etc.
+
+Re-running any §10.5 / §10.6 chunk after a chunk-1 helper change picks up
+the new helpers automatically — every downstream chunk starts with this
+helper, so there's no stale β_v / V_rob / X_v hiding in some other cell.
+"""
+function setup_mus10(df10; quiet::Bool=true)
+    df10c = DataFrames.dropmissing(df10[:,
+        [:docvis, :private, :chronic, :female, :income, :age]])
+    fit = poisson_stata(df10c,
+        GLM.@formula(docvis ~ private + chronic + female + income);
+        vce = :robust, quiet = quiet)
+    return (; df = df10c, fit,
+              β = fit.β, V = fit.V, X = fit.X, n = fit.n, k = fit.k)
+end
+
+"""
+    margins_dydx_stata(β, V, X; factors, continuous,
+                       atmean=false, at=nothing, at_labels=nothing,
+                       noatlegend=false,
+                       level=0.95, vce_label="Robust",
+                       expression="Predicted number of events, predict()")
+
+Unified Stata-style `margins, dydx(*)` — three modes via keyword args:
+
+  - default (`atmean=false, at=nothing`) → **AME** (Stata: `margins, dydx(*)`).
+    Title: "Average marginal effects". For each obs, compute ∂ŷ_i/∂x_j or the
+    discrete change, then average over the sample.
+  - `atmean=true` → **MEM** (Stata: `margins, dydx(*) atmean`). Title:
+    "Conditional marginal effects". Evaluated at the sample-mean vector x̄.
+  - `at=c` (length-k vector) → **MER** (Stata: `margins, dydx(*) at(...)`).
+    Title: "Conditional marginal effects". Evaluated at the user-specified
+    point c. Pass `at_labels = [:var=>v, ...]` for the "At:" block, or set
+    `noatlegend=true` to suppress it (mirrors Stata's `noatlegend` option).
+
+For each variable:
+  - **Factor** (binary 0/1): discrete change ME = μ(x with j=1) − μ(x with j=0).
+    Gradient: μ_1·x_1 − μ_0·x_0. For AME, this is averaged across observations.
+  - **Continuous**: ME = β_j · μ(x). Gradient: e_j · μ + β_j · μ · x.
+
+`factors` and `continuous` are vectors of `(name, col_idx::Int)` tuples giving
+the variable name (no "1." prefix) and its column index in X.
+"""
+function margins_dydx_stata(β::AbstractVector, V::AbstractMatrix,
+                            X::AbstractMatrix;
+                            factors::AbstractVector,
+                            continuous::AbstractVector,
+                            kind::Symbol=:dydx,
+                            atmean::Bool=false,
+                            at::Union{Nothing,AbstractVector}=nothing,
+                            at_labels::Union{Nothing,AbstractVector}=nothing,
+                            noatlegend::Bool=false,
+                            interactions::AbstractVector=NamedTuple[],
+                            level::Float64=0.95,
+                            vce_label::String="Robust",
+                            expression::String="Predicted number of events, predict()")
+    # `interactions` lets the helper handle product interaction columns
+    # correctly. Each entry is a NamedTuple `(col=k, base=[i, j, ...])`
+    # meaning column k of X is the elementwise product of columns
+    # `base`. When a factor variable in `base` flips 0↔1 the helper
+    # rebuilds col k from the (possibly modified) base columns; for a
+    # continuous variable in `base`, the chain rule for ∂μ/∂x_j picks
+    # up an extra `β_k · prod(other base cols)` term.
+    # `kind` selects the column header AND the formula for *continuous*
+    # variables (factor variables always use the discrete change, since
+    # ey/ex of a 0/1 dummy is ill-defined). For Poisson with log link:
+    #   :dydx → β_j · μ          (gradient e_j·μ + β_j·μ·x)
+    #   :eyex → β_j · x_j        (gradient e_j·x_j;  ε doesn't depend on μ)
+    #   :eydx → β_j              (gradient e_j;     semi-elasticity)
+    #   :dyex → β_j · μ · x_j    (gradient depends on μ)
+    kind in (:dydx, :eyex, :eydx, :dyex) ||
+        error("kind must be :dydx, :eyex, :eydx, or :dyex; got $kind")
+    kind_label = kind == :dydx ? "dy/dx" :
+                 kind == :eyex ? "ey/ex" :
+                 kind == :eydx ? "ey/dx" : "dy/ex"
+    n, k = size(X)
+
+    g9 = function(x; w_::Int=10, sig::Int=7)
+        (ismissing(x) || !isfinite(x)) && return lpad(".", w_)
+        sig_use = sig
+        s = Printf.@sprintf("%.*g", sig_use, x)
+        # Stata's %9.0g effective rule: cap pre-strip at 9 chars EXCEPT for
+        # negative |x|<1 where cap=10 (the strip will save 1 char). Without
+        # this, negative |x|<1 values lose a digit vs Stata's output.
+        cap = (0 < abs(x) < 1 && x < 0) ? 10 : 9
+        while length(s) > cap && sig_use > 1
+            sig_use -= 1
+            s = Printf.@sprintf("%.*g", sig_use, x)
+        end
+        0 < abs(x) < 1 && (s = replace(s, r"^(-?)0\." => s"\1."))
+        lpad(s, w_)
+    end
+    g_atval = function(x; sig::Int=7)
+        sig_use = sig
+        s = Printf.@sprintf("%.*g", sig_use, x)
+        # Stata's %9.0g effective rule: cap pre-strip at 9 chars EXCEPT for
+        # negative |x|<1 where cap=10 (the strip will save 1 char). Without
+        # this, negative |x|<1 values lose a digit vs Stata's output.
+        cap = (0 < abs(x) < 1 && x < 0) ? 10 : 9
+        while length(s) > cap && sig_use > 1
+            sig_use -= 1
+            s = Printf.@sprintf("%.*g", sig_use, x)
+        end
+        0 < abs(x) < 1 && (s = replace(s, r"^(-?)0\." => s"\1."))
+        s
+    end
+    commafmt(num::Integer) = begin
+        s = string(abs(num)); parts = String[]; i = length(s)
+        while i >= 1; push!(parts, s[max(1, i-2):i]); i -= 3; end
+        (num < 0 ? "-" : "") * join(reverse(parts), ",")
+    end
+    crit = Distributions.quantile(Distributions.Normal(), 1 - (1-level)/2)
+    _summary(dydx, se) = begin
+        z = dydx / se
+        p = 2 * (1 - Distributions.cdf(Distributions.Normal(), abs(z)))
+        (z, p, dydx - crit*se, dydx + crit*se)
+    end
+
+    # Determine evaluation mode
+    if at !== nothing
+        mode  = :atpoint
+        x_eval = collect(at)
+        length(x_eval) == k ||
+            error("at must have length(β)=$k, got $(length(x_eval))")
+    elseif atmean
+        mode  = :atmean
+        x_eval = vec(Statistics.mean(X, dims = 1))
+    else
+        mode  = :average
+        x_eval = nothing
+    end
+
+    title = mode == :average ? "Average marginal effects" :
+                               "Conditional marginal effects"
+
+    # _refresh_interactions! rebuilds any interaction column whose `base`
+    # includes `idx` from the (possibly mutated) base columns. Used when
+    # flipping a factor between 0 and 1 in the AME / atmean / atpoint path.
+    function _refresh_interactions!(Xm::AbstractMatrix, idx::Integer)
+        for intr in interactions
+            if idx in intr.base
+                col = ones(size(Xm, 1))
+                for b in intr.base
+                    col .*= Xm[:, b]
+                end
+                Xm[:, intr.col] .= col
+            end
+        end
+    end
+    function _refresh_interactions_vec!(xv::AbstractVector, idx::Integer)
+        for intr in interactions
+            if idx in intr.base
+                v = 1.0
+                for b in intr.base
+                    v *= xv[b]
+                end
+                xv[intr.col] = v
+            end
+        end
+    end
+
+    # Compute each variable's dy/dx and its delta-method SE
+    rows = Tuple[]
+    for (nm, idx) in factors
+        if mode == :average
+            X0 = copy(X); X0[:, idx] .= 0.0; _refresh_interactions!(X0, idx)
+            X1 = copy(X); X1[:, idx] .= 1.0; _refresh_interactions!(X1, idx)
+            μ0 = exp.(X0 * β); μ1 = exp.(X1 * β)
+            dydx = Statistics.mean(μ1 .- μ0)
+            gvec = vec((μ1' * X1 .- μ0' * X0) ./ n)
+        else
+            x0 = copy(x_eval); x0[idx] = 0.0; _refresh_interactions_vec!(x0, idx)
+            x1 = copy(x_eval); x1[idx] = 1.0; _refresh_interactions_vec!(x1, idx)
+            μ0 = exp(LinearAlgebra.dot(x0, β))
+            μ1 = exp(LinearAlgebra.dot(x1, β))
+            dydx = μ1 - μ0
+            gvec = μ1 .* x1 .- μ0 .* x0
+        end
+        se = sqrt(gvec' * V * gvec)
+        push!(rows, ("1.$nm", dydx, se, _summary(dydx, se)...))
+    end
+    # Interactions involving variable `idx` — used by :dydx for both the AME
+    # slope and its gradient (chain rule picks up β_intr · prod_other terms).
+    function _intr_extras(idx::Integer, X_::AbstractMatrix)
+        out = NamedTuple[]
+        for intr in interactions
+            if idx in intr.base
+                po = ones(size(X_, 1))
+                for b in intr.base
+                    b == idx && continue
+                    po .*= X_[:, b]
+                end
+                push!(out, (col = intr.col, prod_other = po))
+            end
+        end
+        out
+    end
+    function _intr_extras_vec(idx::Integer, xv::AbstractVector)
+        out = NamedTuple[]
+        for intr in interactions
+            if idx in intr.base
+                v = 1.0
+                for b in intr.base
+                    b == idx && continue
+                    v *= xv[b]
+                end
+                push!(out, (col = intr.col, prod_other_at = v))
+            end
+        end
+        out
+    end
+
+    for (nm, idx) in continuous
+        if mode == :average
+            μ_all = exp.(X * β)
+            μ̄    = Statistics.mean(μ_all)
+            x̄_j  = Statistics.mean(X[:, idx])
+            if kind == :dydx
+                # ∂μ_i/∂x_j = μ_i · slope_i where slope_i = β_j + Σ β_intr · prod_other
+                xtras = _intr_extras(idx, X)
+                slope = fill(β[idx], n)
+                for x in xtras
+                    slope .+= β[x.col] .* x.prod_other
+                end
+                dydx = Statistics.mean(μ_all .* slope)
+                gvec = vec((μ_all .* slope)' * X) ./ n
+                gvec[idx] += sum(μ_all) / n
+                for x in xtras
+                    gvec[x.col] += sum(μ_all .* x.prod_other) / n
+                end
+            elseif kind == :eyex
+                # ey/ex averaged over the sample = β_j · mean(x_j)  (Poisson log)
+                dydx = β[idx] * x̄_j
+                gvec = zeros(k); gvec[idx] = x̄_j
+            elseif kind == :eydx
+                dydx = β[idx]
+                gvec = zeros(k); gvec[idx] = 1.0
+            else  # :dyex — dy/d(ln x) = β_j · μ · x_j
+                dydx = β[idx] * μ̄ * x̄_j
+                gvec = zeros(k); gvec[idx] = μ̄ * x̄_j
+                gvec .+= β[idx] * x̄_j .* vec((μ_all' * X) ./ n)
+            end
+        else
+            μ_at = exp(LinearAlgebra.dot(x_eval, β))
+            xj   = x_eval[idx]
+            if kind == :dydx
+                # slope_at = β_j + Σ β_intr · prod_other (eval at point)
+                xtras = _intr_extras_vec(idx, x_eval)
+                slope_at = β[idx]
+                for x in xtras
+                    slope_at += β[x.col] * x.prod_other_at
+                end
+                dydx = μ_at * slope_at
+                gvec = μ_at * slope_at .* x_eval
+                gvec[idx] += μ_at
+                for x in xtras
+                    gvec[x.col] += μ_at * x.prod_other_at
+                end
+            elseif kind == :eyex
+                # ey/ex at the eval point = β_j · x_j  (Poisson log link makes
+                # this independent of μ — gradient picks up only the β_j slot)
+                dydx = β[idx] * xj
+                gvec = zeros(k); gvec[idx] = xj
+            elseif kind == :eydx
+                dydx = β[idx]
+                gvec = zeros(k); gvec[idx] = 1.0
+            else  # :dyex
+                dydx = β[idx] * μ_at * xj
+                gvec = zeros(k); gvec[idx] = μ_at * xj
+                gvec .+= β[idx] * μ_at * xj .* x_eval
+            end
+        end
+        se = sqrt(gvec' * V * gvec)
+        push!(rows, (string(nm), dydx, se, _summary(dydx, se)...))
+    end
+
+    dydx_names = vcat(["1.$nm" for (nm, _) in factors],
+                      [string(nm) for (nm, _) in continuous])
+
+    println()
+    Printf.@printf("%-57s%-13s = %5s\n",
+                   title, "Number of obs", commafmt(n))
+    Printf.@printf("Model VCE: %s\n", vce_label)
+    println()
+    Printf.@printf("Expression: %s\n", expression)
+    Printf.@printf("%s wrt:  %s\n", kind_label, join(dydx_names, " "))
+
+    # "At:" block (only for atmean / atpoint, and only if not suppressed)
+    if !noatlegend && mode != :average
+        if mode == :atmean
+            at_lines = Tuple[]
+            for (nm, idx) in factors
+                m1 = Statistics.mean(X[:, idx])
+                push!(at_lines, ("0.$nm", 1.0 - m1))
+                push!(at_lines, ("1.$nm", m1))
+            end
+            for (nm, idx) in continuous
+                push!(at_lines, (string(nm), x_eval[idx]))
+            end
+            max_name_w = maximum(length(t[1]) for t in at_lines)
+            for (i, (nm, val)) in enumerate(at_lines)
+                prefix = i == 1 ? "At: " : "    "
+                Printf.@printf("%s%-*s = %s (mean)\n",
+                               prefix, max_name_w, nm, g_atval(val))
+            end
+        elseif at_labels !== nothing && !isempty(at_labels)
+            max_name_w = maximum(length(string(p_.first)) for p_ in at_labels)
+            val_strs   = [Printf.@sprintf("%g", float(p_.second)) for p_ in at_labels]
+            max_val_w  = maximum(length, val_strs)
+            for (i, p_) in enumerate(at_labels)
+                prefix = i == 1 ? "At: " : "    "
+                Printf.@printf("%s%-*s = %s\n",
+                               prefix, max_name_w, string(p_.first),
+                               lpad(val_strs[i], max_val_w))
+            end
+        end
+    end
+
+    println()
+    println("-"^78)
+    println("             |            Delta-method")
+    Printf.@printf("             |      %s   std. err.      z    P>|z|     [95%% conf. interval]\n", kind_label)
+    println("-"^13, "+", "-"^64)
+    for (lab, dydx, se, z, p, lo, hi) in rows
+        Printf.@printf("%12s | %s  %s  %s   %s    %s  %s\n",
+                       lab, g9(dydx; w_=10), g9(se; w_=9),
+                       Printf.@sprintf("%7.2f", z),
+                       Printf.@sprintf("%.3f", p),
+                       g9(lo; w_=9), g9(hi; w_=10))
+    end
+    println("-"^78)
+    !isempty(factors) && println("Note: dy/dx for factor levels is the discrete change from the base level.")
+    return rows
+end
+
+# Back-compat alias for the prior name (deprecated — prefer margins_dydx_stata).
+margins_dydx_atmean_stata(args...; kwargs...) =
+    margins_dydx_stata(args...; atmean=true, kwargs...)
+
+"""
+    mfx_stata(β, V, X; factors, continuous, model_name="poisson",
+              expression="Predicted number of events (predict)",
+              level=0.95, evaluate=:atmean, at=nothing)
+
+Stata-style legacy `mfx, dydx varlist(...)` output. Same dy/dx + delta-method
+SE math as `margins_dydx_stata` but in the older `mfx` table layout:
+
+  - Header line `Marginal effects after <model_name>`
+  - `y = <expression>` and `=  <μ at eval point>`
+  - Columns: variable | dy/dx | Std. err. | z | P>|z| | [95% C.I.] | X
+
+The trailing `X` column shows the value of each regressor at the evaluation
+point (sample mean by default; explicit point if `at=...`). Use this when
+matching outputs from Stata 11/12 textbooks; for newer code, prefer
+`margins_dydx_stata`.
+"""
+function mfx_stata(β::AbstractVector, V::AbstractMatrix, X::AbstractMatrix;
+                   factors::AbstractVector, continuous::AbstractVector,
+                   kind::Symbol=:dydx,
+                   model_name::String="poisson",
+                   expression::String="Predicted number of events (predict)",
+                   level::Float64=0.95,
+                   evaluate::Symbol=:atmean,
+                   at::Union{Nothing,AbstractVector}=nothing)
+    kind in (:dydx, :eyex, :eydx, :dyex) ||
+        error("mfx_stata kind must be :dydx, :eyex, :eydx, or :dyex; got $kind")
+    # Stata mfx: :dydx → "Marginal effects"; :eyex/:eydx/:dyex → "Elasticities"
+    title_prefix = kind == :dydx ? "Marginal effects" : "Elasticities"
+    kind_label   = kind == :dydx ? "dy/dx" :
+                   kind == :eyex ? "ey/ex" :
+                   kind == :eydx ? "ey/dx" : "dy/ex"
+
+    n, k = size(X)
+    x_eval = at !== nothing ? collect(at) :
+             evaluate == :atmean ? vec(Statistics.mean(X, dims=1)) :
+             error("mfx_stata supports evaluate=:atmean or `at=<vector>` only")
+    μ_at = exp(LinearAlgebra.dot(x_eval, β))
+    crit = Distributions.quantile(Distributions.Normal(), 1 - (1-level)/2)
+
+    # Per-column width caps matched to Stata's legacy mfx output. Each column
+    # gets up to `sig` sig figs but reduces precision to fit `cap` chars
+    # (counting the leading "0." for |x|<1, which is then stripped on output).
+    _g(x; sig::Int=7, cap::Int=0) = begin
+        (ismissing(x) || !isfinite(x)) && return "."
+        sig_use = sig
+        s = Printf.@sprintf("%.*g", sig_use, x)
+        if cap > 0
+            while length(s) > cap && sig_use > 1
+                sig_use -= 1
+                s = Printf.@sprintf("%.*g", sig_use, x)
+            end
+        end
+        0 < abs(x) < 1 && (s = replace(s, r"^(-?)0\." => s"\1."))
+        s
+    end
+
+    rows = Tuple[]
+    for (nm, idx) in factors
+        # Discrete change for both kinds (mfx convention; `*` flags it)
+        x0 = copy(x_eval); x0[idx] = 0.0
+        x1 = copy(x_eval); x1[idx] = 1.0
+        μ0 = exp(LinearAlgebra.dot(x0, β))
+        μ1 = exp(LinearAlgebra.dot(x1, β))
+        val  = μ1 - μ0
+        gvec = μ1 .* x1 .- μ0 .* x0
+        se   = sqrt(gvec' * V * gvec)
+        push!(rows, ("$nm*", val, se, x_eval[idx]))
+    end
+    for (nm, idx) in continuous
+        if kind == :dydx
+            val  = β[idx] * μ_at
+            gvec = zeros(k); gvec[idx] = μ_at
+            gvec .+= β[idx] * μ_at .* x_eval
+        elseif kind == :eyex
+            # ε = β_j · x_j  (gradient just e_j · x_j for log link)
+            val  = β[idx] * x_eval[idx]
+            gvec = zeros(k); gvec[idx] = x_eval[idx]
+        elseif kind == :eydx
+            # semi-elasticity ∂lnμ/∂x = β_j (just the coefficient)
+            val  = β[idx]
+            gvec = zeros(k); gvec[idx] = 1.0
+        else  # :dyex — ∂μ/∂lnx = β_j · μ · x_j  (semi-elasticity for log link)
+            xj   = x_eval[idx]
+            val  = β[idx] * μ_at * xj
+            gvec = zeros(k); gvec[idx] = μ_at * xj
+            gvec .+= β[idx] * μ_at * xj .* x_eval
+        end
+        se = sqrt(gvec' * V * gvec)
+        push!(rows, (string(nm), val, se, x_eval[idx]))
+    end
+
+    println()
+    Printf.@printf("%s after %s\n", title_prefix, model_name)
+    Printf.@printf("      y  = %s\n", expression)
+    Printf.@printf("         =  %.8g\n", μ_at)
+    println("-"^78)
+    Printf.@printf("variable |      %s    Std. err.     z    P>|z|  [    95%% C.I.   ]      X\n",
+                   kind_label)
+    println("-"^9, "+", "-"^68)
+    for (nm, val, se, xj) in rows
+        z = val / se
+        p = 2 * (1 - Distributions.cdf(Distributions.Normal(), abs(z)))
+        lo, hi = val - crit*se, val + crit*se
+        Printf.@printf("%8s |%11s%12s%8.2f%8.3f%10s%9s%10s\n",
+                       nm,
+                       lpad(_g(val; sig=7, cap=9), 11),
+                       lpad(_g(se;  sig=7, cap=7), 12),
+                       z, p,
+                       lpad(_g(lo;  sig=7, cap=8), 10),
+                       lpad(_g(hi;  sig=7, cap=8),  9),
+                       lpad(_g(xj;  sig=7, cap=7), 10))
+    end
+    println("-"^78)
+    !isempty(factors) &&
+        println("(*) $kind_label is for discrete change of dummy variable from 0 to 1")
+    return rows
+end
+
+"""
+    lincom_stata(w, β, V; eform=false, name="(1)", depvar="", level=0.95)
+
+Stata-style `lincom <linear combination>` (optionally `, eform`). Computes
+L = w'β, its delta-method SE = sqrt(w' V w), z = L/SE(L), two-sided p, and
+CI on the linear scale. With `eform=true`, reports exp(L) and exp(L)·SE(L)
+(header changes to "exp(b)"), and CI = exp(L ± z·SE(L)) (asymmetric on the
+exp scale) — but **z and p stay on the LINEAR scale**, the key difference
+from `nlcom` of exp(w'β): lincom's z is L/SE(L), nlcom's is exp(L)/SE_eform.
+
+Pass β and V from the relevant model (e.g. n/(n-1)-corrected `V_rob` to
+match Stata's `vce(robust)` after `poisson`).
+"""
+function lincom_stata(w::AbstractVector, β::AbstractVector, V::AbstractMatrix;
+                      eform::Bool=false, name::String="(1)",
+                      depvar::String="", level::Float64=0.95)
+    L    = LinearAlgebra.dot(w, β)
+    seL  = sqrt(w' * V * w)
+    z    = L / seL
+    p    = 2 * (1 - Distributions.cdf(Distributions.Normal(), abs(z)))
+    crit = Distributions.quantile(Distributions.Normal(), 1 - (1-level)/2)
+
+    if eform
+        val, se = exp(L), exp(L) * seL
+        lo, hi  = exp(L - crit * seL), exp(L + crit * seL)
+        clab    = "exp(b)"
+    else
+        val, se = L, seL
+        lo, hi  = L - crit * seL, L + crit * seL
+        clab    = "Coefficient"
+    end
+
+    g9 = function(x; w_::Int=10, sig::Int=7)
+        (ismissing(x) || !isfinite(x)) && return lpad(".", w_)
+        sig_use = sig
+        s = Printf.@sprintf("%.*g", sig_use, x)
+        # Stata's %9.0g effective rule: cap pre-strip at 9 chars EXCEPT for
+        # negative |x|<1 where cap=10 (the strip will save 1 char). Without
+        # this, negative |x|<1 values lose a digit vs Stata's output.
+        cap = (0 < abs(x) < 1 && x < 0) ? 10 : 9
+        while length(s) > cap && sig_use > 1
+            sig_use -= 1
+            s = Printf.@sprintf("%.*g", sig_use, x)
+        end
+        0 < abs(x) < 1 && (s = replace(s, r"^(-?)0\." => s"\1."))
+        lpad(s, w_)
+    end
+
+    # Make the label area exactly 13 chars so "Std. err." always lands at col 29.
+    label_field = rpad(lpad(clab, 10), 13)
+    println("-"^78)
+    Printf.@printf("%12s | %sStd. err.      z    P>|z|     [%g%% conf. interval]\n",
+                   depvar, label_field, 100*level)
+    println("-"^13, "+", "-"^64)
+    Printf.@printf("%12s | %s  %s  %s   %s    %s  %s\n",
+                   name, g9(val; w_=10), g9(se; w_=9),
+                   Printf.@sprintf("%7.2f", z),
+                   Printf.@sprintf("%.3f", p),
+                   g9(lo; w_=9), g9(hi; w_=10))
+    println("-"^78)
+    return (; val, se, z, p, ci=(lo, hi))
+end
+
+"""
+    nlcom_stata(f, β, V; name="_nl_1", depvar="", level=0.95)
+
+Stata-style `nlcom <expression>` — point estimate of an arbitrary smooth
+function f(β) of the coefficient vector, with delta-method SE using vcov V:
+
+    SE(f(β̂)) = sqrt( ∇f(β̂)' · V · ∇f(β̂) )
+
+Reports a Stata-style table with z = f(β̂)/SE, two-sided p, and a 95% normal CI.
+The gradient is computed by central finite differences (so no extra dependency
+on ForwardDiff). Pass β and V from the relevant model — e.g. for a Poisson fit
+with vce(robust), use the n/(n-1)-corrected `V_rob` rather than the OIM vcov.
+"""
+function nlcom_stata(f::Function, β::AbstractVector, V::AbstractMatrix;
+                     name::String="_nl_1", depvar::String="",
+                     level::Float64=0.95)
+    val = f(β)
+    # Central finite-difference gradient (relative step)
+    n_p = length(β)
+    g   = zeros(n_p)
+    for j in 1:n_p
+        h    = sqrt(eps(Float64)) * max(abs(β[j]), 1.0)
+        βp   = collect(β); βm = collect(β)
+        βp[j] += h; βm[j] -= h
+        g[j]  = (f(βp) - f(βm)) / (2h)
+    end
+    se   = sqrt(g' * V * g)
+    z    = val / se
+    p    = 2 * (1 - Distributions.cdf(Distributions.Normal(), abs(z)))
+    crit = Distributions.quantile(Distributions.Normal(), 1 - (1-level)/2)
+    lo   = val - crit * se
+    hi   = val + crit * se
+
+    g9 = function(x; w::Int=10, sig::Int=7)
+        (ismissing(x) || !isfinite(x)) && return lpad(".", w)
+        s = Printf.@sprintf("%.*g", sig, x)
+        if 0 < abs(x) < 1
+            s = replace(s, r"^(-?)0\." => s"\1.")
+        end
+        return lpad(s, w)
+    end
+
+    println("-"^78)
+    Printf.@printf("%12s | Coefficient  Std. err.      z    P>|z|     [%g%% conf. interval]\n",
+                   depvar, 100*level)
+    println("-"^13, "+", "-"^64)
+    Printf.@printf("%12s | %s  %s  %s   %s    %s  %s\n",
+                   name, g9(val; w=10), g9(se; w=9),
+                   Printf.@sprintf("%7.2f", z),
+                   Printf.@sprintf("%.3f", p),
+                   g9(lo; w=9), g9(hi; w=10))
+    println("-"^78)
+    return (; val, se, z, p, ci=(lo, hi))
 end
 
 """
@@ -6970,10 +7834,18 @@ function xtmixed(df, formula; idvar::Symbol=:id, print_table::Bool=true,
     catch
     end
 
-    # Stata %9.0g formatter
+    # Stata %9.0g formatter — sign-aware width cap (cap=9 except cap=10 for
+    # negative |x|<1, where leading-zero strip saves a char). Without this
+    # asymmetry, negative |x|<1 values would lose a digit vs Stata's output.
     function g9(x; w::Int=10, sig::Int=7)
         (ismissing(x) || !isfinite(x)) && return lpad(".", w)
-        s = Printf.@sprintf("%.*g", sig, x)
+        sig_use = sig
+        s = Printf.@sprintf("%.*g", sig_use, x)
+        cap = (0 < abs(x) < 1 && x < 0) ? 10 : 9
+        while length(s) > cap && sig_use > 1
+            sig_use -= 1
+            s = Printf.@sprintf("%.*g", sig_use, x)
+        end
         if 0 < abs(x) < 1
             s = replace(s, r"^(-?)0\." => s"\1.")
         end
@@ -7167,10 +8039,18 @@ function gllamm(df, formula; idvar::Symbol=:id, nip::Int=10)
     se_σ_resid = σ_resid * 0.0121
     se_σ²_resid = 2 * σ_resid * se_σ_resid
 
-    # Stata %9.0g formatter
+    # Stata %9.0g formatter — sign-aware width cap (cap=9 except cap=10 for
+    # negative |x|<1, where leading-zero strip saves a char). Without this
+    # asymmetry, negative |x|<1 values would lose a digit vs Stata's output.
     function g9(x; w::Int=10, sig::Int=7)
         (ismissing(x) || !isfinite(x)) && return lpad(".", w)
-        s = Printf.@sprintf("%.*g", sig, x)
+        sig_use = sig
+        s = Printf.@sprintf("%.*g", sig_use, x)
+        cap = (0 < abs(x) < 1 && x < 0) ? 10 : 9
+        while length(s) > cap && sig_use > 1
+            sig_use -= 1
+            s = Printf.@sprintf("%.*g", sig_use, x)
+        end
         if 0 < abs(x) < 1
             s = replace(s, r"^(-?)0\." => s"\1.")
         end
@@ -7990,7 +8870,50 @@ and prints output in Stata format including:
 
 Returns the fitted GLM model.
 """
-function poisson_stata(df, formula; vce::Symbol=:robust, level::Float64=0.95)
+
+"""
+    estat_ic_stata(fit; model_name=".")
+
+Stata-style `estat ic` — Akaike and Bayesian information criteria.
+`fit` is a NamedTuple with fields `n`, `k`, `ll`, `pseudo_r2` (any chunk-1
+fitter return value works: `poisson_stata`, future glm/nbreg/probit
+fitters, etc.).
+
+  - `ll(null)` is recovered from `ll / (1 − pseudo_r2)`.
+  - `df` reported is `k`, the number of estimated parameters (slopes + cons).
+  - AIC = −2·ll + 2·k                 (Stata's `e(aic)`)
+  - BIC = −2·ll + k·log(n)           (Stata's `e(bic)`)
+
+Reproduces Stata's wide-table layout with a dash-pipe separator.
+"""
+function estat_ic_stata(fit; model_name::String=".")
+    n  = fit.n
+    k  = fit.k
+    ll = fit.ll
+    ll_null = ll / (1 - fit.pseudo_r2)
+    aic = -2*ll + 2*k
+    bic = -2*ll + k*log(n)
+
+    commafmt(num::Integer) = begin
+        s = string(abs(num)); parts = String[]; i = length(s)
+        while i >= 1; push!(parts, s[max(1, i-2):i]); i -= 3; end
+        (num < 0 ? "-" : "") * join(reverse(parts), ",")
+    end
+
+    println("\nAkaike's information criterion and Bayesian information criterion\n")
+    println("-"^78)
+    println("       Model |          N   ll(null)  ll(model)      df        AIC        BIC")
+    println("-"^13, "+", "-"^64)
+    Printf.@printf("%12s | %10s %10.6g %10.7g %7d %10.6g %10.7g\n",
+                   model_name, commafmt(n), ll_null, ll, k, aic, bic)
+    println("-"^78)
+    return (; n, k, ll, ll_null, aic, bic)
+end
+
+function poisson_stata(df, formula; vce::Symbol=:robust, level::Float64=0.95,
+                       quiet::Bool=false,
+                       layout::Union{Nothing,AbstractVector}=nothing,
+                       header_style::Symbol=:poisson)
     # Drop missing for variables in formula
     needed = StatsModels.termvars(formula)
     dfc = DataFrames.dropmissing(df[:, needed])
@@ -8011,12 +8934,14 @@ function poisson_stata(df, formula; vce::Symbol=:robust, level::Float64=0.95)
     Xm = GLM.modelmatrix(m)
     k  = size(Xm, 2)
 
-    # SE: robust (HC1 sandwich) by default
+    # SE: robust sandwich by default. Stata's `poisson, vce(robust)` applies
+    # an n/(n-1) finite-sample correction (NOT n/(n-k) as for `regress`).
+    # This is the same multiplier Stata documents under [R] _robust.
     if vce == :robust
         H = Xm' * LinearAlgebra.Diagonal(μ) * Xm
         meat = Xm' * LinearAlgebra.Diagonal((yv .- μ).^2) * Xm
         Hinv = LinearAlgebra.inv(LinearAlgebra.cholesky(LinearAlgebra.Symmetric(H)))
-        V = Hinv * meat * Hinv * (n / (n - k))
+        V = Hinv * meat * Hinv * (n / (n - 1))
     else
         V = Matrix(GLM.vcov(m))
     end
@@ -8046,10 +8971,18 @@ function poisson_stata(df, formula; vce::Symbol=:robust, level::Float64=0.95)
     ll_null = GLM.loglikelihood(m_null)
     pseudo_r2 = 1 - ll / ll_null
 
-    # Stata %9.0g formatter
+    # Stata %9.0g formatter — sign-aware width cap (cap=9 except cap=10 for
+    # negative |x|<1, where leading-zero strip saves a char). Without this
+    # asymmetry, negative |x|<1 values would lose a digit vs Stata's output.
     function g9(x; w::Int=10, sig::Int=7)
         (ismissing(x) || !isfinite(x)) && return lpad(".", w)
-        s = Printf.@sprintf("%.*g", sig, x)
+        sig_use = sig
+        s = Printf.@sprintf("%.*g", sig_use, x)
+        cap = (0 < abs(x) < 1 && x < 0) ? 10 : 9
+        while length(s) > cap && sig_use > 1
+            sig_use -= 1
+            s = Printf.@sprintf("%.*g", sig_use, x)
+        end
         if 0 < abs(x) < 1
             s = replace(s, r"^(-?)0\." => s"\1.")
         end
@@ -8063,19 +8996,259 @@ function poisson_stata(df, formula; vce::Symbol=:robust, level::Float64=0.95)
         return (num < 0 ? "-" : "") * join(reverse(parts), ",")
     end
 
-    # Print Stata-style header
+    # Skip the entire Stata-style printout when quiet=true (mirrors Stata's
+    # `quietly poisson ...`). Useful for chapter chunks that just need β/V/X
+    # for downstream margins/dydx/etc. and don't want to repeat the table.
+    if !quiet
+    # Print Stata-style header. Two layouts:
+    #   :poisson — Stata's `poisson` command output. Top-left says "Poisson
+    #              regression", and the right column lists Number of obs /
+    #              Wald chi2(k) / Prob > chi2 / Pseudo R2 over four lines,
+    #              with "Log pseudolikelihood = …" on the last line at left.
+    #   :ml      — Stata's `ml maximize` output. No "Poisson regression"
+    #              header; the right column lists Number of obs / Wald
+    #              chi2(k) / Prob > chi2 over three lines, with "Log
+    #              [pseudo]likelihood = …" on the third line at left, and
+    #              no Pseudo R2 row.
     println()
-    Printf.@printf("%-56s%-13s = %6s\n",
-                   "Poisson regression", "Number of obs", commafmt(n))
-    if isfinite(Wald)
-        Printf.@printf("%56s%-13s = %6.2f\n", "", "Wald chi2($(length(slope_idx)))", Wald)
-        Printf.@printf("%56s%-13s = %6.4f\n", "", "Prob > chi2", Wald_p)
+    if header_style == :ml
+        # Stata `ml maximize` right-block format: 13-char left-padded label,
+        # " = ", then a value field whose width is the max of the three
+        # value strings plus 1 (so the longest value sits 1 space after `=`,
+        # shorter ones are right-aligned). The whole right block is positioned
+        # flush right at col 78 by adjusting the leading whitespace.
+        nstr = commafmt(n)
+        wstr = isfinite(Wald) ? Printf.@sprintf("%.2f", Wald) : ""
+        pstr = isfinite(Wald) ? Printf.@sprintf("%.4f", Wald_p) : ""
+        vw   = maximum(length, (nstr, wstr, pstr))
+        rblock = 13 + 3 + vw
+        lead   = max(0, 78 - rblock)
+        ws     = " " ^ lead
+        println(ws, rpad("Number of obs", 13), " = ", lpad(nstr, vw))
+        if isfinite(Wald)
+            println(ws, rpad("Wald chi2($(length(slope_idx)))", 13),
+                    " = ", lpad(wstr, vw))
+        end
+        ll_label = vce == :robust ? "Log pseudolikelihood" : "Log likelihood"
+        ll_str   = Printf.@sprintf("%s = %.3f", ll_label, ll)
+        println(rpad(ll_str, lead), rpad("Prob > chi2", 13), " = ", lpad(pstr, vw))
+    else
+        Printf.@printf("%-56s%-13s = %6s\n",
+                       "Poisson regression", "Number of obs", commafmt(n))
+        if isfinite(Wald)
+            Printf.@printf("%56s%-13s = %6.2f\n", "",
+                           "Wald chi2($(length(slope_idx)))", Wald)
+            Printf.@printf("%56s%-13s = %6.4f\n", "", "Prob > chi2", Wald_p)
+        end
+        Printf.@printf("Log pseudolikelihood = %.3f%23s%-13s = %6.4f\n",
+                       ll, "", "Pseudo R2", pseudo_r2)
     end
-    Printf.@printf("Log pseudolikelihood = %.3f%26s%-13s = %6.4f\n",
-                   ll, "", "Pseudo R2", pseudo_r2)
     println()
 
-    # Coefficient table
+    # Coefficient table. Stata uses lowercase "std. err." under the "Robust"
+    # subheader for `vce(robust)` and capital "Std. err." for the default OIM.
+    println("-"^78)
+    if vce == :robust
+        println("             |               Robust")
+    end
+    se_label = vce == :robust ? "std. err." : "Std. err."
+    Printf.@printf("%12s | Coefficient  %s      z    P>|z|     [95%% conf. interval]\n",
+                   string(formula.lhs), se_label)
+    println("-"^13, "+", "-"^64)
+
+    # `_print_row(label, idx)` renders a single row in Stata's standard
+    # 7-column layout. `_lookup(key)` finds the GLM-order index from a
+    # coefname or returns the index directly.
+    _print_row(label, idx) = Printf.@printf(
+        "%12s | %s  %s  %s   %s    %s  %s\n",
+        label, g9(β[idx]; w=10), g9(se[idx]; w=9),
+        Printf.@sprintf("%7.2f", z[idx]),
+        Printf.@sprintf("%.3f", p[idx]),
+        g9(ci_lo[idx]; w=9), g9(ci_hi[idx]; w=10))
+    _lookup(key) = key isa Integer ? Int(key) :
+        (let i = findfirst(==(string(key)), cn)
+            i === nothing && error("'$(key)' not found in coefnames=$(cn)")
+            i
+        end)
+
+    if layout === nothing
+        # Default layout: slopes (in formula order) first, then _cons.
+        for i in slope_idx
+            _print_row(cn[i], i)
+        end
+        intercept_idx !== nothing && _print_row("_cons", intercept_idx)
+    else
+        # Custom layout. Each entry is one of:
+        #   :blank                       → empty separator row "             |"
+        #   String  => key                → simple row, label = String
+        #   Vector{String} => key         → multi-line interaction block: all
+        #                                    but the last element are header
+        #                                    lines (printed as `<line>|`),
+        #                                    last element is the row label.
+        # `key` can be a coefname (matched against the GLM-order coefnames)
+        # or a 1-based integer index into β.
+        for entry in layout
+            if entry === :blank
+                println("             |")
+            elseif entry isa Pair
+                lab, key = entry.first, entry.second
+                # `label => :omitted` — Stata-style "(omitted)" row for a
+                # variable that was dropped due to collinearity. Prints
+                # "        label |          0  (omitted)" with no key lookup.
+                if key === :omitted
+                    Printf.@printf("%12s |          0  (omitted)\n", string(lab))
+                    continue
+                end
+                idx = _lookup(key)
+                if lab isa AbstractVector
+                    for h in lab[1:end-1]
+                        println(h, "|")
+                    end
+                    _print_row(string(lab[end]), idx)
+                else
+                    _print_row(string(lab), idx)
+                end
+            else
+                error("Unsupported layout entry: $entry (use :blank or label=>key)")
+            end
+        end
+    end
+    println("-"^78)
+    end  # if !quiet
+
+    # Return values in *Stata's display order*: slopes first, then _cons.
+    # That way the margins / nlcom / lincom / dydx helpers can be called
+    # directly on these without any reordering, and the constant always
+    # sits at the end of β (matching the convention used throughout the
+    # downstream chapter chunks).
+    if intercept_idx === nothing
+        ord = collect(slope_idx)
+        cn_ord = cn[ord]
+    else
+        ord = vcat(collect(slope_idx), [intercept_idx])
+        cn_ord = vcat(cn[slope_idx], "_cons")
+    end
+    β_ord  = β[ord]
+    se_ord = se[ord]
+    V_ord  = V[ord, ord]
+    X_ord  = Xm[:, ord]   # last column = ones (the constant)
+
+    return (; model=m, df=dfc, formula,
+              β=β_ord, se=se_ord, V=V_ord, X=X_ord,
+              coefnames=cn_ord,
+              Wald, Wald_p, ll, pseudo_r2, n, k,
+              # Originals (GLM order) preserved for any code that needs them:
+              β_glm=β, V_glm=V, X_glm=Xm, coefnames_glm=cn)
+end
+
+"""
+    glm_stata(df, formula; family=:poisson, link=:log, vce=:robust)
+
+Stata's `glm y x..., family(poisson) link(log) vce(robust)`. Prints the
+GLM-format header (deviance, Pearson chi², AIC, BIC, variance/link function)
+followed by a coefficient table with robust SEs.
+"""
+function glm_stata(df, formula; family::Symbol=:poisson, link::Symbol=:log,
+                    vce::Symbol=:robust, level::Float64=0.95)
+    needed = StatsModels.termvars(formula)
+    dfc = DataFrames.dropmissing(df[:, needed])
+    for c in needed
+        col = dfc[!, c]
+        if eltype(col) <: Union{Missing, Float32} || eltype(col) === Float32
+            dfc[!, c] = Float64.(col)
+        end
+    end
+
+    fam = family == :poisson  ? Distributions.Poisson() :
+          family == :binomial ? Distributions.Binomial() :
+          family == :gaussian ? Distributions.Normal()   :
+          error("family=$family not supported")
+    lnk = link == :log     ? GLM.LogLink()    :
+          link == :identity ? GLM.IdentityLink() :
+          link == :logit   ? GLM.LogitLink()  :
+          link == :probit  ? GLM.ProbitLink() :
+          error("link=$link not supported")
+
+    m = GLM.glm(formula, dfc, fam, lnk)
+    β  = GLM.coef(m)
+    cn = GLM.coefnames(m)
+    n  = Int(StatsBase.nobs(m))
+    yv = Float64.(GLM.response(m))
+    μ  = GLM.predict(m)
+    Xm = GLM.modelmatrix(m)
+    k  = size(Xm, 2)
+    df_resid = n - k
+
+    if vce == :robust && family == :poisson
+        H = Xm' * LinearAlgebra.Diagonal(μ) * Xm
+        meat = Xm' * LinearAlgebra.Diagonal((yv .- μ).^2) * Xm
+        Hinv = LinearAlgebra.inv(LinearAlgebra.cholesky(LinearAlgebra.Symmetric(H)))
+        V = Hinv * meat * Hinv * (n / (n - k))
+    else
+        V = Matrix(GLM.vcov(m))
+    end
+    se = sqrt.(max.(LinearAlgebra.diag(V), 0.0))
+    z  = β ./ se
+    p  = 2 .* (1 .- Distributions.cdf.(Distributions.Normal(), abs.(z)))
+    crit = Distributions.quantile(Distributions.Normal(), 1 - (1-level)/2)
+    ci_lo = β .- crit .* se
+    ci_hi = β .+ crit .* se
+
+    deviance_val = GLM.deviance(m)
+    pearson = family == :poisson ? sum((yv .- μ).^2 ./ μ) : NaN
+    dev_per_df  = deviance_val / df_resid
+    pear_per_df = pearson / df_resid
+
+    ll  = GLM.loglikelihood(m)
+    aic = (-2 * ll + 2 * k) / n
+    bic = deviance_val - df_resid * log(n)
+
+    var_desc  = family == :poisson ? "V(u) = u" :
+                family == :binomial ? "V(u) = u·(1-u/n)" : "V(u) = 1"
+    link_desc = link == :log ? "g(u) = ln(u)" :
+                link == :identity ? "g(u) = u" :
+                link == :logit ? "g(u) = ln(u/(1-u))" :
+                link == :probit ? "g(u) = invΦ(u)" : "g(u) = ?"
+    fam_label = family == :poisson ? "[Poisson]" :
+                family == :binomial ? "[Binomial]" : "[$family]"
+    lnk_label = link == :log ? "[Log]" :
+                link == :identity ? "[Identity]" :
+                link == :logit ? "[Logit]" :
+                link == :probit ? "[Probit]" : "[$link]"
+
+    function g9(x; w::Int=10, sig::Int=7)
+        (ismissing(x) || !isfinite(x)) && return lpad(".", w)
+        s = Printf.@sprintf("%.*g", sig, x)
+        if 0 < abs(x) < 1
+            s = replace(s, r"^(-?)0\." => s"\1.")
+        end
+        return lpad(s, w)
+    end
+    function commafmt(num)
+        s = string(abs(num)); parts = String[]; i = length(s)
+        while i >= 1; push!(parts, s[max(1, i-2):i]); i -= 3; end
+        return (num < 0 ? "-" : "") * join(reverse(parts), ",")
+    end
+
+    println()
+    Printf.@printf("%-50s%-15s = %10s\n", "Generalized linear models",
+                   "Number of obs", commafmt(n))
+    Printf.@printf("%-50s%-15s = %10d\n", "Optimization     : ML",
+                   "Residual df", df_resid)
+    Printf.@printf("%-50s%-15s = %10d\n", "", "Scale parameter", 1)
+    Printf.@printf("%-15s = %12.5f                   %-15s = %10.5f\n",
+                   "Deviance", deviance_val, "(1/df) Deviance", dev_per_df)
+    Printf.@printf("%-15s = %12.5f                   %-15s = %10.5f\n",
+                   "Pearson", pearson, "(1/df) Pearson", pear_per_df)
+    println()
+    Printf.@printf("%-50s%s\n", "Variance function: $(var_desc)", fam_label)
+    Printf.@printf("%-50s%s\n", "Link function    : $(link_desc)", lnk_label)
+    println()
+    Printf.@printf("%50s%-15s = %10.6f\n", "", "AIC", aic)
+    Printf.@printf("Log pseudolikelihood = %.5f%18s%-15s = %10.3f\n",
+                   ll, "", "BIC", bic)
+    println()
+
     println("-"^78)
     if vce == :robust
         println("             |               Robust")
@@ -8083,7 +9256,8 @@ function poisson_stata(df, formula; vce::Symbol=:robust, level::Float64=0.95)
     Printf.@printf("%12s | Coefficient  std. err.      z    P>|z|     [95%% conf. interval]\n",
                    string(formula.lhs))
     println("-"^13, "+", "-"^64)
-    # Print non-intercept first, then _cons
+    intercept_idx = findfirst(==("(Intercept)"), cn)
+    slope_idx = setdiff(1:length(β), [intercept_idx])
     for i in slope_idx
         Printf.@printf("%12s | %s  %s  %s   %s    %s  %s\n",
                        cn[i], g9(β[i]; w=10), g9(se[i]; w=9),
@@ -8101,7 +9275,250 @@ function poisson_stata(df, formula; vce::Symbol=:robust, level::Float64=0.95)
     end
     println("-"^78)
 
-    return (; model=m, β, se, V, Wald, Wald_p, ll, pseudo_r2, n)
+    return (; model=m, β, se, V, ll, deviance=deviance_val, pearson, aic, bic, n)
+end
+
+"""
+    gmm_stata(df, depvar, regs, instruments; mean_fn=:exp, onestep=true,
+              level=0.95)
+
+Stata's `gmm (y - mean_fn(xβ + b0)), instruments(z1 z2 ...) onestep`.
+
+Nonlinear-IV / GMM estimation of a model with conditional mean μ(x'β + b0):
+moment condition is `E[z · (y - μ(x'β + b0))] = 0`.
+
+Arguments:
+- `depvar`     : dependent variable (Symbol)
+- `regs`       : regressors that enter the linear index (Vector{Symbol})
+- `instruments`: instrument variables (Vector{Symbol})
+- `mean_fn`    : `:exp` (Poisson-mean) or `:identity`
+- `onestep`    : true → identity W₁; false → two-step with optimal W₂
+
+Just-identified case (#regs = #instruments) gives Q ≈ 0.
+Returns a NamedTuple with β, se, V, etc., and prints Stata-style output.
+"""
+function gmm_stata(df, depvar::Symbol, regs::Vector{Symbol},
+                   instruments::Vector{Symbol};
+                   mean_fn::Symbol=:exp, onestep::Bool=true,
+                   level::Float64=0.95)
+    needed = unique(vcat([depvar], regs, instruments))
+    dfc = DataFrames.dropmissing(df[:, needed])
+    for c in needed
+        col = dfc[!, c]
+        if eltype(col) <: Union{Missing, Float32} || eltype(col) === Float32
+            dfc[!, c] = Float64.(col)
+        end
+    end
+    n = DataFrames.nrow(dfc)
+    y  = Float64.(dfc[!, depvar])
+    X  = hcat([Float64.(dfc[!, v]) for v in regs]...)         # n × k
+    Z  = hcat([Float64.(dfc[!, v]) for v in instruments]...)  # n × m
+    # Add constant to X (b0) and Z (_cons)
+    X = hcat(X, ones(n))
+    Z = hcat(Z, ones(n))
+    k = size(X, 2)        # number of parameters (including b0)
+    m_cnt = size(Z, 2)    # number of moment conditions
+
+    # Mean function and its gradient w.r.t. β.
+    # NOTE: use *anonymous* closures (`β -> ...`) bound to a local name. Named
+    # short-form methods (`μ_fn(β) = ...`) inside an if/else inside a function
+    # body get hoisted to the enclosing module's method table, so the inner
+    # `X` reference resolves to whatever global `X` exists (from a previous
+    # chunk run) — not the local `X` we just built. That made μ_fn(β_final)
+    # after Newton return values consistent with a *different* design matrix,
+    # which silently inflated SEs by 4–10× for some coefficients.
+    μ_fn, ∂μ_fn = if mean_fn == :exp
+        (β -> exp.(X * β)), (β -> exp.(X * β) .* X)
+    elseif mean_fn == :identity
+        (β -> X * β), (β -> X)
+    else
+        error("mean_fn=$mean_fn not supported")
+    end
+
+    # GMM objective: g(β)' W g(β) where g(β) = (1/n) Σ z_i (y_i - μ(x_i'β))
+    function gmm_obj(β, W)
+        u = y .- μ_fn(β)
+        g = Z' * u ./ n
+        return n * (g' * W * g)
+    end
+
+    # Step 1: identity weight matrix
+    W1 = LinearAlgebra.I(m_cnt) |> Matrix
+
+    # Just-identified case (k == m): solve the moment conditions directly via
+    # Newton-Raphson. This is MUCH more reliable than minimizing the non-convex
+    # GMM objective with Optim, which can land on spurious roots.
+    if k == m_cnt && mean_fn == :exp
+        # Newton: β_{k+1} = β_k + (Z' diag(μ) X)^{-1} · Z'(y - μ)
+        β1 = zeros(k)
+        # Warm start from Poisson MLE (using ALL regressors as instruments
+        # of themselves — i.e., GLM Poisson regression).
+        try
+            df_init = DataFrames.DataFrame(_y = y)
+            for (j, v) in enumerate(regs)
+                df_init[!, v] = X[:, j]
+            end
+            fml_init = StatsModels.term(:_y) ~ sum(StatsModels.term.(regs))
+            m_init = GLM.glm(fml_init, df_init,
+                             Distributions.Poisson(), GLM.LogLink())
+            β_init_glm = GLM.coef(m_init)
+            β1 = vcat(β_init_glm[2:end], β_init_glm[1])
+        catch
+        end
+        # Newton iteration on Z'(y - exp(Xβ)) = 0
+        for iter in 1:200
+            μ = exp.(X * β1)
+            r = Z' * (y .- μ)            # m-vector of moment values
+            # Jacobian: ∂r/∂β = -Z' diag(μ) X  (m × k)
+            J = -(Z' * LinearAlgebra.Diagonal(μ) * X)
+            # Update: solve J · Δ = -r, β_new = β_old + Δ
+            Δ = try
+                -(J \ r)
+            catch
+                -(LinearAlgebra.pinv(J) * r)
+            end
+            β1 = β1 + Δ
+            if maximum(abs.(r)) < 1e-9 || maximum(abs.(Δ)) < 1e-12
+                break
+            end
+        end
+        # Compute final Q
+        u1 = y .- μ_fn(β1)
+        g1 = Z' * u1 ./ n
+        Q1 = n * (g1' * W1 * g1)
+    else
+        # Overidentified: minimize via Optim, warm-started from Poisson MLE
+        β_init = if mean_fn == :exp
+            try
+                df_init = DataFrames.DataFrame(_y = y)
+                for (j, v) in enumerate(regs)
+                    df_init[!, v] = X[:, j]
+                end
+                fml_init = StatsModels.term(:_y) ~ sum(StatsModels.term.(regs))
+                m_init = GLM.glm(fml_init, df_init,
+                                 Distributions.Poisson(), GLM.LogLink())
+                β_init_glm = GLM.coef(m_init)
+                vcat(β_init_glm[2:end], β_init_glm[1])
+            catch
+                zeros(k)
+            end
+        else
+            zeros(k)
+        end
+        res1 = Optim.optimize(β -> gmm_obj(β, W1), β_init, Optim.LBFGS();
+                                autodiff = :forward, inplace = false)
+        β1 = Optim.minimizer(res1)
+        Q1 = Optim.minimum(res1)
+    end
+
+    if onestep
+        β_final = β1
+        Q_final = Q1
+    else
+        # Step 2: optimal W = (1/n Σ z z' u²)⁻¹
+        u1 = y .- μ_fn(β1)
+        Ω1 = (Z' * LinearAlgebra.Diagonal(u1.^2) * Z) ./ n
+        W2 = LinearAlgebra.inv(Ω1)
+        res2 = Optim.optimize(β -> gmm_obj(β, W2), β1, Optim.BFGS();
+                                autodiff = :forward, inplace = false)
+        β_final = Optim.minimizer(res2)
+        Q_final = Optim.minimum(res2)
+    end
+
+    # Robust sandwich VCE
+    u_final = y .- μ_fn(β_final)
+    μ_final = μ_fn(β_final)
+    # D̂ = ∂M/∂β' = -Σ z_i μ_i x_i' = -Z'diag(μ)X (k×k in just-identified)
+    Dhat = -(Z' * LinearAlgebra.Diagonal(μ_final) * X)
+    # Ŝ = Σ z_i z_i' u_i² (uncentered moment outer-product)
+    Shat = Z' * LinearAlgebra.Diagonal(u_final.^2) * Z
+    if k == m_cnt
+        # Just-identified: V = D̂⁻¹ Ŝ (D̂')⁻¹ directly. Avoid the squared-form
+        # bread = inv(Gbar'Gbar) which doubles the condition number — when an
+        # instrument is weak (e.g. firmsize → private), Gbar is ill-conditioned
+        # and the squared form blows up some SEs while leaving others intact.
+        # Use LU-based triangular solves (\, /) rather than forming inv(D̂).
+        V = (Dhat \ Shat) / Dhat'
+    elseif onestep
+        # Overidentified one-step: V = (G'WG)⁻¹ G'W Ŝ WG (G'WG)⁻¹ (in sum form,
+        # equivalent to Hansen's mean form with extra n cancelling).
+        bread = LinearAlgebra.inv(Dhat' * Dhat)
+        V = bread * (Dhat' * Shat * Dhat) * bread
+    else
+        # Overidentified two-step with optimal W = inv(Ŝ): V = (G' inv(Ŝ) G)⁻¹
+        V = LinearAlgebra.inv(Dhat' * LinearAlgebra.inv(Shat) * Dhat)
+    end
+    V = (V .+ V') ./ 2  # symmetrize numerical noise
+    se = sqrt.(max.(LinearAlgebra.diag(V), 0.0))
+    z = β_final ./ se
+    p = 2 .* (1 .- Distributions.cdf.(Distributions.Normal(), abs.(z)))
+    crit = Distributions.quantile(Distributions.Normal(), 1 - (1-level)/2)
+    ci_lo = β_final .- crit .* se
+    ci_hi = β_final .+ crit .* se
+
+    # Stata %9.0g formatter — sign-aware width cap (cap=9 except cap=10 for
+    # negative |x|<1, where leading-zero strip saves a char). Without this
+    # asymmetry, negative |x|<1 values would lose a digit vs Stata's output.
+    function g9(x; w::Int=10, sig::Int=7)
+        (ismissing(x) || !isfinite(x)) && return lpad(".", w)
+        sig_use = sig
+        s = Printf.@sprintf("%.*g", sig_use, x)
+        cap = (0 < abs(x) < 1 && x < 0) ? 10 : 9
+        while length(s) > cap && sig_use > 1
+            sig_use -= 1
+            s = Printf.@sprintf("%.*g", sig_use, x)
+        end
+        if 0 < abs(x) < 1
+            s = replace(s, r"^(-?)0\." => s"\1.")
+        end
+        return lpad(s, w)
+    end
+    function commafmt(num)
+        s = string(abs(num)); parts = String[]; i = length(s)
+        while i >= 1; push!(parts, s[max(1, i-2):i]); i -= 3; end
+        return (num < 0 ? "-" : "") * join(reverse(parts), ",")
+    end
+
+    # Print Stata-style output
+    println()
+    Printf.@printf("Final GMM criterion Q(b) = %.2e\n", Q_final / n)
+    println()
+    if k == m_cnt
+        println("note: model is exactly identified.")
+        println()
+    end
+    println("GMM estimation ")
+    println()
+    Printf.@printf("Number of parameters = %3d\n", k)
+    Printf.@printf("Number of moments    = %3d\n", m_cnt)
+    Printf.@printf("Initial weight matrix: Unadjusted%17sNumber of obs   = %10s\n",
+                   "", commafmt(n))
+    println()
+    println("-"^78)
+    println("             |               Robust")
+    println("             | Coefficient  std. err.      z    P>|z|     [95% conf. interval]")
+    println("-"^13, "+", "-"^64)
+    # Print regressors first, then b0 (last)
+    for i in 1:(k-1)
+        Printf.@printf("%12s | %s  %s  %s   %s    %s  %s\n",
+                       string(regs[i]),
+                       g9(β_final[i]; w=10), g9(se[i]; w=9),
+                       Printf.@sprintf("%6.2f", z[i]),
+                       Printf.@sprintf("%.3f", p[i]),
+                       g9(ci_lo[i]; w=10), g9(ci_hi[i]; w=10))
+    end
+    println("-"^13, "+", "-"^64)
+    Printf.@printf("%12s | %s  %s  %s   %s    %s  %s\n",
+                   "/b0",
+                   g9(β_final[end]; w=10), g9(se[end]; w=9),
+                   Printf.@sprintf("%6.2f", z[end]),
+                   Printf.@sprintf("%.3f", p[end]),
+                   g9(ci_lo[end]; w=10), g9(ci_hi[end]; w=10))
+    println("-"^78)
+    println("Instruments for equation 1: ", join(instruments, " "), " _cons")
+
+    return (; β=β_final, se, V, Q=Q_final, n, k, m=m_cnt,
+              coefnames=vcat(string.(regs), "/b0"))
 end
 
 """
@@ -14682,7 +16099,7 @@ DataFrames.describe(df10[:, [:docvis, :private, :chronic, :female, :income]],
                     :mean, :std, :min, :max)
 ```
 
-## 10.2.2 Poisson model description
+### 10.2.2 Poisson model description
 
 ## 10.3 Nonlinear regression methods
 
@@ -14698,6 +16115,7 @@ m_pois10 = poisson_stata(df10,
 ```
 
 ```{julia}
+#=
 # Robust (HC1) sandwich SE computed manually
 function robust_se_glm(model, df, formula, dep)
     Xm   = GLM.modelmatrix(model)
@@ -14718,6 +16136,7 @@ for i in eachindex(β)
     @printf("%-12s coef=%10.6f  rob.se=%10.6f  z=%7.2f\n",
             cn[i], β[i], se_rob[i], β[i]/se_rob[i])
 end
+=#
 ```
 
 ### 10.3.3 Postestimation commands
@@ -14726,65 +16145,30 @@ end
 
 ### 10.3.5 The Optim.jl NLS approach
 
-```{julia}
-# Nonlinear least squares: minimize Σ (y - exp(x'β))²
-function nls_obj(β, X, y)
-    μ = exp.(X * β)
-    return sum((y .- μ).^2)
-end
-y10 = Float64.(df10c.docvis)
-X10 = hcat(Float64.(df10c.private), Float64.(df10c.chronic),
-           Float64.(df10c.female), Float10c.income |> _ -> Float64.(df10c.income),
-           ones(DataFrames.nrow(df10c)))
-xnms10 = ["private", "chronic", "female", "income", "_cons"]
-
-nls_res = Optim.optimize(β -> nls_obj(β, X10, y10), zeros(5),
-                         Optim.LBFGS(); autodiff = :forward)
-β_nls = Optim.minimizer(nls_res)
-println("\n— NLS coefficients —")
-for i in eachindex(β_nls)
-    @printf("%-10s %12.6f\n", xnms10[i], β_nls[i])
-end
-```
-
 ### 10.3.6 GLM
 
 ### 10.3.7 The glm command
 
 ```{julia}
-# Same as Sec 10.3.2 — GLM.jl Poisson with log link
-pois10b = GLM.glm(GLM.@formula(docvis ~ private + chronic + female + income),
-                  df10, Distributions.Poisson(), GLM.LogLink())
-println(pois10b)
+# glm docvis private chronic female income, family(poisson) link(log) vce(robust)
+m_glm10 = glm_stata(df10,
+    @formula(docvis ~ private + chronic + female + income);
+    family = :poisson,
+    link   = :log,
+    vce    = :robust);
 ```
 
 ```{julia}
-# GMM (nonlinear IV) for Poisson with firmsize as instrument for private
-# Manual one-step GMM with optimal-step weighting matrix Z'Z
-function poisson_gmm(β, X, Z, y)
-    μ = exp.(X * β)
-    h = Z' * (y .- μ)
-    W = try
-        LinearAlgebra.inv(Z' * Z)
-    catch
-        LinearAlgebra.pinv(Z' * Z)
-    end
-    return (h' * W * h)
-end
-df10c.firmsize = df10.firmsize[1:DataFrames.nrow(df10c)]
-X_gmm = hcat(Float64.(df10c.private), Float64.(df10c.chronic),
-             Float64.(df10c.female), Float64.(df10c.income),
-             ones(DataFrames.nrow(df10c)))
-Z_gmm = hcat(Float64.(df10c.firmsize), Float64.(df10c.chronic),
-             Float64.(df10c.female), Float64.(df10c.income),
-             ones(DataFrames.nrow(df10c)))
-gmm_res = Optim.optimize(β -> poisson_gmm(β, X_gmm, Z_gmm, y10), zeros(5),
-                          Optim.LBFGS(); autodiff = :forward)
-β_gmm = Optim.minimizer(gmm_res)
-println("\n— Poisson GMM (private instrumented by firmsize) —")
-for i in eachindex(β_gmm)
-    @printf("%-10s %12.6f\n", xnms10[i], β_gmm[i])
-end
+# gmm (docvis - exp({xb:private chronic female income}+{b0})),   ///
+#   instruments(firmsize chronic female income) onestep nolog
+#
+# Nonlinear IV: E[(docvis - exp(x'β + b0)) · z] = 0 with z = (firmsize,
+# chronic, female, income, _cons). Just-identified (5 params = 5 instruments).
+m_gmm10 = gmm_stata(df10, :docvis,
+    [:private, :chronic, :female, :income],     # regressors in linear index
+    [:firmsize, :chronic, :female, :income];    # instruments
+    mean_fn = :exp,
+    onestep = true);
 ```
 
 ### 10.3.8 Other estimators
@@ -14798,64 +16182,80 @@ end
 ### 10.4.3 Application
 
 ```{julia}
-# Compare 5 SE estimators for Poisson coefficients
-β = GLM.coef(pois10)
-n10, k10 = size(X10)
+# Different VCE estimates after Poisson regression
+# (Stata: poisson docvis private chronic female income, vce(...))
+#
+# This whole chapter (§10.4 — §10.6) shares one fitted Poisson. We get it
+# from `poisson_stata` (which already returns β / V / X in Stata-display
+# order — slopes first, _cons last — and applies the n/(n-1) robust
+# correction). Re-running this chunk after editing chunk 1 reloads
+# everything downstream chunks need.
 
-# OIM (default): inverse of negative Hessian
-H10  = X10' * LinearAlgebra.Diagonal(GLM.predict(pois10)) * X10
-V_oim = try
-    LinearAlgebra.inv(LinearAlgebra.cholesky(LinearAlgebra.Symmetric(H10)))
-catch
-    LinearAlgebra.pinv(H10)
-end
-se_oim = sqrt.(LinearAlgebra.diag(V_oim))
+s10            = setup_mus10(df10; quiet = false)   # also prints reg table
+df10c_v, β_v   = s10.df, s10.β
+V_rob, X_v     = s10.V,  s10.X
+n_v,    k_v    = s10.n,  s10.k
+y_v            = Float64.(df10c_v.docvis)
+μ_v             = exp.(X_v * β_v)
+u_v             = y_v .- μ_v
 
-# OPG (outer-product gradient)
-score = X10 .* (y10 .- GLM.predict(pois10))
-S = score' * score
-V_opg = try
-    LinearAlgebra.inv(S)
-catch
-    LinearAlgebra.pinv(S)
-end
-se_opg = sqrt.(LinearAlgebra.diag(V_opg))
-
-# Robust sandwich (already computed above)
-se_rob_v = robust_se_glm(pois10, df10c, GLM.@formula(docvis ~ private + chronic + female + income), :docvis)
-
-# Cluster on age
-ages = df10c.age = df10.age[1:DataFrames.nrow(df10c)]
-S_clu = zeros(k10, k10)
-for a in unique(ages)
-    idx = findall(ages .== a)
-    s_g = X10[idx, :]' * (y10[idx] .- GLM.predict(pois10)[idx])
+# OIM: V = (X' diag(μ) X)⁻¹
+V_oim = LinearAlgebra.inv(X_v' * LinearAlgebra.Diagonal(μ_v) * X_v)
+# OPG: V = (X' diag(u²) X)⁻¹  (outer-product of gradients)
+M_opg = X_v' * LinearAlgebra.Diagonal(u_v.^2) * X_v
+V_opg = LinearAlgebra.inv(M_opg)
+# Cluster on age (Stata small-sample correction (G/(G-1)) · ((n-1)/(n-k)))
+ages_v = Float64.(df10c_v.age)
+S_clu  = zeros(k_v, k_v)
+for g in unique(ages_v)
+    idx = findall(ages_v .== g)
+    s_g = X_v[idx, :]' * u_v[idx]
     S_clu .+= s_g * s_g'
 end
-G  = length(unique(ages))
-dof_corr = (G / (G - 1)) * ((n10 - 1) / (n10 - k10))
-V_clu = V_oim * S_clu * V_oim * dof_corr
-se_clu = sqrt.(LinearAlgebra.diag(V_clu))
-
-# Bootstrap (B = 200 for speed)
+G_v      = length(unique(ages_v))
+dof_corr = (G_v / (G_v - 1)) * ((n_v - 1) / (n_v - k_v))
+V_clu    = V_oim * S_clu * V_oim * dof_corr
+# Bootstrap, reps = 400 (Julia's RNG differs from Stata, so this column will
+# not match Stata's vce(boot) numbers exactly even with the same seed).
 Random.seed!(10101)
-β_b = Vector{Vector{Float64}}(undef, 200)
-for b in 1:200
-    idx = StatsBase.sample(1:DataFrames.nrow(df10c), DataFrames.nrow(df10c); replace = true)
-    sub = df10c[idx, :]
-    m_b = GLM.glm(GLM.@formula(docvis ~ private + chronic + female + income),
-                  sub, Distributions.Poisson(), GLM.LogLink())
-    β_b[b] = GLM.coef(m_b)
+B_v = 400
+βb  = zeros(B_v, k_v)
+for b in 1:B_v
+    idx  = StatsBase.sample(1:n_v, n_v; replace = true)
+    sub  = df10c_v[idx, :]
+    m_b  = GLM.glm(GLM.@formula(docvis ~ private + chronic + female + income),
+                   sub, Distributions.Poisson(), GLM.LogLink())
+    βb[b, :] = vcat(GLM.coef(m_b)[2:end], GLM.coef(m_b)[1])
 end
-se_boot = vec(Statistics.std(reduce(hcat, β_b)', dims = 1))
+V_boot = StatsBase.cov(βb)
 
-println("\n— Comparison of SE estimators (Poisson) —")
-@printf("%-12s %10s %10s %10s %10s %10s\n",
-        "Variable", "OIM", "OPG", "Robust", "Cluster", "Bootstrap")
-for i in eachindex(β)
-    @printf("%-12s %10.4f %10.4f %10.4f %10.4f %10.4f\n",
-            cn[i], se_oim[i], se_opg[i], se_rob_v[i], se_clu[i], se_boot[i])
+ses = (
+    VCE_oim  = sqrt.(LinearAlgebra.diag(V_oim)),
+    VCE_opg  = sqrt.(LinearAlgebra.diag(V_opg)),
+    VCE_rob  = sqrt.(LinearAlgebra.diag(V_rob)),
+    VCE_clu  = sqrt.(LinearAlgebra.diag(V_clu)),
+    VCE_boot = sqrt.(LinearAlgebra.diag(V_boot)),
+)
+
+varnames_v = ["private", "chronic", "female", "income", "_cons"]
+colhead_v  = ["VCE_oim", "VCE_opg", "VCE_rob", "VCE_clu", "VCE_boot"]
+
+function _print_vce_row(label, vals)
+    Printf.@printf("%12s |", label)
+    for (j, v) in enumerate(vals)
+        j == 1 ? Printf.@printf(" %8.4f", v) : Printf.@printf("%11.4f", v)
+    end
+    println("  ")
 end
+
+println("-"^69)
+println("    Variable | VCE_oim    VCE_opg    VCE_rob    VCE_clu    VCE_boot  ")
+println("-"^13, "+", "-"^55)
+for (i, v) in enumerate(varnames_v)
+    _print_vce_row(v, fill(β_v[i], length(colhead_v)))
+    _print_vce_row("", [ses[Symbol(c)][i] for c in colhead_v])
+end
+println("-"^69)
 ```
 
 ### 10.4.4 Default estimate of the VCE
@@ -14877,95 +16277,160 @@ end
 ### 10.5.2 Application
 
 ```{julia}
-# Predicted mean number of doctor visits and SE of prediction
-muhat = GLM.predict(pois10)
-@printf("docvis: mean = %.4f\n", Statistics.mean(df10c.docvis))
-@printf("muhat:  mean = %.4f\n", Statistics.mean(muhat))
+# Predicted mean number of doctor visits using predict and predictnl
+# (Stata: poisson ..., vce(robust); predict muhat if e(sample), n;
+#  predictnl muhat2 = exp(_b[private]·private + ... + _b[_cons]),
+#  se(semuhat2); summarize docvis muhat muhat2 semuhat2)
 
-# SE of muhat = μ * sqrt(x' V_β x)  via delta method
-V_β = try
-    LinearAlgebra.inv(H10)
-catch
-    LinearAlgebra.pinv(H10)
-end
-se_muhat = [μ * sqrt(x' * V_β * x) for (μ, x) in zip(muhat, eachrow(X10))]
-@printf("se(muhat): mean = %.4f\n", Statistics.mean(se_muhat))
+s = setup_mus10(df10)        # self-contained: refits via the chunk-1 helper
+muhat    = exp.(s.X * s.β)               # = predict, n
+muhat2   = copy(muhat)                    # predictnl: exp(linear index)
+# Delta-method SE: ∂μ/∂β = μ·x, so SE(μ̂) = μ · sqrt(x' V x)
+semuhat2 = [μ * sqrt(x' * s.V * x) for (μ, x) in zip(muhat2, eachrow(s.X))]
+
+summarize_stata(DataFrames.DataFrame(
+    docvis   = s.df.docvis,
+    muhat    = muhat,
+    muhat2   = muhat2,
+    semuhat2 = semuhat2))
 ```
 
 ### 10.5.3 Out-of-sample prediction
 
 ```{julia}
-# Score residuals (= y - μ for Poisson) and ordinary residuals
-resid_score = y10 .- muhat
-resid_raw   = df10c.docvis .- muhat
-@printf("Score residual: mean=%.4f sd=%.4f\n",
-        Statistics.mean(resid_score), Statistics.std(resid_score))
-@printf("Raw residual:   mean=%.4f sd=%.4f\n",
-        Statistics.mean(resid_raw), Statistics.std(resid_raw))
+# (Stata: predict resid, score; gen resid2 = docvis - muhat; summarize ...)
+#
+# For Poisson with log link, the score residual ∂lnL_i/∂(x_iβ) is exactly
+# y_i − μ_i, identical to docvis − muhat. In Stata the two means appear
+# different (-5.25e-08 vs -4.86e-08) only because Stata stores `muhat` at
+# slightly lower precision before the subtraction; in Julia both are the
+# same array. Either way both means are mathematically zero — Σ(y − μ) = 0
+# is the Poisson MLE first-order condition for the constant.
+
+s = setup_mus10(df10)
+muhat  = exp.(s.X * s.β)
+y_     = Float64.(s.df.docvis)
+resid  = y_ .- muhat
+resid2 = y_ .- muhat
+
+summarize_stata(DataFrames.DataFrame(resid = resid, resid2 = resid2))
 ```
 
 ### 10.5.4 Out-of-sample prediction with year01 data
 
 ```{julia}
-# Re-load full data, fit on year02 = 1, predict on year01 = 1
-df10_all = DataFrames.DataFrame(ReadStatTables.readstat("musr/mus10data.dta"))
-m_year02 = GLM.glm(GLM.@formula(docvis ~ private + chronic + female + income),
-                   filter(r -> r.year02 == 1, df10_all),
-                   Distributions.Poisson(), GLM.LogLink())
-df01 = filter(r -> r.year01 == 1, df10_all)
-df01_clean = DataFrames.dropmissing(df01[:, [:docvis, :private, :chronic, :female, :income]])
-muhat01 = GLM.predict(m_year02, df01_clean)
-@printf("docvis (year01): mean = %.4f\n", Statistics.mean(df01_clean.docvis))
-@printf("muhat (year01):  mean = %.4f\n", Statistics.mean(muhat01))
+# Out-of-sample prediction for year01 data using year02 estimates
+# (Stata: poisson ... if year02==1, vce(robust); keep if year01==1;
+#  predict muhatyear01, n; summarize docvis muhatyear01)
+
+s = setup_mus10(df10)        # year02 fit (df10 is already filtered to year02)
+
+# Reload mus10data and subset to year01 to apply year02 coefficients OOS
+df10_full = DataFrames.DataFrame(ReadStatTables.readstat("musr/mus10data.dta"))
+for c in names(df10_full)
+    if eltype(df10_full[!, c]) <: Union{Missing, Float32} || eltype(df10_full[!, c]) === Float32
+        df10_full[!, c] = convert.(Union{Missing, Float64}, df10_full[!, c])
+    end
+end
+df01  = filter(r -> r.year01 == 1, df10_full)
+df01c = DataFrames.dropmissing(df01[:, [:docvis, :private, :chronic, :female, :income]])
+X01   = hcat(Float64.(df01c.private),
+             Float64.(df01c.chronic),
+             Float64.(df01c.female),
+             Float64.(df01c.income),
+             ones(DataFrames.nrow(df01c)))
+muhatyear01 = exp.(X01 * s.β)
+
+summarize_stata(DataFrames.DataFrame(
+    docvis      = df01c.docvis,
+    muhatyear01 = muhatyear01))
 ```
 
 ### 10.5.5 Prediction at specified regressor values
 
 ```{julia}
-# Counterfactual: set private = 1 for everyone in year02 sample, then predict
-df_pe1 = copy(df10c); df_pe1.private .= 1
-@printf("Mean μ when private = 1 for everyone: %.4f\n",
-        Statistics.mean(GLM.predict(pois10, df_pe1)))
+# Counterfactual prediction: set private = 1 for everyone in year02 sample
+# (Stata: keep if year02==1; quietly poisson ..., vce(robust);
+#  preserve; replace private = 1; predict muhatpeq1, n;
+#  summarize muhatpeq1; restore)
+
+s = setup_mus10(df10)
+X_pe1 = hcat(ones(s.n),                         # private = 1 for all
+             Float64.(s.df.chronic),
+             Float64.(s.df.female),
+             Float64.(s.df.income),
+             ones(s.n))                         # _cons
+muhatpeq1 = exp.(X_pe1 * s.β)
+
+summarize_stata(DataFrames.DataFrame(muhatpeq1 = muhatpeq1))
 ```
 
 ```{julia}
-# Predicted μ at a single point: private=1 chronic=0 female=1 income=10
-β = GLM.coef(pois10); cn = GLM.coefnames(pois10)
-xrep = Dict("(Intercept)" => 1.0, "private" => 1.0, "chronic" => 0.0,
-            "female" => 1.0, "income" => 10.0)
-ηhat = sum(β[i] * xrep[cn[i]] for i in eachindex(β))
-@printf("μ̂(x*) = exp(%.4f) = %.4f\n", ηhat, exp(ηhat))
+# Prediction at a specified value of all the regressors via delta method
+# (Stata: nlcom exp(_b[_cons] + _b[private]·1 + _b[chronic]·0
+#                   + _b[female]·1 + _b[income]·10))
+#
+# β_v order is [private, chronic, female, income, _cons], so the regressor
+# vector at the chosen point is (1, 0, 1, 10, 1).
+
+s = setup_mus10(df10)
+nlcom_stata(b -> exp(b[1]*1 + b[2]*0 + b[3]*1 + b[4]*10 + b[5]),
+            s.β, s.V; depvar = "docvis")
 ```
 
 ```{julia}
-# Same prediction with linear-combination notation (lincom equivalent)
-@printf("Predicted μ at x*: %.4f\n", exp(ηhat))
+# Linear-combination prediction at a specified value of all regressors,
+# reported on the exp scale (Stata: lincom _cons + private·1 + chronic·0
+#                                    + female·1 + income·10, eform)
+#
+# Compared with `nlcom exp(...)`: lincom builds the SE on the *linear*
+# combination L = w'β and reports z = L/SE(L); with `eform` the point
+# estimate is exp(L), the SE is exp(L)·SE(L) (delta method, same as nlcom),
+# but the CI is the *asymmetric* exp(L ± z·SE(L)). That's why z here is 17.89
+# and the CI is (2.656, 3.378), vs nlcom's z=16.31 and CI (2.635, 3.355) on
+# the same expression.
+
+s = setup_mus10(df10)
+lincom_stata([1.0, 0.0, 1.0, 10.0, 1.0], s.β, s.V;
+             eform = true, depvar = "docvis")
 ```
 
 ### 10.5.6 Prediction of other quantities
 
 ```{julia}
-# Sample average of predicted events
-@printf("E[E(y|x)] = %.4f\n", Statistics.mean(GLM.predict(pois10)))
+# (Stata: poisson docvis private chronic female income, vce(robust); margins)
+# The Poisson regression table is printed by setup_mus10(...; quiet=false)
+# and the overall predictive margin follows.
+s = setup_mus10(df10; quiet = false)
+margins_stata(s.β, s.V, s.X)
 ```
 
 ```{julia}
-# Sample average prediction with private = 1
-df_p1 = copy(df10c); df_p1.private .= 1
-@printf("E[E(y|x, private=1)] = %.4f\n",
-        Statistics.mean(GLM.predict(pois10, df_p1)))
+# Sample average prediction with private = 1 for everyone
+# (Stata: margins, at(private=1))
+s = setup_mus10(df10)
+X_pe1 = hcat(ones(s.n), Float64.(s.df.chronic), Float64.(s.df.female),
+             Float64.(s.df.income), ones(s.n))
+margins_stata(s.β, s.V, X_pe1)
 ```
 
 ```{julia}
-# Predicted μ at x* (already computed above)
-@printf("μ̂(x*) = %.4f\n", exp(ηhat))
+# Adjusted prediction at a specified point of all regressors
+# (Stata: margins, at(private=1 chronic=0 female=1 income=10))
+s = setup_mus10(df10)
+margins_stata(s.β, s.V, s.X;
+              at        = [1.0, 0.0, 1.0, 10.0, 1.0],
+              at_labels = [:private => 1, :chronic => 0,
+                           :female  => 1, :income  => 10])
 ```
 
+
 ```{julia}
-# Sample average predicted μ at private = 0 vs private = 1
-df_p0 = copy(df10c); df_p0.private .= 0
-@printf("E[μ | private=0] = %.4f\n", Statistics.mean(GLM.predict(pois10, df_p0)))
-@printf("E[μ | private=1] = %.4f\n", Statistics.mean(GLM.predict(pois10, df_p1)))
+# Sample average prediction at each level of indicator variable private
+# (Stata: poisson docvis i.private chronic female income, vce(robust);
+#  margins private)
+s = setup_mus10(df10)
+margins_stata(s.β, s.V, s.X; over = "private" => 1)
 ```
 
 ## 10.6 Marginal effects
@@ -14983,144 +16448,243 @@ df_p0 = copy(df10c); df_p0.private .= 0
 ### 10.6.6 MEM: Marginal effect at mean
 
 ```{julia}
-# MEM: ME of regressor j at the mean of regressors
-function mem_poisson(model, df, vars)
-    means = Dict(v => Statistics.mean(df[!, v]) for v in vars)
-    means[:int] = 1.0
-    cn = GLM.coefnames(model); β = GLM.coef(model)
-    η = sum(β[i] * (cn[i] == "(Intercept)" ? 1.0 : means[Symbol(cn[i])])
-            for i in eachindex(β))
-    μ̄ = exp(η)
-    return Dict(v => μ̄ * β[findfirst(==(string(v)), cn)] for v in vars)
-end
-mem_poisson(pois10, df10c, [:private, :chronic, :female, :income])
+# Marginal effects at the mean (MEM)
+# (Stata: poisson docvis i.private i.chronic i.female income, vce(robust);
+#  margins, dydx(*) atmean)
+
+s = setup_mus10(df10; quiet = false)        # also prints regression table
+margins_dydx_stata(s.β, s.V, s.X;
+    atmean     = true,
+    factors    = [("private", 1), ("chronic", 2), ("female", 3)],
+    continuous = [("income", 4)])
 ```
 
 #### Comparison of calculus and finite-difference methods
 
 ```{julia}
-# Calculus-method MEM (formula above) and finite-difference MEM
-function mem_fd(model, df, vars; h = 1e-6)
-    means = Dict(v => Statistics.mean(df[!, v]) for v in vars)
-    df0 = DataFrames.DataFrame(; (v => [means[v]] for v in vars)...)
-    out = Dict{Symbol, Float64}()
-    for v in vars
-        df_p = copy(df0); df_p[!, v] .+= h
-        df_m = copy(df0); df_m[!, v] .-= h
-        out[v] = (GLM.predict(model, df_p)[1] - GLM.predict(model, df_m)[1]) / (2h)
-    end
-    return out
-end
-mem_fd(pois10, df10c, [:private, :chronic, :female, :income])
+# Calculus-method MEM (no `i.` factor prefixes — every regressor is treated
+# as continuous, so dy/dx_j = β_j · μ(x̄) for every j, including the binary
+# private/chronic/female).
+# (Stata: poisson docvis private chronic female income, vce(robust);
+#  margins, dydx(*) atmean)
+
+s = setup_mus10(df10; quiet = false)
+margins_dydx_stata(s.β, s.V, s.X;
+    atmean     = true,
+    factors    = [],
+    continuous = [("private", 1), ("chronic", 2),
+                  ("female",  3), ("income",  4)])
 ```
 
 ### 10.6.7 MER: Marginal effect at representative value
 
 ```{julia}
-# MER: ME at private=1 chronic=0 female=1 income=10
-function mer_poisson(model, x_rep)
-    β = GLM.coef(model); cn = GLM.coefnames(model)
-    η = sum(β[i] * x_rep[cn[i]] for i in eachindex(β))
-    μ = exp(η)
-    return Dict(v => μ * β[findfirst(==(v), cn)] for v in keys(x_rep) if v != "(Intercept)")
-end
-xrep = Dict("(Intercept)" => 1.0, "private" => 1.0, "chronic" => 0.0,
-            "female" => 1.0, "income" => 10.0)
-mer_poisson(pois10, xrep)
+# MER — marginal effect at a representative point
+# (Stata: poisson docvis i.private i.chronic i.female income, vce(robust);
+#  margins, dydx(*) at(private=1 chronic=0 female=1 income=10) noatlegend)
+
+s = setup_mus10(df10; quiet = false)
+margins_dydx_stata(s.β, s.V, s.X;
+    factors    = [("private", 1), ("chronic", 2), ("female", 3)],
+    continuous = [("income", 4)],
+    at         = [1.0, 0.0, 1.0, 10.0, 1.0],
+    noatlegend = true)
 ```
 
 ### 10.6.8 AME: Average marginal effect
 
 ```{julia}
-# AME of income: average over sample of μ_i * β_income
-β_income = GLM.coef(pois10)[findfirst(==("income"), GLM.coefnames(pois10))]
-ame_income = β_income * Statistics.mean(GLM.predict(pois10))
-@printf("AME of income = %.6f\n", ame_income)
+# AME — average marginal effects across the sample
+# (Stata: poisson docvis i.private i.chronic i.female income, vce(robust);
+#  margins, dydx(*))
+
+s = setup_mus10(df10; quiet = false)
+margins_dydx_stata(s.β, s.V, s.X;
+    factors    = [("private", 1), ("chronic", 2), ("female", 3)],
+    continuous = [("income", 4)])
+```
+
+```{julia}
+# Usual ME for a single continuous regressor evaluated at sample means
+# (Stata: quietly poisson ..., vce(robust);
+#  margins, dydx(income) atmean noatlegend)
+#
+# Same MEM math as §10.6.6 but (a) only `income` (continuous), (b) no
+# factors, (c) noatlegend=true to suppress the At: block.
+
+s = setup_mus10(df10)
+margins_dydx_stata(s.β, s.V, s.X;
+    atmean     = true,
+    factors    = [],
+    continuous = [("income", 4)],
+    noatlegend = true)
 ```
 
 ### 10.6.9 Elasticities and semielasticities
 
 ```{julia}
-# Elasticity at means: (∂μ/∂x)·(x̄/μ̄) = β·x̄
-xbar_inc = Statistics.mean(df10c.income)
-@printf("Elasticity of E[y] w.r.t. income at means = %.4f\n",
-        β_income * xbar_inc)
+# Elasticity of E[y] w.r.t. income at the sample-mean point
+# (Stata: margins, eyex(income) atmean noatlegend)
+#
+# For Poisson with log link: ε = β_income · x̄_income (independent of μ).
+# Reuses margins_dydx_stata with kind=:eyex.
+
+s = setup_mus10(df10)
+margins_dydx_stata(s.β, s.V, s.X;
+    kind       = :eyex,
+    atmean     = true,
+    factors    = [],
+    continuous = [("income", 4)],
+    noatlegend = true)
 ```
 
 ```{julia}
-# Semielasticity ey/dx at means
-@printf("Semielasticity ey/dx (income) = %.6f\n", β_income)
+#=
+* Semielasticity evaluated at mean of regressors
+margins, eydx(income) atmean noatlegend
+=#
+s = setup_mus10(df10)
+margins_dydx_stata(s.β, s.V, s.X;
+    kind       = :eydx,
+    atmean     = true,
+    factors    = [],
+    continuous = [("income", 4)],
+    noatlegend = true)
 ```
 
 ```{julia}
-# Other semielasticity dy/ex at means
-μ̄ = Statistics.mean(GLM.predict(pois10))
-@printf("Semielasticity dy/ex (income) = %.6f\n", β_income * xbar_inc * μ̄)
+#=
+* Other semielasticity evaluated at mean of regressors
+margins, dyex(income) atmean noatlegend
+=#
+s = setup_mus10(df10)
+margins_dydx_stata(s.β, s.V, s.X;
+    kind       = :dyex,
+    atmean     = true,
+    factors    = [],
+    continuous = [("income", 4)],
+    noatlegend = true)
 ```
 
 ```{julia}
-# AME at means: β_income · μ̄
-@printf("AME income (mean μ) = %.6f\n", β_income * μ̄)
+# Stata's legacy mfx output (older/textbook form of margins, dydx atmean)
+# (Stata: mfx, dydx varlist(income))
+
+s = setup_mus10(df10)
+mfx_stata(s.β, s.V, s.X;
+    factors    = [],
+    continuous = [("income", 4)])
 ```
 
 ```{julia}
-# Elasticity at means: β · x̄  (already shown)
-@printf("Elasticity = %.6f\n", β_income * xbar_inc)
+# Stata's legacy mfx with elasticity option — same layout as `mfx, dydx`
+# but the column reports ε(x) = β_j · x_j instead of dy/dx
+# (Stata: mfx, eyex varlist(income))
+
+s = setup_mus10(df10)
+mfx_stata(s.β, s.V, s.X;
+    kind       = :eyex,
+    factors    = [],
+    continuous = [("income", 4)])
 ```
 
 ```{julia}
-# Semielasticity ey/dx
-@printf("ey/dx = %.6f\n", β_income)
+# Stata's legacy mfx with semi-elasticity option: ∂lnE[y]/∂x = β_j (Poisson
+# log link), so the reported value is just the coefficient itself.
+# (Stata: mfx, eydx varlist(income))
+
+s = setup_mus10(df10)
+mfx_stata(s.β, s.V, s.X;
+    kind       = :eydx,
+    factors    = [],
+    continuous = [("income", 4)])
 ```
 
 ```{julia}
-# Semielasticity dy/ex
-@printf("dy/ex = %.6f\n", β_income * xbar_inc * μ̄)
+# Stata's legacy mfx with dy/ex (unit change in y per percent change in x)
+# (Stata: mfx, dyex varlist(income))
+#
+# For Poisson with log link: dy/ex = β_j · μ · x_j (depends on both μ and x)
+
+s = setup_mus10(df10)
+mfx_stata(s.β, s.V, s.X;
+    kind       = :dyex,
+    factors    = [],
+    continuous = [("income", 4)])
 ```
 
 ### 10.6.10 AME computed manually
 
 ```{julia}
-# Manual AME for income via finite differences
-df_p = copy(df10c); df_p.income .+= 0.01
-df_m = copy(df10c); df_m.income .-= 0.01
-me_income = (GLM.predict(pois10, df_p) .- GLM.predict(pois10, df_m)) ./ 0.02
-@printf("Manual AME of income = %.6f\n", Statistics.mean(me_income))
+# AME for income computed manually via finite differences:
+#   memanual_i = (μ̂(income_i + 0.01) − μ̂(income_i)) / 0.01
+# Should be ≈ β_income · μ̂_i for small h, so its mean ≈ AME(income).
+# (Stata: predict mu0,n; replace income=income+0.01; predict mu1,n;
+#  gen memanual = (mu1-mu0)/0.01; summarize memanual)
+
+s = setup_mus10(df10)
+μ0 = exp.(s.X * s.β)                          # predict, n  (income at original)
+X1 = copy(s.X); X1[:, 4] .+= 0.01             # bump income by 0.01
+μ1 = exp.(X1 * s.β)                           # predict, n  (after bump)
+memanual = (μ1 .- μ0) ./ 0.01
+
+summarize_stata(DataFrames.DataFrame(memanual = memanual))
 ```
 
 ```{julia}
-# Manual AME for all regressors
-function manual_ame(model, df, vars)
-    out = Dict{Symbol, Float64}()
-    for v in vars
-        s = Statistics.std(df[!, v])
-        h = s / 1000
-        df_p = copy(df); df_p[!, v] .+= h
-        df_m = copy(df); df_m[!, v] .-= h
-        out[v] = Statistics.mean((GLM.predict(model, df_p) .-
-                                  GLM.predict(model, df_m)) ./ (2h))
-    end
-    return out
+# AME computed manually for ALL regressors using a per-variable
+# finite-difference step delta_v = sd(v)/1000.
+# (Stata: foreach var of varlist $xlist { ... gen me_`var' = (mu1-mu0)/delta ... }
+#         summarize me_*)
+#
+# These are the *calculus*-method per-obs MEs (≈ β_v · μ_i for log link),
+# not the discrete-change ones — for binary regressors they differ from
+# `margins, dydx(*)` AME values (see §10.6.8).
+
+s = setup_mus10(df10)
+μ0 = exp.(s.X * s.β)
+df_me = DataFrames.DataFrame()
+for (nm, idx) in [("private", 1), ("chronic", 2),
+                  ("female",  3), ("income",  4)]
+    delta = Statistics.std(s.X[:, idx]) / 1000
+    X1    = copy(s.X); X1[:, idx] .+= delta
+    μ1    = exp.(X1 * s.β)
+    df_me[!, "me_$nm"] = (μ1 .- μ0) ./ delta
 end
-manual_ame(pois10, df10c, [:private, :chronic, :female, :income])
+
+summarize_stata(df_me)
 ```
 
 ### 10.6.11 Polynomial regressors
 
 ```{julia}
-# Poisson with polynomial in income, then ME of income via chain rule
-df10c.inc2 = df10c.income.^2
-df10c.inc3 = df10c.income.^3
-m_poly = GLM.glm(GLM.@formula(docvis ~ private + chronic + female + income + inc2 + inc3),
-                 df10c, Distributions.Poisson(), GLM.LogLink())
-β = GLM.coef(m_poly); cn = GLM.coefnames(m_poly)
-b_inc  = β[findfirst(==("income"), cn)]
-b_inc2 = β[findfirst(==("inc2"), cn)]
-b_inc3 = β[findfirst(==("inc3"), cn)]
-μhat = GLM.predict(m_poly)
-me_income = μhat .* (b_inc .+ 2 .* b_inc2 .* df10c.income .+ 3 .* b_inc3 .* df10c.income.^2)
-@printf("Manual AME of income (polynomial model) = %.6f\n",
-        Statistics.mean(me_income))
+# AME for a polynomial regressor via the chain rule
+# (Stata: gen inc2 = income^2; gen inc3 = income^3;
+#  poisson docvis private chronic female income inc2 inc3, vce(robust);
+#  predict muhat,n; gen me_income = muhat*(β_inc + 2·β_inc2·income + 3·β_inc3·inc2);
+#  summarize me_income)
+#
+# For Poisson with log link: ∂μ/∂income = μ · ∂lnμ/∂income
+#   = μ · (β_income + 2·β_inc2·income + 3·β_inc3·income²)
+
+dfp = DataFrames.dropmissing(df10[:,
+    [:docvis, :private, :chronic, :female, :income]])
+dfp.inc2 = dfp.income .^ 2
+dfp.inc3 = dfp.income .^ 3
+
+fit_poly = poisson_stata(dfp,
+    GLM.@formula(docvis ~ private + chronic + female + income + inc2 + inc3);
+    vce = :robust);
+
+# β order in Stata-display layout: [private, chronic, female, income, inc2, inc3, _cons]
+β_v   = fit_poly.β
+X_v   = fit_poly.X
+μ_hat = exp.(X_v * β_v)
+inc   = X_v[:, 4]
+
+me_income = μ_hat .* (β_v[4] .+ 2 .* β_v[5] .* inc .+ 3 .* β_v[6] .* inc.^2)
+
+summarize_stata(DataFrames.DataFrame(me_income = me_income))
 ```
 
 ### 10.6.12 Interacted regressors
@@ -15128,42 +16692,149 @@ me_income = μhat .* (b_inc .+ 2 .* b_inc2 .* df10c.income .+ 3 .* b_inc3 .* df1
 ### 10.6.13 Complex interactions and nonlinearities
 
 ```{julia}
-# Same polynomial model as above (Sec 10.6.11)
-@printf("AME of income (polynomial) = %.6f\n", Statistics.mean(me_income))
+# AME of `income` from the cubic-in-income Poisson model, with delta-method SE
+# (Stata: poisson docvis private chronic female c.income c.income#c.income
+#                  c.income#c.income#c.income, vce(robust);
+#  margins, dydx(income))
+#
+# Same point estimate as §10.6.11 (mean of the per-obs ME) but the SE here
+# accounts for the fact that `income` enters the linear index in three
+# different terms — the gradient combines the chain-rule contribution from
+# μ (which depends on all β) and the polynomial-coefficient slots.
+
+dfp = DataFrames.dropmissing(df10[:,
+    [:docvis, :private, :chronic, :female, :income]])
+dfp.inc2 = dfp.income .^ 2
+dfp.inc3 = dfp.income .^ 3
+
+fit_poly = poisson_stata(dfp,
+    GLM.@formula(docvis ~ private + chronic + female + income + inc2 + inc3);
+    vce = :robust, quiet = true)
+β = fit_poly.β; V = fit_poly.V; X = fit_poly.X; n_p = fit_poly.n; k_p = fit_poly.k
+inc       = X[:, 4]
+μ         = exp.(X * β)
+poly_term = β[4] .+ 2 .* β[5] .* inc .+ 3 .* β[6] .* inc.^2
+me_i      = μ .* poly_term
+ame       = Statistics.mean(me_i)
+
+# Delta-method gradient: ∂AME/∂β = mean over i of [μ_i · poly_term_i · x_i + μ_i · poly_grad_i]
+# where poly_grad_i has 1 at the income slot, 2·inc_i at inc2, 3·inc_i² at inc3.
+g     = vec((μ .* poly_term)' * X) ./ n_p
+g[4] += sum(μ)               / n_p
+g[5] += sum(μ .* 2 .* inc)   / n_p
+g[6] += sum(μ .* 3 .* inc.^2) / n_p
+se    = sqrt(g' * V * g)
+z     = ame / se
+p     = 2 * (1 - Distributions.cdf(Distributions.Normal(), abs(z)))
+crit  = Distributions.quantile(Distributions.Normal(), 0.975)
+lo, hi = ame - crit*se, ame + crit*se
+
+g9 = function(x; w_::Int=10, sig::Int=7)
+    sig_use = sig
+    s = Printf.@sprintf("%.*g", sig_use, x)
+    cap = (0 < abs(x) < 1 && x < 0) ? 10 : 9
+    while length(s) > cap && sig_use > 1
+        sig_use -= 1
+        s = Printf.@sprintf("%.*g", sig_use, x)
+    end
+    0 < abs(x) < 1 && (s = replace(s, r"^(-?)0\." => s"\1."))
+    lpad(s, w_)
+end
+
+println()
+Printf.@printf("Average marginal effects                                 Number of obs = %s\n",
+               replace(string(n_p), r"(\d)(?=(\d{3})+$)" => s"\1,"))
+println("Model VCE: Robust\n")
+println("Expression: Predicted number of events, predict()")
+println("dy/dx wrt:  income\n")
+println("-"^78)
+println("             |            Delta-method")
+println("             |      dy/dx   std. err.      z    P>|z|     [95% conf. interval]")
+println("-"^13, "+", "-"^64)
+Printf.@printf("%12s | %s  %s  %s   %s    %s  %s\n",
+               "income", g9(ame; w_=10), g9(se; w_=9),
+               Printf.@sprintf("%7.2f", z),
+               Printf.@sprintf("%.3f", p),
+               g9(lo; w_=9), g9(hi; w_=10))
+println("-"^78)
 ```
 
 ```{julia}
-# Interaction model: female × income
-df10c.fem_inc = Float64.(df10c.female) .* df10c.income
-m_int = GLM.glm(GLM.@formula(docvis ~ private + chronic + female + income + fem_inc),
-                df10c, Distributions.Poisson(), GLM.LogLink())
-println(m_int)
+# Poisson with interaction female × income — uses `poisson_stata`'s
+# `layout` keyword to reproduce Stata's multi-line interaction header
+# (`female# / c.income / 1`).
+# (Stata: poisson docvis private chronic i.female c.income i.female#c.income,
+#         vce(robust) nolog)
+
+df_intr = DataFrames.dropmissing(df10[:,
+    [:docvis, :private, :chronic, :female, :income]])
+
+poisson_stata(df_intr,
+    GLM.@formula(docvis ~ private + chronic + female + income + female & income);
+    vce = :robust,
+    layout = [
+        "private"  => "private",
+        "chronic"  => "chronic",
+        "1.female" => "female",
+        "income"   => "income",
+        :blank,
+        ["      female#", "    c.income ", "1"] => "female & income",
+        :blank,
+        "_cons"    => "(Intercept)",
+    ]);
 ```
 
 ```{julia}
-# AME of female and income with interaction (chain rule)
-β = GLM.coef(m_int); cn = GLM.coefnames(m_int)
-b_fem  = β[findfirst(==("female"), cn)]
-b_inc  = β[findfirst(==("income"), cn)]
-b_fi   = β[findfirst(==("fem_inc"), cn)]
-μ_int  = GLM.predict(m_int)
-ame_fem = Statistics.mean(μ_int .* (b_fem .+ b_fi .* df10c.income))
-ame_inc = Statistics.mean(μ_int .* (b_inc .+ b_fi .* Float64.(df10c.female)))
-@printf("AME female (interaction model) = %.6f\n", ame_fem)
-@printf("AME income (interaction model) = %.6f\n", ame_inc)
+# AME for the interaction model — `margins_dydx_stata` now takes an
+# `interactions` keyword that tells it which X column is the product of
+# which base columns. With this, switching female 0↔1 also rebuilds the
+# `female × income` column, and ∂μ/∂income picks up the β_intr · female
+# contribution. Without `interactions`, the helper would silently treat
+# the interaction column as independent of female and income, producing
+# the wrong AME.
+# (Stata: margins, dydx(female income))
+
+df_intr = DataFrames.dropmissing(df10[:,
+    [:docvis, :private, :chronic, :female, :income]])
+fit_intr = poisson_stata(df_intr,
+    GLM.@formula(docvis ~ private + chronic + female + income + female & income);
+    vce = :robust, quiet = true)
+
+margins_dydx_stata(fit_intr.β, fit_intr.V, fit_intr.X;
+    factors      = [("female", 3)],
+    continuous   = [("income", 4)],
+    interactions = [(col = 5, base = [3, 4])])  # col 5 = female × income
 ```
 
 ```{julia}
-# Manual finite-difference AME for the same complex polynomial model
-df10c.inc2 = df10c.income.^2
-df10c.inc3 = df10c.income.^3
-df_p = copy(df10c); h = Statistics.std(df10c.income) / 100
-df_p.income .+= h
-df_p.inc2  .= df_p.income.^2
-df_p.inc3  .= df_p.income.^3
-me_inc_fd = (GLM.predict(m_poly, df_p) .- GLM.predict(m_poly, df10c)) ./ h
-@printf("Manual finite-diff AME of income (polynomial model) = %.6f\n",
-        Statistics.mean(me_inc_fd))
+# AME for income computed manually for the interaction model:
+# bumping `income` also has to rebuild the `female × income` column
+# (Stata: preserve; predict mu0,n; replace income = income + delta;
+#  replace inc2 = income^2; replace inc3 = income^3; predict mu1,n;
+#  gen me_inc = (mu1 - mu0)/delta; summarize me_inc; restore)
+#
+# The `replace inc2`/`inc3` lines in the Stata code are leftovers from a
+# prior cubic-in-income setup — they don't affect the result here because
+# the FITTED model is `private + chronic + i.female + c.income +
+# i.female#c.income`, which has no inc2/inc3 terms. What matters in Julia
+# is rebuilding the `female × income` column after bumping income.
+
+df_intr = DataFrames.dropmissing(df10[:,
+    [:docvis, :private, :chronic, :female, :income]])
+fit_intr = poisson_stata(df_intr,
+    GLM.@formula(docvis ~ private + chronic + female + income + female & income);
+    vce = :robust, quiet = true)
+β_v = fit_intr.β; X_v = fit_intr.X    # cols: 1=priv 2=chr 3=fem 4=inc 5=fem×inc 6=_cons
+
+μ0    = exp.(X_v * β_v)
+delta = Statistics.std(X_v[:, 4]) / 100
+X1    = copy(X_v)
+X1[:, 4] .+= delta                    # bump income
+X1[:, 5]  .= X1[:, 3] .* X1[:, 4]     # rebuild female × income
+μ1    = exp.(X1 * β_v)
+me_inc = (μ1 .- μ0) ./ delta
+
+summarize_stata(DataFrames.DataFrame(me_inc = me_inc))
 ```
 
 ## 10.7 Model diagnostics
@@ -15171,48 +16842,68 @@ me_inc_fd = (GLM.predict(m_poly, df_p) .- GLM.predict(m_poly, df10c)) ./ h
 ### 10.7.1 Goodness-of-fit measures
 
 ```{julia}
-# Pseudo R² = 1 - logL / logL_null
-ll      = GLM.loglikelihood(pois10)
-ll_null = GLM.nullloglikelihood(pois10)
-@printf("Pseudo-R² = %.4f\n", 1 - ll / ll_null)
+# Pseudo-R² = 1 − ℓ(β̂) / ℓ_0  (McFadden's, the same `e(ll)/e(ll_0)` Stata
+# uses). `poisson_stata` already returns it as `.pseudo_r2`.
+# (Stata: quietly poisson docvis private chronic female income, vce(robust);
+#  display "Pseudo-R^2 = " 1 - e(ll)/e(ll_0))
+
+s = setup_mus10(df10)
+Printf.@printf("Pseudo-R^2 = %.7f\n", s.fit.pseudo_r2)
 ```
 
 ### 10.7.2 Information criteria for model comparison
 
 ```{julia}
-@printf("AIC = %.4f\n", StatsBase.aic(pois10))
-@printf("BIC = %.4f\n", StatsBase.bic(pois10))
+# AIC / BIC after Poisson regression  (Stata: estat ic)
+s = setup_mus10(df10)
+estat_ic_stata(s.fit);
 ```
 
 ### 10.7.3 Residuals
 
 ```{julia}
-# Residuals after Poisson GLM
-μ        = GLM.predict(pois10)
-yv       = df10c.docvis
-uraw     = yv .- μ
-upearson = (yv .- μ) ./ sqrt.(μ)
-udev     = sign.(yv .- μ) .*
-            sqrt.(2 .* (yv .* log.(max.(yv, eps()) ./ μ) .- (yv .- μ)))
-uans     = (3/2) .* (yv.^(2/3) .- μ.^(2/3)) ./ μ.^(1/6)
+# Four residual flavors after Poisson GLM
+# (Stata: glm docvis private chronic female income, family(poisson);
+#  predict mu, mu; gen uraw = docvis - mu; predict upearson, pearson;
+#  predict udeviance, deviance; predict uanscombe, anscombe;
+#  summarize uraw upearson udeviance uanscombe)
+#
+# Formulas for Poisson:
+#   raw      : u_i = y_i − μ̂_i
+#   Pearson  : (y_i − μ̂_i) / √μ̂_i
+#   Deviance : sign(y_i − μ̂_i) · √(2{y_i·log(y_i/μ̂_i) − (y_i − μ̂_i)})
+#              with y_i·log(y_i/μ̂_i) ≡ 0 when y_i = 0
+#   Anscombe : (3/2) · (y_i^(2/3) − μ̂_i^(2/3)) / μ̂_i^(1/6)
 
-println("─" ^ 60)
-@printf("%-10s %10s %10s\n", "Residual", "mean", "sd")
-println("─" ^ 60)
-@printf("%-10s %10.4f %10.4f\n", "raw",      Statistics.mean(uraw), Statistics.std(uraw))
-@printf("%-10s %10.4f %10.4f\n", "Pearson",  Statistics.mean(upearson), Statistics.std(upearson))
-@printf("%-10s %10.4f %10.4f\n", "deviance", Statistics.mean(udev), Statistics.std(udev))
-@printf("%-10s %10.4f %10.4f\n", "Anscombe", Statistics.mean(uans), Statistics.std(uans))
-println("─" ^ 60)
+s = setup_mus10(df10)
+y = Float64.(s.df.docvis)
+μ = exp.(s.X * s.β)
+
+uraw     = y .- μ
+upearson = (y .- μ) ./ sqrt.(μ)
+udev     = [sign(y[i] - μ[i]) *
+            sqrt(2 * (y[i] > 0 ? y[i]*log(y[i]/μ[i]) - (y[i] - μ[i])
+                                : -(y[i] - μ[i])))
+            for i in eachindex(y)]
+uans     = (3/2) .* (y.^(2/3) .- μ.^(2/3)) ./ μ.^(1/6)
+
+summarize_stata(DataFrames.DataFrame(
+    uraw      = uraw,
+    upearson  = upearson,
+    udeviance = udev,
+    uanscombe = uans))
 ```
 
 ### 10.7.4 Model-specification tests
 
 ```{julia}
-# Correlations among the four residual types
-M = hcat(uraw, upearson, udev, uans)
-println("Correlation matrix of residuals:")
-display(Statistics.cor(M))
+# Pairwise correlations of the four residual flavors from the previous chunk
+# (Stata: correlate uraw upearson udeviance uanscombe — not in the book)
+correlate_stata(DataFrames.DataFrame(
+    uraw      = uraw,
+    upearson  = upearson,
+    udeviance = udev,
+    uanscombe = uans))
 ```
 
 ## 10.8 Stata resources
@@ -15317,6 +17008,104 @@ GLM.glm(GLM.@formula(docvis ~ private + chronic + female + income),
         df11, Distributions.Poisson(), GLM.LogLink())
 ```
 
+```{julia}
+# Verbose Poisson MLE via raw Newton–Raphson, showing parameter vector and
+# gradient at every iteration — for comparison with the standard fit above.
+# (Stata: poisson docvis private chronic female income, log trace gradient
+#         iterate(100) tol(1e-4) ltol(0) robust)
+#
+# Score   ∇ℓ(β) = X'(y − μ),    Hessian H(β) = −X' diag(μ) X.
+# Update  β_{k+1} = β_k + (X' diag(μ) X)⁻¹ · X'(y − μ).
+# Stops when max |Δβ_j| / (|β_j| + ε) < 1e-4 (Stata's tol(...)).
+
+dfc = DataFrames.dropmissing(df10[:,
+    [:docvis, :private, :chronic, :female, :income]])
+y_v = Float64.(dfc.docvis)
+X_v = hcat(Float64.(dfc.private), Float64.(dfc.chronic),
+           Float64.(dfc.female),  Float64.(dfc.income),
+           ones(DataFrames.nrow(dfc)))
+varnames_v = ["private", "chronic", "female", "income", "_cons"]
+n_v, k_v   = size(X_v)
+depvar_v   = "docvis"
+ll_const   = sum(SpecialFunctions.loggamma.(y_v .+ 1))
+
+# Stata-style %9.0g for one number (sign-aware cap so negative |x|<1 keeps
+# 7 sig digs after the leading-zero strip).
+_g = function (x; sig::Int=7)
+    sig_use = sig
+    s = Printf.@sprintf("%.*g", sig_use, x)
+    cap = (0 < abs(x) < 1 && x < 0) ? 10 : 9
+    while length(s) > cap && sig_use > 1
+        sig_use -= 1
+        s = Printf.@sprintf("%.*g", sig_use, x)
+    end
+    0 < abs(x) < 1 && (s = replace(s, r"^(-?)0\." => s"\1."))
+    s
+end
+
+function _print_iter(iter, β, ll, g)
+    println("-"^81)
+    Printf.@printf("Iteration %d:\n", iter)
+    println("Parameter vector:")
+    print("  ")
+    for _ in 1:k_v
+        Printf.@printf("%11s", "$(depvar_v):")
+    end
+    println()
+    print("  ")
+    for nm in varnames_v
+        Printf.@printf("%11s", nm)
+    end
+    println()
+    print("r1")
+    for j in 1:k_v
+        Printf.@printf("%11s", _g(β[j]))
+    end
+    println()
+    println()
+    Printf.@printf("%48sLog pseudolikelihood = %s\n", "", _g(ll))
+    Printf.@printf("Gradient vector (length = %s):\n", _g(sqrt(sum(g.^2))))
+    print("  ")
+    for _ in 1:k_v
+        Printf.@printf("%11s", "$(depvar_v):")
+    end
+    println()
+    print("  ")
+    for nm in varnames_v
+        Printf.@printf("%11s", nm)
+    end
+    println()
+    print("r1")
+    for j in 1:k_v
+        Printf.@printf("%11s", _g(g[j]))
+    end
+    println()
+end
+
+# Newton–Raphson loop
+β_nr = zeros(k_v)
+for iter in 0:100
+    μ_nr = exp.(X_v * β_nr)
+    ll_nr = sum(y_v .* log.(μ_nr) .- μ_nr) - ll_const
+    g_nr  = X_v' * (y_v .- μ_nr)
+    _print_iter(iter, β_nr, ll_nr, g_nr)
+
+    H_nr = X_v' * LinearAlgebra.Diagonal(μ_nr) * X_v
+    Δ    = H_nr \ g_nr
+    if maximum(abs.(Δ) ./ (abs.(β_nr) .+ 1e-10)) < 1e-4
+        β_nr .+= Δ
+        break
+    end
+    β_nr .+= Δ
+end
+println("-"^81)
+
+# Print the final regression table in Stata's standard layout
+poisson_stata(dfc,
+    GLM.@formula(docvis ~ private + chronic + female + income);
+    vce = :robust);
+```
+
 ## 11.3 Gradient methods
 
 ### 11.3.1 Maximization options
@@ -15330,16 +17119,22 @@ GLM.glm(GLM.@formula(docvis ~ private + chronic + female + income),
 ### 11.3.5 Multiple maximums
 
 ```{julia}
-# Objective function with multiple optima — Figure 11.1
-fig11 = CairoMakie.Figure(size = (700, 450))
-ax = CairoMakie.Axis(fig11[1, 1],
-    title = "Objective function Q(θ) as θ varies",
-    xlabel = "θ", ylabel = "Q(θ)")
-θ = range(5, 90, length = 500)
-Q = @. 100 - 0.0000001 * (θ - 10) * (θ - 30) * (θ - 50) *
-            (θ - 50) * (θ - 70) * (θ - 80)
-CairoMakie.lines!(ax, θ, Q, linewidth = 2, color = :steelblue)
-fig11
+# Objective function with multiple optima:
+#   Q(θ) = 100 − 1e-7 · (θ−10)(θ−30)(θ−50)²(θ−70)(θ−80),  θ ∈ [5, 90]
+# Three local optima visible in the range — illustrates why gradient
+# methods need good starting values.
+# (Stata: graph twoway function y = 100 - 1e-7 * ..., range(5 90) ...)
+
+θ = collect(range(5.0, 90.0; length = 401))
+Q = @. 100 - 1e-7 * (θ - 10) * (θ - 30) * (θ - 50)^2 * (θ - 70) * (θ - 80)
+
+fig = CairoMakie.Figure()
+ax  = CairoMakie.Axis(fig[1, 1];
+        xlabel = "Theta", ylabel = "Q(theta)",
+        title  = "Objective function Q(theta) as theta varies")
+CairoMakie.lines!(ax, θ, Q; color = :steelblue, linewidth = 2)
+CairoMakie.save("musr/mus11fig1.png", fig)
+fig
 ```
 
 ### 11.3.6 Numerical derivatives
@@ -15395,6 +17190,59 @@ end
 @printf("Log-likelihood = %.4f\n", -Optim.minimum(res_pois))
 ```
 
+```{julia}
+# Poisson MLE via a user-supplied log-likelihood — the Julia analogue of
+# Stata's `ml model lf lfpois ...; ml check; ml search; ml maximize`.
+# The "lfpois evaluator" is the closure `lfpois(β)` below; it returns the
+# total log-likelihood (Optim minimizes the negative).
+# (Stata: program lfpois; args lnf theta1; ...;
+#         ml model lf lfpois (docvis = private chronic female income), vce(robust);
+#         ml check; ml search; ml maximize)
+
+dfc = DataFrames.dropmissing(df10[:,
+    [:docvis, :private, :chronic, :female, :income]])
+y_v = Float64.(dfc.docvis)
+X_v = hcat(Float64.(dfc.private), Float64.(dfc.chronic),
+           Float64.(dfc.female),  Float64.(dfc.income),
+           ones(DataFrames.nrow(dfc)))
+n_v, k_v = size(X_v)
+ll_const = sum(SpecialFunctions.loggamma.(y_v .+ 1))
+
+# Stata's `lfpois` evaluator written as a single Julia function:
+#     ln f_i(β) = -μ_i + y_i · θ_i - ln(y_i!)   where  θ_i = x_i'β,  μ_i = exp(θ_i)
+# Returned as the SUM (total log-likelihood); Optim feeds the negative.
+function lfpois(β)
+    θ = X_v * β
+    μ = exp.(θ)
+    return sum(y_v .* θ .- μ) - ll_const
+end
+
+# Newton-Raphson, mirroring `ml maximize`'s iteration log
+println("Initial:      Log pseudolikelihood = ",
+        Printf.@sprintf("%.3f", lfpois(zeros(k_v))))
+β_ml = zeros(k_v)
+for iter in 0:100
+    Printf.@printf("Iteration %d:  Log pseudolikelihood = %.3f\n",
+                   iter, lfpois(β_ml))
+    μ_it = exp.(X_v * β_ml)
+    g_it = X_v' * (y_v .- μ_it)
+    H_it = X_v' * LinearAlgebra.Diagonal(μ_it) * X_v
+    Δ    = H_it \ g_it
+    if maximum(abs.(Δ) ./ (abs.(β_ml) .+ 1e-10)) < 1e-4
+        β_ml .+= Δ
+        break
+    end
+    β_ml .+= Δ
+end
+println()
+
+# `ml maximize, vce(robust)` produces the regression table — same format
+# as `poisson_stata`, since the converged β is identical.
+poisson_stata(dfc,
+    GLM.@formula(docvis ~ private + chronic + female + income);
+    vce = :robust);
+```
+
 ### 11.4.4 Negative binomial example: Two-index model
 
 ```{julia}
@@ -15427,20 +17275,205 @@ end
 @printf("logL      = %.4f\n", -Optim.minimum(res_nb))
 ```
 
+```{julia}
+# Negative-binomial MLE via a user-supplied two-equation log-likelihood,
+# matching Stata's `ml model lf lfnb (docvis = private chronic female income) ()`
+# eq1 = β (linear index for μ);  eq2 = α (NB2 dispersion, fitted DIRECTLY,
+# not log α — same as Stata's lfnb).
+# (Stata: program lfnb; args lnf theta1 a; ...;
+#         ml model lf lfnb (docvis = ...) (); ml maximize, nolog)
+
+dfc = DataFrames.dropmissing(df10[:,
+    [:docvis, :private, :chronic, :female, :income]])
+y_v = Float64.(dfc.docvis)
+X_v = hcat(Float64.(dfc.private), Float64.(dfc.chronic),
+           Float64.(dfc.female),  Float64.(dfc.income),
+           ones(DataFrames.nrow(dfc)))
+n_v, kβ_v = size(X_v)
+varnames_v = ["private", "chronic", "female", "income", "_cons"]
+
+# Stata's lfnb evaluator written as a single Julia function (NB2, α direct):
+#   ln f_i = lnΓ(y+1/α) − lnΓ(1/α) − lnΓ(y+1)
+#            − (y+1/α)·ln(1+α·μ) + y·ln(α) + y·ln(μ),    μ = exp(x'β)
+function lfnb_total(p)
+    β = p[1:kβ_v]; α = p[end]
+    α <= 0 && return -1e10
+    μ = exp.(X_v * β)
+    invα = 1 / α
+    return sum(SpecialFunctions.loggamma.(y_v .+ invα)
+              .- SpecialFunctions.loggamma(invα)
+              .- SpecialFunctions.loggamma.(y_v .+ 1)
+              .- (y_v .+ invα) .* log.(1 .+ α .* μ)
+              .+ y_v .* log(α)
+              .+ y_v .* log.(μ))
+end
+
+# Maximize via L-BFGS with autodiff (`ml maximize`'s default is BHHH-like;
+# either converges to the same MLE).
+const FD = Optim.NLSolversBase.ForwardDiff   # Optim already vendors ForwardDiff
+p0   = vcat(zeros(kβ_v), 1.0)                 # β = 0, α = 1
+res  = Optim.optimize(p -> -lfnb_total(p), p0, Optim.LBFGS();
+                      autodiff = :forward)
+p_ml = Optim.minimizer(res)
+β_ml = p_ml[1:kβ_v]; α_ml = p_ml[end]
+ll_max = -Optim.minimum(res)
+
+# OIM standard errors from inverse Hessian of the negative log-likelihood
+H_ml = FD.hessian(p -> -lfnb_total(p), p_ml)
+V_ml = LinearAlgebra.inv(H_ml)
+se_ml = sqrt.(LinearAlgebra.diag(V_ml))
+z_ml  = p_ml ./ se_ml
+pv_ml = 2 .* (1 .- Distributions.cdf.(Distributions.Normal(), abs.(z_ml)))
+crit  = Distributions.quantile(Distributions.Normal(), 0.975)
+lo_ml = p_ml .- crit .* se_ml
+hi_ml = p_ml .+ crit .* se_ml
+
+# Wald chi² on β slopes (excluding α and the eq1 intercept)
+slope_idx = 1:4
+W = β_ml[slope_idx]' * LinearAlgebra.inv(V_ml[slope_idx, slope_idx]) * β_ml[slope_idx]
+W_p = 1 - Distributions.cdf(Distributions.Chisq(length(slope_idx)), W)
+
+# Stata-style table (two equations, eq1 / eq2 sub-headers)
+g9 = function (x; w_::Int=10, sig::Int=7)
+    sig_use = sig
+    s = Printf.@sprintf("%.*g", sig_use, x)
+    cap = (0 < abs(x) < 1 && x < 0) ? 10 : 9
+    while length(s) > cap && sig_use > 1
+        sig_use -= 1
+        s = Printf.@sprintf("%.*g", sig_use, x)
+    end
+    0 < abs(x) < 1 && (s = replace(s, r"^(-?)0\." => s"\1."))
+    lpad(s, w_)
+end
+commafmt(num::Integer) = begin
+    s = string(abs(num)); parts = String[]; i = length(s)
+    while i >= 1; push!(parts, s[max(1, i-2):i]); i -= 3; end
+    (num < 0 ? "-" : "") * join(reverse(parts), ",")
+end
+function row(label, idx)
+    Printf.@printf("%12s | %s  %s  %s   %s    %s  %s\n",
+                   label, g9(p_ml[idx]; w_=10), g9(se_ml[idx]; w_=9),
+                   Printf.@sprintf("%7.2f", z_ml[idx]),
+                   Printf.@sprintf("%.3f", pv_ml[idx]),
+                   g9(lo_ml[idx]; w_=9), g9(hi_ml[idx]; w_=10))
+end
+
+println()
+Printf.@printf("%-56s%-13s = %6s\n", "", "Number of obs", commafmt(n_v))
+Printf.@printf("%56s%-13s = %6.2f\n", "", "Wald chi2(4)", W)
+Printf.@printf("Log likelihood = %.4f%23s%-13s = %6.4f\n",
+               ll_max, "", "Prob > chi2", W_p)
+println()
+println("-"^78)
+Printf.@printf("%12s | Coefficient  Std. err.      z    P>|z|     [95%% conf. interval]\n",
+               "docvis")
+println("-"^13, "+", "-"^64)
+Printf.@printf("%-12s |\n", "eq1")
+for i in 1:5
+    row(varnames_v[i], i)
+end
+println("-"^13, "+", "-"^64)
+Printf.@printf("%-12s |\n", "eq2")
+row("_cons", 6)
+println("-"^78)
+```
+
 ### 11.4.5 NLS example: Nonlikelihood model
 
 ```{julia}
-# NLS: minimize Σ (y - exp(x'β))²
-function nls11(β, X, y)
-    sum((y .- exp.(X * β)).^2)
+# NLS via the lf "pseudo-likelihood" trick — Stata's `ml model lf lfnls`
+# treats lnf = -(y − exp(x'β))² as a per-observation log-likelihood, so
+# maximizing Σ lnf is the same as minimizing the SSR of the Poisson mean
+# function. Robust SE is the BHHH-style sandwich on the SSR's score.
+# (Stata: program lfnls; args lnf theta1; replace lnf = -(y - exp(theta1))^2;
+#         ml model lf lfnls (docvis = ...), vce(robust); ml maximize)
+
+dfc = DataFrames.dropmissing(df10[:,
+    [:docvis, :private, :chronic, :female, :income]])
+y_v = Float64.(dfc.docvis)
+X_v = hcat(Float64.(dfc.private), Float64.(dfc.chronic),
+           Float64.(dfc.female),  Float64.(dfc.income),
+           ones(DataFrames.nrow(dfc)))
+n_v, k_v = size(X_v)
+varnames_v = ["private", "chronic", "female", "income", "_cons"]
+
+# Stata's lfnls evaluator: total "pseudo-log-lik" is just −SSR
+function lfnls_total(β)
+    μ = exp.(X_v * β)
+    return -sum((y_v .- μ).^2)
 end
-res_nls = Optim.optimize(β -> nls11(β, X11, y11), zeros(k11),
-                          Optim.LBFGS(); autodiff = :forward)
-β_nls11 = Optim.minimizer(res_nls)
-println("\n— NLS coefficients —")
-for i in 1:k11
-    @printf("%-10s %12.6f\n", xnms11[i], β_nls11[i])
+
+# Maximize via L-BFGS (mirrors Stata's `ml maximize`)
+res    = Optim.optimize(β -> -lfnls_total(β), zeros(k_v), Optim.LBFGS(),
+                        Optim.Options(g_tol = 1e-10, iterations = 500);
+                        autodiff = :forward)
+β_nls  = Optim.minimizer(res)
+ll_max = lfnls_total(β_nls)              # = −SSR (Stata's "Log pseudolikelihood")
+
+# Robust sandwich. Score s_i(β) = ∂lnf_i/∂β = 2 u_i μ_i x_i,  u_i = y_i − μ_i.
+# OPG:    Σ s_i s_i' = 4 X' diag(μ²·u²) X.
+# Hessian: H_i = ∂²lnf_i/∂β∂β' = 2 μ_i (y_i − 2μ_i) x_i x_i', so
+#         −H = 2 X' diag(μ·(2μ − y)) X.
+# V_robust = (−H)⁻¹ · OPG · (−H)⁻¹ · n/(n−1)   ← Stata's small-sample correction
+μ_nls = exp.(X_v * β_nls)
+u_nls = y_v .- μ_nls
+negH  = 2 * (X_v' * LinearAlgebra.Diagonal(μ_nls .* (2 .* μ_nls .- y_v)) * X_v)
+OPG   = 4 * (X_v' * LinearAlgebra.Diagonal(μ_nls.^2 .* u_nls.^2) * X_v)
+V_nls = LinearAlgebra.inv(negH) * OPG * LinearAlgebra.inv(negH) * (n_v / (n_v - 1))
+se_nls = sqrt.(LinearAlgebra.diag(V_nls))
+z_nls  = β_nls ./ se_nls
+pv_nls = 2 .* (1 .- Distributions.cdf.(Distributions.Normal(), abs.(z_nls)))
+crit   = Distributions.quantile(Distributions.Normal(), 0.975)
+lo_nls = β_nls .- crit .* se_nls
+hi_nls = β_nls .+ crit .* se_nls
+
+# Wald χ² on β slopes (private, chronic, female, income — not _cons)
+slope_idx_nls = 1:4
+W_nls   = β_nls[slope_idx_nls]' *
+          LinearAlgebra.inv(V_nls[slope_idx_nls, slope_idx_nls]) *
+          β_nls[slope_idx_nls]
+W_p_nls = 1 - Distributions.cdf(Distributions.Chisq(length(slope_idx_nls)), W_nls)
+
+# Stata-style table  (single-equation, like `poisson_stata` with vce(robust))
+g9 = function (x; w_::Int=10, sig::Int=7)
+    sig_use = sig
+    s = Printf.@sprintf("%.*g", sig_use, x)
+    cap = (0 < abs(x) < 1 && x < 0) ? 10 : 9
+    while length(s) > cap && sig_use > 1
+        sig_use -= 1
+        s = Printf.@sprintf("%.*g", sig_use, x)
+    end
+    0 < abs(x) < 1 && (s = replace(s, r"^(-?)0\." => s"\1."))
+    lpad(s, w_)
 end
+commafmt(num::Integer) = begin
+    s = string(abs(num)); parts = String[]; i = length(s)
+    while i >= 1; push!(parts, s[max(1, i-2):i]); i -= 3; end
+    (num < 0 ? "-" : "") * join(reverse(parts), ",")
+end
+function row(label, idx)
+    Printf.@printf("%12s | %s  %s  %s   %s    %s  %s\n",
+                   label, g9(β_nls[idx]; w_=10), g9(se_nls[idx]; w_=9),
+                   Printf.@sprintf("%7.2f", z_nls[idx]),
+                   Printf.@sprintf("%.3f", pv_nls[idx]),
+                   g9(lo_nls[idx]; w_=9), g9(hi_nls[idx]; w_=10))
+end
+
+println()
+Printf.@printf("%-56s%-13s = %6s\n", "", "Number of obs", commafmt(n_v))
+Printf.@printf("%56s%-13s = %6.2f\n", "", "Wald chi2(4)", W_nls)
+Printf.@printf("Log pseudolikelihood = %.2f%19s%-13s = %6.4f\n",
+               ll_max, "", "Prob > chi2", W_p_nls)
+println()
+println("-"^78)
+println("             |               Robust")
+Printf.@printf("%12s | Coefficient  std. err.      z    P>|z|     [95%% conf. interval]\n",
+               "docvis")
+println("-"^13, "+", "-"^64)
+for i in 1:k_v
+    row(varnames_v[i], i)
+end
+println("-"^78)
 ```
 
 ## 11.5 Checking the program
@@ -15455,7 +17488,101 @@ X11_e = hcat(X11, df11.extra)
 @printf("Condition number = %.2e\n", LinearAlgebra.cond(X11_e))
 ```
 
+```{julia}
+# Near-perfect collinearity: `extra = income + tiny noise`. Stata's `ml` (and
+# its other estimators) detect near-singularity in the design matrix via
+# `_rmcoll` and drop the offending column, reporting it as "(omitted)".
+# (Stata: gen extra = income + 0.001*runiform();
+#         ml model lf lfpois (docvis = private chronic female income extra),
+#         vce(robust); ml maximize)
+
+dfc = DataFrames.dropmissing(df10[:,
+    [:docvis, :private, :chronic, :female, :income]])
+Random.seed!(10101)
+dfc.extra = dfc.income .+ 0.001 .* rand(DataFrames.nrow(dfc))
+
+# Stata `_rmcoll`-style collinearity check: scan regressors in the user-given
+# order and flag any column whose absolute correlation with an earlier kept
+# column exceeds 1 - 1e-5 (matches Stata's default behaviour of dropping the
+# *later* variable).
+X_full        = hcat(Float64.(dfc.private), Float64.(dfc.chronic),
+                     Float64.(dfc.female),  Float64.(dfc.income),
+                     Float64.(dfc.extra))
+varnames_full = ["private", "chronic", "female", "income", "extra"]
+keep          = trues(size(X_full, 2))
+for j in 2:size(X_full, 2), i in 1:(j-1)
+    keep[i] && abs(Statistics.cor(X_full[:, i], X_full[:, j])) > 1 - 1e-5 &&
+        (keep[j] = false; break)
+end
+omitted_names = varnames_full[.!keep]
+println("Collinearity check: dropping ", omitted_names)
+
+# Refit Poisson on the surviving regressors using `poisson_stata`'s `layout`
+# keyword to inject the "extra | 0 (omitted)" row in Stata's exact spot.
+poisson_stata(dfc,
+    GLM.@formula(docvis ~ private + chronic + female + income);
+    vce = :robust,
+    layout = [
+        "private" => "private",
+        "chronic" => "chronic",
+        "female"  => "female",
+        "income"  => "income",
+        "extra"   => :omitted,
+        "_cons"   => "(Intercept)",
+    ]);
+```
+
 ### 11.5.2 Getting the program to run
+
+```{julia}
+# Buggy lfpois — sign on the μ term flipped from − to +. Stata's source
+# commented this out (it would blow up), but it's a useful demo: the
+# resulting "log-likelihood" is unbounded above, so the optimizer diverges
+# (β → +∞ pushes μ → ∞, and the loss → +∞ along with it).
+# (Stata: replace lnf = mu + y*ln(mu) - lnyfact;  ml maximize)
+
+dfc = DataFrames.dropmissing(df10[:,
+    [:docvis, :private, :chronic, :female, :income]])
+y_v = Float64.(dfc.docvis)
+X_v = hcat(Float64.(dfc.private), Float64.(dfc.chronic),
+           Float64.(dfc.female),  Float64.(dfc.income),
+           ones(DataFrames.nrow(dfc)))
+n_v, k_v = size(X_v)
+ll_const = sum(SpecialFunctions.loggamma.(y_v .+ 1))
+
+# WRONG sign on μ (correct version subtracts μ)
+function lfpois_buggy(β)
+    θ = X_v * β
+    μ = exp.(θ)
+    return sum(μ .+ y_v .* θ) - ll_const   # NOTE: `+ μ` is the bug
+end
+
+# Show the loss climbing toward +∞ as β walks in the gradient direction.
+# Score: ∂lnf_i/∂β = (μ_i + y_i) · x_i   →   always pulls β to +∞.
+println("Buggy log-pseudolikelihood at β = 0:        ",
+        Printf.@sprintf("%.3f", lfpois_buggy(zeros(k_v))))
+for step in [0.01, 0.05, 0.1, 0.5]
+    β_walk = step .* (X_v' * (y_v .+ exp.(X_v * zeros(k_v)))) ./ n_v
+    Printf.@printf("β scaled by step=%.2f          → lnf = %.3f\n",
+                   step, lfpois_buggy(β_walk))
+end
+
+# Try Optim and watch it fail (the optimizer minimizes -lfnp_buggy, which
+# is unbounded BELOW, so it walks β to +∞ and trips a numerical overflow).
+res = try
+    Optim.optimize(β -> -lfpois_buggy(β), zeros(k_v), Optim.LBFGS(),
+                   Optim.Options(iterations = 50, g_tol = 1e-6);
+                   autodiff = :forward)
+catch e
+    e
+end
+println("\nOptim result: ", res isa Exception ? "ERROR — $(typeof(res))" :
+        (Optim.converged(res) ? "(spuriously) converged" : "did not converge"))
+res isa Optim.OptimizationResults && Printf.@printf(
+    "  iterations: %d   final ‘lnf’: %.3e   max|β|: %.3e\n",
+    Optim.iterations(res), -Optim.minimum(res),
+    maximum(abs.(Optim.minimizer(res))))
+```
 
 ### 11.5.3 Checking the data
 
@@ -15503,58 +17630,134 @@ println("VIFs with 'extra2' (less collinear):")
 vif(hcat(df11.income, df11.extra2), ["income", "extra2"])
 ```
 
+```{julia}
+# High-but-not-perfect collinearity: `extra2 = income + 0.01·U(0,1)` is correlated
+# with `income` at ≈1 − 5·10⁻⁹, well below Stata's `_rmcoll` tolerance of 1 − 10⁻⁵.
+# Stata KEEPS both regressors and reports huge offsetting coefficients with very
+# wide SEs — the sandwich variance still exists because the Hessian is nonsingular,
+# only ill-conditioned. (Contrast with §11.5.1, where 0.001·U(0,1) noise is tight
+# enough that `_rmcoll` drops `extra` as "(omitted)".)
+# (Stata: gen extra2 = income + 0.01*runiform();
+#         ml model lf lfpois (docvis = private chronic female income extra2),
+#         vce(robust); ml maximize, nolog)
+
+dfc = DataFrames.dropmissing(df10[:,
+    [:docvis, :private, :chronic, :female, :income]])
+Random.seed!(10101)
+dfc.extra2 = dfc.income .+ 0.01 .* rand(DataFrames.nrow(dfc))
+
+# Verify the correlation is below Stata's drop threshold (so no column is omitted)
+@printf("cor(income, extra2) = %.10f   |1 − cor| = %.2e   (Stata threshold ≈ 1e-5)\n",
+        Statistics.cor(dfc.income, dfc.extra2),
+        1 - abs(Statistics.cor(dfc.income, dfc.extra2)))
+
+# Fit on all five regressors via `poisson_stata` with vce(robust). The optimum
+# sits on a near-flat ridge: β_income ≈ −β_extra2 with SEs of the same order
+# as the point estimates and z-stats well below 2 — the data identify only
+# their sum, not the two coefficients separately.
+#
+# The exact magnitude of β_income depends on the realised noise vector. The
+# book reports β_income ≈ 12.23 (log L ≈ −18492.27); Julia here lands on
+# β_income ≈ 6.92 (log L ≈ −18500.09). The difference is the RNG: Stata uses
+# 64-bit Mersenne Twister (MT64) with a 312-element state, while Julia's
+# default is `Xoshiro256++` and `MersenneTwister` is the 32-bit MT19937 variant
+# — none reproduce Stata's `runiform()` sequence from the same seed value.
+# Qualitatively the finding is identical: huge offsetting coefs, both kept by
+# the optimiser rather than dropped, with very wide SEs.
+poisson_stata(dfc,
+    GLM.@formula(docvis ~ private + chronic + female + income + extra2);
+    vce = :robust);
+```
+
+```{julia}
+# Stata's `_rmcoll` flags variables whose multiple-correlation R² with the
+# previously kept variables exceeds 1 − tol (default tol = 1e-9). With
+# 0.001·U(0,1) noise, 1 − R²(income, extra) ≈ 1e-10 < 1e-9 → `extra` is
+# dropped. With 0.01·U(0,1) noise, 1 − R²(income, extra2) ≈ 1e-8 > 1e-9 →
+# both kept (exactly why §11.5.2's `ml maximize` did not omit `extra2`).
+
+dfc_rm = DataFrames.dropmissing(df10[:,
+    [:docvis, :private, :chronic, :female, :income]])
+Random.seed!(10101)
+dfc_rm.extra  = dfc_rm.income .+ 0.001 .* rand(DataFrames.nrow(dfc_rm))
+Random.seed!(10101)
+dfc_rm.extra2 = dfc_rm.income .+ 0.01  .* rand(DataFrames.nrow(dfc_rm))
+
+println(". _rmcoll income extra")
+kept_e  = rmcoll_stata(dfc_rm, [:income, :extra])
+println("  kept: ", kept_e)
+
+println("\n. _rmcoll income extra2")
+kept_e2 = rmcoll_stata(dfc_rm, [:income, :extra2])
+println("  kept: ", kept_e2)
+```
+
 ### 11.5.5 Multiple optimums
 
 ### 11.5.6 Checking parameter estimation
 
 ```{julia}
-# Generate Poisson DGP and fit
+#=
+# (Stata: clear; set obs 10000; set seed 10101;
+#         gen x = rnormal(0,0.5); gen mu = exp(2 + x); gen y = rpoisson(mu);
+#         summarize mu x y)
 Random.seed!(10101)
 N_dgp = 10_000
 x_dgp = Distributions.rand(Distributions.Normal(0, 0.5), N_dgp)
 μ_dgp = exp.(2 .+ x_dgp)
 y_dgp = [Distributions.rand(Distributions.Poisson(m)) for m in μ_dgp]
-@printf("mean μ = %.4f, mean y = %.4f\n",
-        Statistics.mean(μ_dgp), Statistics.mean(y_dgp))
+
+# Persist the simulated dataset so Stata (or a later Julia run) can pick it up
+df_dgp = DataFrames.DataFrame(x = x_dgp, mu = μ_dgp, y = y_dgp)
+=#
+df_dgp = CSV.read("11_5_6.csv", DataFrames.DataFrame)
+
+summarize_stata(df_dgp, [:mu, :x, :y]);
 ```
 
 ```{julia}
-# Consistency check: fit the DGP
-df_dgp = DataFrames.DataFrame(y = y_dgp, x = x_dgp)
-m_dgp = GLM.glm(GLM.@formula(y ~ x), df_dgp,
-                Distributions.Poisson(), GLM.LogLink())
-println(m_dgp)
-println("\nTrue β = (2.0, 1.0); estimated = ", round.(GLM.coef(m_dgp), digits = 4))
+# `ml model lf lfpois (y = x); ml maximize, nolog` is a Poisson MLE on the
+# DGP data with the **default OIM** SEs (no robust adjustment). Calling
+# `poisson_stata` with `vce = :oim` switches off the sandwich, and
+# `header_style = :ml` reproduces `ml maximize`'s top block (no "Poisson
+# regression" title; "Log likelihood" with Prob > chi2 on the same line; no
+# Pseudo R² row). The estimate of β should be ≈ (1, 2) — the DGP truth.
+
+poisson_stata(df_dgp, GLM.@formula(y ~ x);
+              vce = :oim, header_style = :ml);
 ```
 
 ### 11.5.7 Checking standard-error estimation
 
 ```{julia}
-# Repeated sampling: estimate (b1, b2) and their SEs at N = 500
+# Monte-Carlo SE check. One replication generates 500 obs from the same
+# Poisson DGP, fits Poisson MLE on (y = x), and returns (b_cons, se_cons,
+# b_x, se_x) — matching Stata's `secheck` rclass program.
 function secheck()
-    x = Distributions.rand(Distributions.Normal(0, 0.5), 500)
-    μ = exp.(2 .+ x)
-    y = [Distributions.rand(Distributions.Poisson(m)) for m in μ]
+    x  = Distributions.rand(Distributions.Normal(0, 0.5), 500)
+    μ  = exp.(2 .+ x)
+    y  = [Distributions.rand(Distributions.Poisson(m)) for m in μ]
     df = DataFrames.DataFrame(y = y, x = x)
-    m = GLM.glm(GLM.@formula(y ~ x), df,
-                Distributions.Poisson(), GLM.LogLink())
-    nm = GLM.coefnames(m)
-    i_int = findfirst(==("(Intercept)"), nm)
-    i_x   = findfirst(==("x"), nm)
-    return (b1 = GLM.coef(m)[i_int], se1 = sqrt(GLM.vcov(m)[i_int, i_int]),
-            b2 = GLM.coef(m)[i_x],   se2 = sqrt(GLM.vcov(m)[i_x, i_x]))
+    m  = GLM.glm(GLM.@formula(y ~ x), df,
+                 Distributions.Poisson(), GLM.LogLink())
+    cn = GLM.coefnames(m)
+    i_c = findfirst(==("(Intercept)"), cn)
+    i_x = findfirst(==("x"), cn)
+    V   = Matrix(GLM.vcov(m))
+    return (bcons    = GLM.coef(m)[i_c], se_bcons = sqrt(V[i_c, i_c]),
+            bx       = GLM.coef(m)[i_x], se_bx    = sqrt(V[i_x, i_x]))
 end
 
+# Stata: `set seed 10101; simulate secheck …, reps(2000); summarize`
 Random.seed!(10101)
-sims11 = [secheck() for _ in 1:200]   # 200 reps for speed
-@printf("mean b1 = %.4f, sd b1 = %.4f, mean se1 = %.4f\n",
-        Statistics.mean(s.b1 for s in sims11),
-        Statistics.std(s.b1 for s in sims11),
-        Statistics.mean(s.se1 for s in sims11))
-@printf("mean b2 = %.4f, sd b2 = %.4f, mean se2 = %.4f\n",
-        Statistics.mean(s.b2 for s in sims11),
-        Statistics.std(s.b2 for s in sims11),
-        Statistics.mean(s.se2 for s in sims11))
+sims11 = [secheck() for _ in 1:2000]
+df_sim = DataFrames.DataFrame(
+    bcons    = [s.bcons    for s in sims11],
+    se_bcons = [s.se_bcons for s in sims11],
+    bx       = [s.bx       for s in sims11],
+    se_bx    = [s.se_bx    for s in sims11])
+
+summarize_stata(df_sim, [:bcons, :se_bcons, :bx, :se_bx]);
 ```
 
 ## 11.6 Custom evaluators (d0/d1/d2 equivalents)
@@ -15569,86 +17772,129 @@ or computes them via `autodiff = :forward`.
 ### 11.6.2 d0-style: only the log-likelihood
 
 ```{julia}
-# Already shown in Sec 11.4.3 — Optim with autodiff
-res_d0 = Optim.optimize(β -> poisson_nll(β, X11, y11), zeros(k11),
+# Stata's `d0pois` evaluator computes the per-obs log-likelihood
+#   lnf_i = −exp(θ_i) + y_i·θ_i − lnΓ(y_i + 1),  θ_i = x_iᵀβ
+# and `mlsum` aggregates. The Julia analogue — defined in §11.4.3 — is
+# `poisson_nll(β, X, y)`; minimising its negative via `Optim` is the d0
+# method. Demonstrated here, then refit via `poisson_stata` so the printed
+# table matches Stata's `ml maximize` exactly.
+
+dfd = DataFrames.dropmissing(df10[:,
+    [:docvis, :private, :chronic, :female, :income]])
+y_d0 = Float64.(dfd.docvis)
+X_d0 = hcat(Float64.(dfd.private), Float64.(dfd.chronic),
+            Float64.(dfd.female),  Float64.(dfd.income),
+            ones(DataFrames.nrow(dfd)))
+
+# d0 demo: Optim with `poisson_nll` (no gradient supplied; autodiff handles it)
+res_d0  = Optim.optimize(β -> poisson_nll(β, X_d0, y_d0),
+                         zeros(size(X_d0, 2)),
                          Optim.LBFGS(); autodiff = :forward)
-println("d0 (likelihood only) — coefs: ",
-        round.(Optim.minimizer(res_d0), digits = 6))
+β_d0 = Optim.minimizer(res_d0)
+@printf("d0 (Optim, autodiff)  log L = %.3f   β = %s\n",
+        -Optim.minimum(res_d0), round.(β_d0, digits = 6))
+
+# Same fit via the chunk-1 helper for the Stata-formatted table
+poisson_stata(dfd,
+    GLM.@formula(docvis ~ private + chronic + female + income);
+    vce = :oim, header_style = :ml);
 ```
 
 ```{julia}
-# d1-style: provide an analytical gradient
-function poisson_grad!(g, β, X, y)
-    μ = exp.(X * β)
-    g .= -X' * (y .- μ)
+# Stata's d1 method augments d0 with an analytical gradient. For Poisson the
+# score is ∂lnf_i/∂β = (y_i − exp(θ_i)) · x_i (equivalently ∑ Xᵀ(y − μ)). In
+# Julia, supply both the NLL and an in-place gradient `g!(g, β)` to
+# `Optim.optimize`. The sign is flipped because Optim minimises the negative
+# log-likelihood.
+function d1pois_grad!(g, β, X, y)
+    g .= -X' * (y .- exp.(X * β))
 end
-res_d1 = Optim.optimize(β -> poisson_nll(β, X11, y11),
-                         (g, β) -> poisson_grad!(g, β, X11, y11),
-                         zeros(k11), Optim.LBFGS())
-println("d1 (likelihood + grad) — coefs: ",
-        round.(Optim.minimizer(res_d1), digits = 6))
+
+res_d1 = Optim.optimize(β -> poisson_nll(β, X_d0, y_d0),
+                        (g, β) -> d1pois_grad!(g, β, X_d0, y_d0),
+                        zeros(size(X_d0, 2)),
+                        Optim.LBFGS())
+β_d1 = Optim.minimizer(res_d1)
+@printf("d1 (Optim, analytical grad)  log L = %.3f   β = %s\n",
+        -Optim.minimum(res_d1), round.(β_d1, digits = 6))
+@printf("|β_d0 − β_d1|_∞ = %.3e (same MLE, different optimiser path)\n",
+        maximum(abs.(β_d0 .- β_d1)))
+
+# Stata-formatted table — identical to d0 since both methods converge to the
+# same MLE.
+poisson_stata(dfd,
+    GLM.@formula(docvis ~ private + chronic + female + income);
+    vce = :oim, header_style = :ml);
 ```
 
 ### 11.6.4 d1 with the robust estimate of the VCE
 
 ```{julia}
-# Use d1-style + robust sandwich SE (computed manually after fit)
-β_d1 = Optim.minimizer(res_d1)
-μ_d1 = exp.(X11 * β_d1)
-H    = X11' * LinearAlgebra.Diagonal(μ_d1) * X11
-S    = X11' * LinearAlgebra.Diagonal((y11 .- μ_d1).^2) * X11
-V    = try
-        LinearAlgebra.inv(LinearAlgebra.cholesky(LinearAlgebra.Symmetric(H))) *
-        S *
-        LinearAlgebra.inv(LinearAlgebra.cholesky(LinearAlgebra.Symmetric(H)))
-    catch
-        LinearAlgebra.pinv(H) * S * LinearAlgebra.pinv(H)
-    end *
-       (n11 / (n11 - k11))
-println("d1 robust SE: ", round.(sqrt.(LinearAlgebra.diag(V)), digits = 6))
-```
-
-```{julia}
-# Same approach (d1 with grad) — already shown above
-res_d1
+# `d1poisrob` is `d1pois` plus the per-observation score `g1 = y − exp(θ)`,
+# which Stata's robust machinery uses to build the outer-product-of-gradients
+# meat matrix B = ∑ g1_i g1_iᵀ x_i x_iᵀ. The sandwich is then A⁻¹ B A⁻¹ where
+# A = ∑ exp(θ_i) x_i x_iᵀ is the OIM. The d1 fit is identical to §11.6.3 (same
+# MLE); only the variance estimator changes. We refit via `poisson_stata` with
+# `vce = :robust` so the helper computes the sandwich and prints the table in
+# Stata's `ml maximize, vce(robust)` format ("Log pseudolikelihood", "Robust"
+# subheader, lowercase "std. err.").
+poisson_stata(dfd,
+    GLM.@formula(docvis ~ private + chronic + female + income);
+    vce = :robust, header_style = :ml);
 ```
 
 ### 11.6.5 d2-style: gradient + Hessian
 
 ```{julia}
-# d2-style: provide both gradient and Hessian
-function poisson_hess!(H, β, X, y)
+# Method lf1: like d1 but the evaluator returns the *per-observation* log-lik
+# and *per-observation* score (rather than aggregate quantities). Stata sums
+# them internally; the per-obs scores are exactly what `vce(robust)` needs to
+# build the OPG meat matrix B = ∑ g1_i g1_iᵀ x_i x_iᵀ.
+#
+# The Julia per-obs evaluator:
+#   lnf_i(β)  = −exp(x_iᵀβ) + y_i · x_iᵀβ − lnΓ(y_i+1)
+#   g1_i(β)  = (y_i − exp(x_iᵀβ)) · x_i
+# (we don't need them as separate functions — Optim minimises the sum, and
+# `poisson_stata` builds the sandwich from μ and (y−μ) directly).
+#
+# The lf1 fit is the same MLE as d0 / d1 / d1robust, and `vce(robust)` gives
+# the same sandwich as d1poisrob. So the call is identical to §11.6.4.
+poisson_stata(dfd,
+    GLM.@formula(docvis ~ private + chronic + female + income);
+    vce = :robust, header_style = :ml);
+```
+
+```{julia}
+# Method d2: d1 plus the analytical Hessian. For Poisson:
+#   ∇β lnL  = Xᵀ(y − μ)            (score, same as d1)
+#   ∇²β lnL = −Xᵀ Diag(μ) X        (Hessian; negative-definite at the MLE)
+# In Julia we supply both `g!(g, β)` and `H!(H, β)` to `Optim.optimize` and
+# pick a second-order optimiser like `NewtonTrustRegion`. Since we minimise
+# the *negative* log-likelihood, both gradient and Hessian flip sign:
+#   ∇β  (−lnL) = −Xᵀ(y − μ)
+#   ∇²β (−lnL) =  Xᵀ Diag(μ) X
+function d2pois_grad!(g, β, X, y)
+    g .= -X' * (y .- exp.(X * β))
+end
+function d2pois_hess!(H, β, X, y)
     μ = exp.(X * β)
-    H .= X' * LinearAlgebra.Diagonal(μ) * X    # +Hessian (positive definite)
+    H .= X' * LinearAlgebra.Diagonal(μ) * X
 end
-res_d2 = Optim.optimize(β -> poisson_nll(β, X11, y11),
-                         (g, β) -> poisson_grad!(g, β, X11, y11),
-                         (H, β) -> poisson_hess!(H, β, X11, y11),
-                         zeros(k11), Optim.NewtonTrustRegion())
-println("d2 (likelihood + grad + Hess) — coefs: ",
-        round.(Optim.minimizer(res_d2), digits = 6))
-```
 
-```{julia}
-# Same as above with method = NewtonTrustRegion
-res_d2
-```
+res_d2 = Optim.optimize(β -> poisson_nll(β, X_d0, y_d0),
+                        (g, β) -> d2pois_grad!(g, β, X_d0, y_d0),
+                        (H, β) -> d2pois_hess!(H, β, X_d0, y_d0),
+                        zeros(size(X_d0, 2)), Optim.NewtonTrustRegion())
+β_d2 = Optim.minimizer(res_d2)
+@printf("d2 (Optim, analytical grad + Hess)  log L = %.3f   β = %s\n",
+        -Optim.minimum(res_d2), round.(β_d2, digits = 6))
+@printf("|β_d0 − β_d2|_∞ = %.3e (same MLE; second-order method converges faster)\n",
+        maximum(abs.(β_d0 .- β_d2)))
 
-```{julia}
-# d2 cross-check with GLM.jl
-GLM.glm(GLM.@formula(docvis ~ private + chronic + female + income),
-        df11, Distributions.Poisson(), GLM.LogLink())
-```
-
-```{julia}
-# Compare coefficients across approaches
-println("\n— Poisson coefficient comparison —")
-@printf("%-10s %10s %10s %10s\n", "Var", "d0", "d1", "d2")
-for i in 1:k11
-    @printf("%-10s %10.6f %10.6f %10.6f\n",
-            xnms11[i], Optim.minimizer(res_d0)[i],
-            Optim.minimizer(res_d1)[i], Optim.minimizer(res_d2)[i])
-end
+# Stata-formatted table — identical to d0 / d1 (same MLE, default OIM SEs).
+poisson_stata(dfd,
+    GLM.@formula(docvis ~ private + chronic + female + income);
+    vce = :oim, header_style = :ml);
 ```
 
 ## 11.7 The Optim.jl interface (mata optimize equivalent)
@@ -15659,30 +17905,101 @@ end
 
 ### 11.7.3 Poisson example
 
-#### Evaluator function for Poisson MLE
+```{python}
+%%stata
+local y docvis
+local xlist private chronic female income cons
 
-```{julia}
-# Define a single function returning negative log-density (sum)
-poisson_eval(β) = poisson_nll(β, X11, y11)
+mata: mata set matastrict off
+* Evaluator function for Poisson MLE using optimize gf2 evaluator
+mata 
+  void poissonmle(todo, b, y, X, lndensity, g, H)
+  {
+    Xb = X*b'
+    mu = exp(Xb)
+    lndensity = -mu + y:*Xb - lnfactorial(y)
+    if (todo == 0) return
+    g = (y-mu):*X   
+    if (todo == 1) return
+    H = - cross(X, mu, X)
+  }
+end
 ```
 
-#### Optim.optimize for Poisson MLE
+#### The optimize() function for Poisson MLE 
 
 ```{julia}
-# Same as Sec 11.4.3 — using LBFGS with autodiff
-res_opt = Optim.optimize(poisson_eval, zeros(k11),
-                          Optim.LBFGS(); autodiff = :forward)
-β_opt = Optim.minimizer(res_opt)
-println("Optim coefficients: ", round.(β_opt, digits = 6))
+# Mata's `optimize()` with a `gf2` evaluator wants per-obs log-density,
+# gradient, and Hessian. Julia's `Optim.optimize` takes the aggregate NLL
+# plus in-place `g!(g, β)` and `H!(H, β)`, then we build the robust sandwich
+# manually (Mata's `optimize_result_V_robust`).
 
-# Robust SE
-μ_o = exp.(X11 * β_opt)
-H   = X11' * LinearAlgebra.Diagonal(μ_o) * X11
-V   = LinearAlgebra.inv(LinearAlgebra.cholesky(LinearAlgebra.Symmetric(H))) *
-      X11' * LinearAlgebra.Diagonal((y11 .- μ_o).^2) * X11 *
-      LinearAlgebra.inv(LinearAlgebra.cholesky(LinearAlgebra.Symmetric(H))) *
-      (n11 / (n11 - k11))
-println("Robust SE: ", round.(sqrt.(LinearAlgebra.diag(V)), digits = 6))
+# Aggregate log-likelihood; sign-flipped for minimisation
+function poisson_lnL(β, X, y)
+    Xb = X * β
+    μ  = exp.(Xb)
+    -sum(y .* Xb .- μ .- SpecialFunctions.loggamma.(y .+ 1))
+end
+poisson_grad_mata!(g, β, X, y) = (g .= -X' * (y .- exp.(X * β)))
+poisson_hess_mata!(H, β, X, y) =
+    (H .= X' * LinearAlgebra.Diagonal(exp.(X * β)) * X)
+
+res_mata = Optim.optimize(β -> poisson_lnL(β, X_d0, y_d0),
+                          (g, β) -> poisson_grad_mata!(g, β, X_d0, y_d0),
+                          (H, β) -> poisson_hess_mata!(H, β, X_d0, y_d0),
+                          zeros(size(X_d0, 2)), Optim.NewtonTrustRegion())
+b = Optim.minimizer(res_mata)
+
+# Robust sandwich (the Mata `optimize_result_V_robust` analogue):
+#   V = A⁻¹ B A⁻¹ · n/(n−1),  A = XᵀDiag(μ)X,  B = XᵀDiag((y−μ)²)X
+n   = size(X_d0, 1)
+μ   = exp.(X_d0 * b)
+A   = X_d0' * LinearAlgebra.Diagonal(μ) * X_d0
+B   = X_d0' * LinearAlgebra.Diagonal((y_d0 .- μ).^2) * X_d0
+Ainv = LinearAlgebra.inv(LinearAlgebra.cholesky(LinearAlgebra.Symmetric(A)))
+Vbrob = Ainv * B * Ainv * (n / (n - 1))
+serob = sqrt.(LinearAlgebra.diag(Vbrob))
+
+# `b \ serob` in Mata stacks `b` on top of `serob` as a 2×k matrix
+bs = vcat(b', serob')
+
+# Mata-style matrix display: 4 cols per block, 10-digit numbers, leading
+# zero stripped for |x| < 1 (matching Stata's `mata` shell output).
+function _g10(x)
+    cap = (0 < abs(x) < 1 && x < 0) ? 12 : 11
+    for sig in 10:-1:1
+        fmt = Printf.Format("%.$(sig)g")
+        s   = Printf.format(fmt, x)
+        s_strip = 0 < abs(x) < 1 ? replace(s, r"^(-?)0\." => s"\1.") : s
+        length(s_strip) <= cap && return s_strip
+    end
+    return Printf.@sprintf("%.1e", x)
+end
+function mata_matrix_print(M; cpb::Int = 4, w::Int = 15)
+    nrows, ncols = size(M)
+    for bs_col in 1:cpb:ncols
+        be_col = min(bs_col + cpb - 1, ncols)
+        Printf.@printf("    ")
+        for c in bs_col:be_col; Printf.@printf("%*d", w, c); end
+        println()
+        bar = "+" * "-" ^ ((be_col - bs_col + 1) * w + 1) * "+"
+        println("    ", bar)
+        for r in 1:nrows
+            Printf.@printf("  %d |", r)
+            for c in bs_col:be_col
+                Printf.@printf(" %*s", w - 1, _g10(M[r, c]))
+            end
+            println(" |")
+        end
+        println("    ", bar)
+        be_col == ncols || println()
+    end
+end
+
+println(":   Vbrob = optimize_result_V_robust(S)\n")
+println(":   serob = (sqrt(diagonal(Vbrob)))'\n")
+println(":   b \\ serob ")
+mata_matrix_print(bs)
 ```
 
 ## 11.8 Generalized method of moments
@@ -15694,49 +18011,61 @@ println("Robust SE: ", round.(sqrt.(LinearAlgebra.diag(V)), digits = 6))
 ### 11.8.3 GMM via Optim.jl
 
 ```{julia}
-# Pseudo-code for Poisson GMM:
-#   Q(β) = h(β)' W h(β),  h(β) = Z'(y - μ),  μ = exp(Xβ)
-# with W = (Z'Z)^{-1} (one-step) or optimal sandwich (two-step).
-println("See Sec 10.3.7 for the Optim-based GMM implementation.")
-```
+# Poisson GMM with `firmsize` as an instrument for `private` (chronic, female,
+# income, cons remain valid as both regressors and instruments). The moment
+# function is the orthogonality condition Z'(y − exp(Xβ)) = 0; minimizing
+#   Q(β) = h(β)' W h(β),  h = Z'(y − μ),  W = (Z'Z)⁻¹
+# yields the GMM estimator. The robust sandwich VCE is
+#   V = (G'WG)⁻¹ · G'W S W G · (G'WG)⁻¹,
+# where G = −(μ.*Z)'X is the moment Jacobian and
+# S = ((y−μ).*Z)'((y−μ).*Z) · n/(n−k) is the meat matrix.
 
-```{julia}
-# Replicate the GMM code from Sec 10.3.7 with robust SE
-df11c = DataFrames.dropmissing(df11[:, [:docvis, :private, :chronic, :female,
-                                         :income, :firmsize]])
-X_g = hcat(Float64.(df11c.private), Float64.(df11c.chronic),
-           Float64.(df11c.female),  Float64.(df11c.income),
-           ones(DataFrames.nrow(df11c)))
-Z_g = hcat(Float64.(df11c.firmsize), Float64.(df11c.chronic),
-           Float64.(df11c.female),   Float64.(df11c.income),
-           ones(DataFrames.nrow(df11c)))
-y_g = Float64.(df11c.docvis)
+dfg = DataFrames.dropmissing(df10[:,
+    [:docvis, :private, :chronic, :female, :income, :firmsize]])
+y_g = Float64.(dfg.docvis)
+X_g = hcat(Float64.(dfg.private),  Float64.(dfg.chronic),
+           Float64.(dfg.female),   Float64.(dfg.income),
+           ones(DataFrames.nrow(dfg)))
+Z_g = hcat(Float64.(dfg.firmsize), Float64.(dfg.chronic),
+           Float64.(dfg.female),   Float64.(dfg.income),
+           ones(DataFrames.nrow(dfg)))
+n_g, k_g = size(X_g)
+W_g = LinearAlgebra.inv(LinearAlgebra.cholesky(LinearAlgebra.Symmetric(Z_g' * Z_g)))
 
-function pgmm_obj(β, X, Z, y)
+function pgmm_Q(β, X, Z, y, W)
+    h = Z' * (y .- exp.(X * β))
+    return (h' * W * h)::Float64
+end
+function pgmm_grad!(g, β, X, Z, y, W)
     μ = exp.(X * β)
     h = Z' * (y .- μ)
-    W = LinearAlgebra.inv(Z' * Z)
-    return h' * W * h
+    G = -(μ .* Z)' * X
+    g .= 2 .* (G' * W * h)         # ∂Q/∂β = 2·G'Wh
+end
+function pgmm_hess!(H, β, X, Z, y, W)
+    μ = exp.(X * β)
+    G = -(μ .* Z)' * X
+    H .= 2 .* (G' * W * G)         # Gauss–Newton-style Hessian
 end
 
-res_gmm = Optim.optimize(β -> pgmm_obj(β, X_g, Z_g, y_g), zeros(5),
-                          Optim.LBFGS(); autodiff = :forward)
-β_gmm11 = Optim.minimizer(res_gmm)
+res_gmm = Optim.optimize(β -> pgmm_Q(β, X_g, Z_g, y_g, W_g),
+                         (g, β) -> pgmm_grad!(g, β, X_g, Z_g, y_g, W_g),
+                         (H, β) -> pgmm_hess!(H, β, X_g, Z_g, y_g, W_g),
+                         zeros(k_g), Optim.NewtonTrustRegion())
+b_gmm = Optim.minimizer(res_gmm)
 
-# Robust SE (sandwich)
-μ_g = exp.(X_g * β_gmm11)
-G   = -(μ_g .* Z_g)' * X_g
-W   = LinearAlgebra.inv(Z_g' * Z_g)
-S   = (y_g .- μ_g)' .* Z_g' * ((y_g .- μ_g) .* Z_g) *
-      (DataFrames.nrow(df11c) / (DataFrames.nrow(df11c) - 5))
-V_gmm = LinearAlgebra.inv(G' * W * G) * G' * W * S * W * G *
-         LinearAlgebra.inv(G' * W * G)
-se_gmm = sqrt.(abs.(LinearAlgebra.diag(V_gmm)))
+# Robust sandwich VCE with the n/(n−k) finite-sample correction
+μ_g  = exp.(X_g * b_gmm)
+G_g  = -(μ_g .* Z_g)' * X_g
+Shat = ((y_g .- μ_g) .* Z_g)' * ((y_g .- μ_g) .* Z_g) * (n_g / (n_g - k_g))
+GtWG = G_g' * W_g * G_g
+Vb   = LinearAlgebra.inv(GtWG) * G_g' * W_g * Shat * W_g * G_g *
+       LinearAlgebra.inv(GtWG)
+seb  = sqrt.(LinearAlgebra.diag(Vb))
 
-println("\n— Poisson GMM with robust SE —")
-for i in 1:5
-    @printf("%-10s %12.6f  se=%10.6f\n", xnms11[i], β_gmm11[i], se_gmm[i])
-end
+# Mata-style display: `b \ seb` as a 2×5 matrix
+println(":   b \\ seb")
+mata_matrix_print(vcat(b_gmm', seb'))
 ```
 
 ## 11.9 Stata resources

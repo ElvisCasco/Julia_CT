@@ -4176,7 +4176,7 @@ poisson docvis private chronic female income, vce(robust)
 
 ```{python}
 %%stata
-capture nl (docvis = exp({private}*private + {chronic}*chronic     ///
+capture nl (docvis = exp({private}private + {chronic}*chronic     ///
             + {female}*female + {income}*income + {intercept}))
 if _rc != 0 {
     display "NLS did not converge"
@@ -4320,7 +4320,7 @@ lincom _cons + private*1 + chronic*0 + female*1 + income*10, eform
 ```{python}
 %%stata
 * Sample average of predicted number of events
-quietly poisson docvis private chronic female income, vce(robust)
+poisson docvis private chronic female income, vce(robust)
 margins
 ```
 
@@ -4339,7 +4339,7 @@ margins, at(private=1 chronic=0 female=1 income=10)
 ```{python}
 %%stata
 * Sample average prediction at different values of indicator variable private
-quietly poisson docvis i.private chronic female income, vce(robust)
+poisson docvis i.private chronic female income, vce(robust)
 margins private
 ```
 
@@ -4369,7 +4369,7 @@ margins, dydx(*) atmean
 ```{python}
 %%stata
 * Marginal effects at mean (MEM) using margins command and only calculus method
-quietly poisson docvis private chronic female income, vce(robust)
+poisson docvis private chronic female income, vce(robust)
 margins, dydx(*) atmean
 ```
 
@@ -4378,10 +4378,10 @@ margins, dydx(*) atmean
 ```{python}
 %%stata
 * Marginal effects at representative value (MER) using margins command
-quietly poisson docvis i.private i.chronic i.female income, vce(robust)
+poisson docvis i.private i.chronic i.female income, vce(robust)
 margins, dydx(*) at(private=1 chronic=0 female=1 income=10) noatlegend
 * Average marginal effects (AVE) using margins command and finite differences
-quietly poisson docvis i.private i.chronic i.female income, vce(robust)
+poisson docvis i.private i.chronic i.female income, vce(robust)
 margins, dydx(*)
 ```
 
@@ -4919,7 +4919,6 @@ end
 
 ```{python}
 %%stata
-/*
 * Method d1 : With robust SEs program dipoisrob
 program d1poisrob
   version 10.1
@@ -4935,7 +4934,6 @@ program d1poisrob
 `mlvecsum `lnf' `d1' = `g1', eq(1) // changed
   matrix `g' = (`d1')
 end
-*/
 ```
 
 ```{python}
@@ -5076,7 +5074,6 @@ local y docvis
 local xlist private chronic female income cons
 local zlist firmsize chronic female income cons
 
-/*
 mata
     Xb = X*b'                    // b for optimize is 1xk row vector
     mu = exp(Xb)
@@ -5089,7 +5086,6 @@ mata
     H = G'W*G                    // hessian for optimize is kxk matrix
     V = luinv(G'W*G)*G'W*S*W*G*luinv(G'W*G)  
 end
-*/
 ```
 
 ```{python}
