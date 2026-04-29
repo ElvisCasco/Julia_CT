@@ -502,21 +502,28 @@ function test_stata(model, vars=nothing; values=nothing,
         for (row, restr) in enumerate(restrictions)
             coefs, rhs = restr.first, restr.second
             pairs = coefs isa AbstractDict ? collect(coefs) : collect(coefs)
-            terms = String[]
-            for (vname, c) in pairs
+            # Build display terms with Stata-style sign handling:
+            #   first positive  →  "[depvar]name"
+            #   first negative  →  "- [depvar]name"   (space after `-`)
+            #   later positive  →  "+ [depvar]name"
+            #   later negative  →  "- [depvar]name"
+            # Coefficients with |c| ≠ 1 get a "c*" prefix on the symbol.
+            term_strs = String[]
+            for (idx, (vname, c)) in enumerate(pairs)
                 R[row, p_idx(vname)] = float(c)
-                cf = float(c)
-                if cf == 1.0
-                    push!(terms, "[$depvar]$vname")
-                elseif cf == -1.0
-                    push!(terms, "-[$depvar]$vname")
+                cf      = float(c)
+                abs_c   = abs(cf)
+                core    = abs_c == 1.0 ? "[$depvar]$vname" :
+                          Printf.@sprintf("%g*[%s]%s", abs_c, depvar, vname)
+                sign_op = cf < 0 ? "-" : "+"
+                if idx == 1
+                    push!(term_strs, cf < 0 ? "- $core" : core)
                 else
-                    push!(terms, Printf.@sprintf("%g*[%s]%s", cf, depvar, vname))
+                    push!(term_strs, "$sign_op $core")
                 end
             end
             r[row] = float(rhs)
-            # Join with " + " but turn "+ -" into " - " for nicer display
-            push!(labels, replace(join(terms, " + "), " + -" => " - ") *
+            push!(labels, join(term_strs, " ") *
                           " = " * Printf.@sprintf("%g", r[row]))
         end
     else
@@ -1221,7 +1228,7 @@ function mfx_stata(β::AbstractVector, V::AbstractMatrix, X::AbstractMatrix;
 end
 
 """
-    lincom_stata(w, β, V; eform=false, name="(1)", depvar="", level=0.95)
+    lincom_stata(w, β, V; eform=false, c=0.0, name="(1)", depvar="", level=0.95)
 
 Stata-style `lincom <linear combination>` (optionally `, eform`). Computes
 L = w'β, its delta-method SE = sqrt(w' V w), z = L/SE(L), two-sided p, and
@@ -1234,9 +1241,13 @@ Pass β and V from the relevant model (e.g. n/(n-1)-corrected `V_rob` to
 match Stata's `vce(robust)` after `poisson`).
 """
 function lincom_stata(w::AbstractVector, β::AbstractVector, V::AbstractMatrix;
-                      eform::Bool=false, name::String="(1)",
+                      eform::Bool=false, c::Float64=0.0, name::String="(1)",
                       depvar::String="", level::Float64=0.95)
-    L    = LinearAlgebra.dot(w, β)
+    # `c` is an additive constant in the linear combination, e.g. for
+    # `lincom private + chronic - 1`, set `c = -1`. The point estimate
+    # shifts by c (L → L + c), but the SE is unaffected (constants have
+    # zero variance), and z = (L + c) / SE.
+    L    = LinearAlgebra.dot(w, β) + c
     seL  = sqrt(w' * V * w)
     z    = L / seL
     p    = 2 * (1 - Distributions.cdf(Distributions.Normal(), abs(z)))
@@ -1336,6 +1347,43 @@ function nlcom_stata(f::Function, β::AbstractVector, V::AbstractMatrix;
                    g9(lo; w=9), g9(hi; w=10))
     println("-"^78)
     return (; val, se, z, p, ci=(lo, hi))
+end
+
+"""
+    testnl_stata(g, β, V; label="g(β) = 0") -> NamedTuple
+
+Stata-style `testnl <expression>` — delta-method Wald χ² for a single
+nonlinear hypothesis g(β) = 0. Linearises g around β̂ via central finite
+differences (no ForwardDiff dependency) and returns
+χ² = g(β̂)² / (∇g' V ∇g) on 1 df.
+
+`g` is a closure mapping β → scalar (e.g. `β -> β[i_f]/β[i_p] - 1` for the
+ratio test `_b[female]/_b[private] = 1`). `label` is the Stata-style
+hypothesis string printed above the χ² block; pass the same expression you'd
+type into Stata's `testnl`.
+
+Pass `V` from `setup_mus10().V_robust` (or another robust V) to match
+Stata's `testnl` after `vce(robust)`.
+"""
+function testnl_stata(g::Function, β::AbstractVector, V::AbstractMatrix;
+                     label::AbstractString="g(β) = 0")
+    g_val = g(β)
+    n_p   = length(β)
+    ∇g    = zeros(n_p)
+    for j in 1:n_p
+        h    = sqrt(eps(Float64)) * max(abs(β[j]), 1.0)
+        βp   = collect(β); βm = collect(β)
+        βp[j] += h; βm[j] -= h
+        ∇g[j] = (g(βp) - g(βm)) / (2h)
+    end
+    var_g = (∇g' * V * ∇g)::Float64
+    W     = g_val^2 / var_g
+    p_val = Distributions.ccdf(Distributions.Chisq(1), W)
+    println()
+    Printf.@printf("  (1)  %s\n\n", label)
+    Printf.@printf("               chi2(1) = %11.2f\n", W)
+    Printf.@printf("           Prob > chi2 = %13.4f\n", p_val)
+    return (; chi2=W, df=1, p=p_val)
 end
 
 """
@@ -18461,30 +18509,27 @@ test private chronic female income
 test_stata(s.model, ["private", "chronic", "female", "income"]; V = s.V_robust);
 ```
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 #### Test calculated from retrieved coefficients and VCE
 
 ```{julia}
-# Manual Wald via the matrix formula  W = (Rβ - r)' [R V R']⁻¹ (Rβ - r)
-R = zeros(4, length(β))
-for (k, i) in enumerate(slope_idx); R[k, i] = 1; end
-r = zeros(4)
-diff = R * β .- r
-W = diff' * LinearAlgebra.inv(R * V * R') * diff
-@printf("Wald = %.4f  p = %.4f\n",
-        W, 1 - Distributions.cdf(Distributions.Chisq(4), W))
+# Direct matrix Wald computation (no helper). Stata builds an explicit
+# 4×5 selector R that picks the four slopes (skipping `_cons`), the null
+# vector r, and computes W = (Rβ − r)' (R V R')⁻¹ (Rβ − r). The robust V is
+# already on `s.V_robust` (GLM order, with `_cons` first). We use
+# `slope_idx` (defined in the §12.3.2 setup chunk) so the test matches
+# Stata regardless of where `_cons` lands in coefnames.
+β  = GLM.coef(s.model)
+V  = s.V_robust
+R  = zeros(length(slope_idx), length(β))
+for (k, i) in enumerate(slope_idx); R[k, i] = 1.0; end
+r  = zeros(length(slope_idx))
+W  = (R * β - r)' * LinearAlgebra.inv(LinearAlgebra.Symmetric(R * V * R')) *
+     (R * β - r)
+h  = size(R, 1)
+# `ccdf` (= 1 − cdf) is computed directly so the tail probability survives
+# even when cdf ≈ 1.0 underflows; for W ≈ 594.7, the χ²(4) tail is ≈ 2e-131.
+p  = Distributions.ccdf(Distributions.Chisq(h), W)
+@printf("Wald test statistic: %.5f  with p-value: %.2e\n", W, p)
 ```
 
 ### 12.3.3 One-sided Wald tests
@@ -18494,25 +18539,25 @@ W = diff' * LinearAlgebra.inv(R * V * R') * diff
 ### 12.3.5 Nonlinear Wald via the delta method
 
 ```{julia}
-# Test H0: β_female / β_private = 1 — delta method
-# g(β) = β_f / β_p,  ∂g/∂β_f = 1/β_p,  ∂g/∂β_p = -β_f/β_p²
-β_f = β[i_f]; β_p = β[i_p]
-∇g = zeros(length(β))
-∇g[i_f] = 1 / β_p
-∇g[i_p] = -β_f / β_p^2
-g_val = β_f / β_p - 1
-var_g = (∇g' * V * ∇g)
-W = g_val^2 / var_g
-@printf("Nonlinear Wald χ²(1) = %.3f, p = %.4f\n",
-        W, 1 - Distributions.cdf(Distributions.Chisq(1), W))
+# `testnl_stata` (chunk 1) handles the delta-method linearisation and
+# Stata-format printing. Pass the closure `β -> β[i_f]/β[i_p] − 1` for
+# H0: β_female/β_private = 1, plus the robust V and the hypothesis string.
+testnl_stata(β -> β[i_f] / β[i_p] - 1, β, V;
+             label = "_b[female]/_b[private] = 1");
 ```
 
 ```{julia}
-# Wald is not invariant: test of H0: β_female - β_private = 0 vs the ratio test
-diff = β_f - β_p
-se_d = sqrt(V[i_f, i_f] + V[i_p, i_p] - 2 * V[i_f, i_p])
-@printf("β_female - β_private: diff=%.4f  se=%.4f  z=%.3f\n",
-        diff, se_d, diff / se_d)
+# Stata `test female = private` rearranges the equation as
+# `-private + female = 0` (regressor-list order, with the second variable
+# moved to RHS getting a `-` sign). The same restriction in `test_stata`
+# uses `["private" => -1.0, "female" => 1.0] => 0.0`. The chi² is exactly
+# the same as testing `female - private = 0`, but Stata's display orders
+# the terms in regressor-list order.
+test_stata(s.model;
+    V = s.V_robust,
+    restrictions = [
+        ["private" => -1.0, "female" => 1.0] => 0.0,
+    ]);
 ```
 
 ### 12.3.6 Wald confidence intervals
@@ -18528,6 +18573,16 @@ se_lc = sqrt(V[i_p, i_p] + V[i_c, i_c] + 2 * V[i_p, i_c])
         lc, se_lc, lc - 1.96 * se_lc, lc + 1.96 * se_lc)
 ```
 
+```{julia}
+# `lincom_stata` (chunk 1) takes a weight vector w (one entry per coefficient,
+# in GLM order) plus an additive constant `c` for shifts like `- 1`. Estimate
+# is L = w'β + c with SE = √(w'Vw); z, p, and the 95% CI follow directly.
+w        = zeros(length(β))
+w[i_p]   = 1.0
+w[i_c]   = 1.0
+lincom_stata(w, β, V; c = -1.0, depvar = "docvis");
+```
+
 ### 12.3.8 Nonlinear combinations (nlcom equivalent — delta method)
 
 ```{julia}
@@ -18541,6 +18596,14 @@ se_g = sqrt(∇g' * V * ∇g)
         g_val, se_g, g_val - 1.96 * se_g, g_val + 1.96 * se_g)
 ```
 
+```{julia}
+# `nlcom_stata` (chunk 1) takes the nonlinear function as a closure over β
+# and computes the delta-method SE via central finite differences. Output
+# matches Stata's `nlcom` table (Coefficient / Std. err. / z / p / 95% CI).
+nlcom_stata(β -> β[i_f] / β[i_p] - 1, β, V;
+            name = "_nl_1", depvar = "docvis");
+```
+
 ### 12.3.9 Asymmetric confidence intervals
 
 ```{julia}
@@ -18552,9 +18615,30 @@ lo, hi = β_p_val - 1.96 * se_p_val, β_p_val + 1.96 * se_p_val
 ```
 
 ```{julia}
+# `lincom_stata` with `eform = true` reports exp(L) instead of L, the
+# delta-method SE = exp(L)·SE(L), and an asymmetric CI = [exp(L − z·SE(L)),
+# exp(L + z·SE(L))] (i.e. the symmetric CI on the log scale, exponentiated).
+# z and p stay on the LINEAR scale — the test is still H0: β_private = 0,
+# equivalent to H0: exp(β_private) = 1.
+w        = zeros(length(β))
+w[i_p]   = 1.0
+lincom_stata(w, β, V; eform = true, depvar = "docvis");
+```
+
+```{julia}
 # Same as above (lincom-then-exponentiate uses the symmetric CI on the log scale)
 @printf("β_private = %.4f  95%% CI = [%.4f, %.4f]\n",
         β_p_val, lo, hi)
+```
+
+```{julia}
+# Plain `lincom private` (no `, eform`) reports β_private and its CI on the
+# LINEAR scale; users then exponentiate the endpoints by hand to get the
+# eform CI. Numerically equivalent to the previous chunk's eform output:
+#   exp(.7986653) = 2.2226, exp(.5850262) = 1.7950, exp(1.012304) = 2.7519.
+w        = zeros(length(β))
+w[i_p]   = 1.0
+lincom_stata(w, β, V; depvar = "docvis");
 ```
 
 ```{julia}
@@ -18562,6 +18646,16 @@ lo, hi = β_p_val - 1.96 * se_p_val, β_p_val + 1.96 * se_p_val
 expβ = exp(β_p_val); se_expβ = expβ * se_p_val
 @printf("exp(β_private) (delta) = %.4f  se=%.4f  CI=[%.4f, %.4f]\n",
         expβ, se_expβ, expβ - 1.96 * se_expβ, expβ + 1.96 * se_expβ)
+```
+
+```{julia}
+# `nlcom exp(_b[private])` builds a SYMMETRIC CI on the eform scale via the
+# delta method: SE = |exp(β)|·SE(β); CI = exp(β) ± z·SE. Compare with the
+# previous `lincom private, eform` chunk, which exponentiates a symmetric
+# CI from the LINEAR scale and is therefore asymmetric on the eform scale.
+# Same point estimate (2.2226), same SE (.2423), but the CI endpoints differ.
+nlcom_stata(β -> exp(β[i_p]), β, V;
+            name = "_nl_1", depvar = "docvis");
 ```
 
 ## 12.4 Likelihood-ratio tests
