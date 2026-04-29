@@ -1,797 +1,1092 @@
-%!PS-Adobe-2.0 EPSF-2.0
-%% This is a Stata generated postscript file
-%%BoundingBox: 0 0 396 288
-%%HiResBoundingBox: 0.000 0.000 396.000 288.000
-%%DocumentNeededResources: font Helvetica
-/xratio 0.012375 def
-/yratio 0.012375 def
-/Sbgfill {
-	/y1 exch def
-	/x1 exch def
-	/y0 exch def
-	/x0 exch def
-	x0 y0 moveto
-	x0 y1 lineto x1 y1 lineto x1 y0 lineto x0 y0 lineto
-	fill
-} def
-/Spt {
-	yratio mul
-	/yp exch def
-	xratio mul
-	/xp exch def
-	Slrgb setrgbcolor
-	xp yp .5 0 360 arc fill
-} def
-/Sln {
-	yratio mul
-	/y1p exch def
-	xratio mul
-	/x1p exch def
-	yratio mul
-	/y0p exch def
-	xratio mul
-	/x0p exch def
-	Slw setlinewidth
-	Slrgb setrgbcolor
-	x0p y0p M x1p y1p lineto S
-} def
-/Scrv {
-	yratio mul
-	/y3p exch def
-	xratio mul
-	/x3p exch def
-	yratio mul
-	/y2p exch def
-	xratio mul
-	/x2p exch def
-	yratio mul
-	/y1p exch def
-	xratio mul
-	/x1p exch def
-	Slw setlinewidth
-	Slrgb setrgbcolor
-	x1p y1p x2p y2p x3p y3p curveto
-	S
-} def
-/Stxtl {
-	/sp exch def
-	yratio mul
-	/sizep exch def
-	dup
-	/anglep exch def
-	0 exch sub
-	/angle2p exch def
-	yratio mul
-	/y0p exch def
-	xratio mul
-	/x0p exch def
-	Strgb setrgbcolor
-	x0p y0p M anglep rotate sizep fntsize sp show stroke angle2p rotate
-} def
-/Stxtc {
-	/sp exch def
-	yratio mul
-	/sizep exch def
-	dup
-	/anglep exch def
-	0 exch sub
-	/angle2p exch def
-	yratio mul
-	/y0p exch def
-	xratio mul
-	/x0p exch def
-	Strgb setrgbcolor
-	x0p y0p M anglep rotate sizep fntsize sp stringwidth exch -2 div exch rm sp show stroke angle2p rotate
-} def
-/Stxtr {
-	/sp exch def
-	yratio mul
-	/sizep exch def
-	dup
-	/anglep exch def
-	0 exch sub
-	/angle2p exch def
-	yratio mul
-	/y0p exch def
-	xratio mul
-	/x0p exch def
-	Strgb setrgbcolor
-	x0p y0p M anglep rotate sizep fntsize sp stringwidth 1 index -1 mul exch rm pop sp show stroke angle2p rotate
-} def
-/Srect {
-	/sfill exch def
-	/sstroke exch def
-	yratio mul
-	/y1 exch def
-	xratio mul
-	/x1 exch def
-	yratio mul
-	/y0 exch def
-	xratio mul
-	/x0 exch def
-	newpath x0 y0 moveto x0 y1 lineto x1 y1 lineto x1 y0 lineto x0 y0 lineto closepath
-	sfill Sfill
-	sstroke Sstroke
-} def
-/Sellipse {
-	/sfill exch def
-	/sstroke exch def
-	yratio mul
-	/yrad exch def
-	xratio mul
-	/xrad exch def
-	yratio mul
-	/y exch def
-	xratio mul
-	/x exch def
-	/savematrix matrix currentmatrix def
-	x y translate
-	xrad yrad scale
-	0 0 1 0 360 arc
-	savematrix setmatrix
-	sfill Sfill
-	sstroke Sstroke
-} def
-/Stri {
-	/sfill exch def
-	/sstroke exch def
-	xratio mul
-	/r exch def
-	yratio mul
-	/y0 exch def
-	xratio mul
-	/x0 exch def
-	/xcen x0 def
-	y0 r add
-	/ytop exch def
-	r 2 div
-	y0 exch sub
-	/ybot exch def
-	r 3 sqrt 2 div mul dup
-	xcen exch sub
-	/xleft exch def
-	xcen add
-	/xright exch def
-	newpath xcen ytop moveto xright ybot lineto xleft ybot lineto xcen ytop lineto closepath
-	sfill Sfill
-	sstroke Sstroke
-} def
-/Soldtri {
-	/sfill exch def
-	xratio mul
-	/r exch def
-	yratio mul
-	/y0 exch def
-	xratio mul
-	/x0 exch def
-	x0 r sub
-	/x1 exch def
-	y0 r sub
-	/y1 exch def
-	x0 r add
-	/x2 exch def
-	y0 r sub
-	/y2 exch def
-	/x3 x0 def
-	y0 r add
-	/y3 exch def
-	newpath x1 y1 moveto x2 y2 lineto x3 y3 lineto x1 y1 lineto closepath
-	sfill 1 eq {
-		Ssrgb setrgbcolor
-		gsave
-		fill
-		grestore
-	} if
-	Slw setlinewidth
-	Slrgb setrgbcolor
-	S
-} def
-/Sdia {
-	/sfill exch def
-	/sstroke exch def
-	xratio mul
-	/r exch def
-	yratio mul
-	/y exch def
-	xratio mul
-	/x exch def
-	x r sub
-	/x0 exch def
-	/y0 y def
-	/x1 x def
-	y r sub
-	/y1 exch def
-	x r add
-	/x2 exch def
-	/y2 y def
-	/x3 x def
-	y r add
-	/y3 exch def
-	newpath x0 y0 moveto x1 y1 lineto x2 y2 lineto x3 y3 lineto closepath
-	sfill Sfill
-	sstroke Sstroke
-} def
-/Scc {
-	/sfill exch def
-	/sstroke exch def
-	xratio mul
-	/r0 exch def
-	yratio mul
-	/y0 exch def
-	xratio mul
-	/x0 exch def
-	x0 y0 r0 0 360 arc closepath
-	sfill Sfill
-	sstroke Sstroke
-} def
-/Spie {
-	/sfill exch def
-	/salign exch def
-	/a1 exch def
-	/a0 exch def
-	xratio mul
-	/r exch def
-	yratio mul
-	/y exch def
-	xratio mul
-	/x exch def
-	/Pie {
-		x y moveto x y r a0 a1 arc closepath
-	} def
-	newpath Pie
-	sfill Sfill
-	Slrgb setrgbcolor
-	salign 0 eq {
-		gsave
-		Slw 2 mul setlinewidth
-		clip
-		S
-		grestore
-	} if
-	salign 1 eq {
-		Slw setlinewidth
-		S
-	} if
-	salign 2 eq {
-		gsave
-		Slw 2 mul setlinewidth
-		strokepath
-		pathbbox
-		/ury exch def
-		/urx exch def
-		/lly exch def
-		/llx exch def
-		newpath llx lly moveto llx ury lineto urx ury lineto urx lly lineto closepath
-		Pie
-		eoclip
-		newpath Pie
-		S
-		grestore
-	} if
-	newpath
-} def
-/Splu {
-	xratio mul
-	/r exch def
-	yratio mul
-	/y exch def
-	xratio mul
-	/x exch def
-	x r sub
-	/x0 exch def
-	x r add
-	/x1 exch def
-	x0 y M x1 y L
-	y r sub
-	/y0 exch def
-	y r add
-	/y1 exch def
-	x y0 M x y1 L
-} def
-/Scro {
-	xratio mul
-	/r exch def
-	yratio mul
-	/y exch def
-	xratio mul
-	/x exch def
-	x r sub
-	/x0 exch def
-	y r sub
-	/y0 exch def
-	x r add
-	/x1 exch def
-	y r add
-	/y1 exch def
-	x0 y0 M x1 y1 L
-	x r add
-	/x0 exch def
-	y r sub
-	/y0 exch def
-	x r sub
-	/x1 exch def
-	y r add
-	/y1 exch def
-	x0 y0 M x1 y1 L
-} def
-/Sm {
-	yratio mul
-	/y exch def
-	xratio mul
-	/x exch def
-	x y M
-} def
-/Sl {
-	yratio mul
-	/y exch def
-	xratio mul
-	/x exch def
-	x y L
-} def
-/SPl {
-	yratio mul
-	/y exch def
-	xratio mul
-	/x exch def
-	x y PL
-} def
-/Sarr {
-	/sfill exch def
-	xratio mul
-	/r exch def
-	yratio mul
-	/y exch def
-	xratio mul
-	/x exch def
-	y r add
-	/ytop exch def
-	y r sub
-	/ybot exch def
-	gsave
-	Slrgb setrgbcolor
-	sfill 0 eq {
-		r 2 mul 3 div dup
-		x exch sub
-		/xleft exch def
-		x add
-		/xright exch def
-		newpath xleft y moveto x ytop lineto xright y lineto x ytop moveto x ybot lineto
-		Lcs
-		1 setlinejoin
-	} {
-		r 2 div dup
-		x exch sub
-		/xleft exch def
-		x add
-		/xright exch def
-		newpath xleft y moveto x ytop lineto xright y lineto x ytop closepath moveto x ybot lineto
-		gsave
-		fill
-		grestore
-	} ifelse
-	Slw setlinewidth
-	S
-	grestore
-} def
-/Spipe {
-	xratio mul
-	/r exch def
-	yratio mul
-	/y exch def
-	xratio mul
-	/x exch def
-	y r sub
-	/y0 exch def
-	y r add
-	/y1 exch def
-	x y0 M x y1 L
-} def
-/Sv {
-	xratio mul
-	/r exch def
-	yratio mul
-	/y0 exch def
-	xratio mul
-	/x0 exch def
-	/xcen x0 def
-	y0 r add
-	/ytop exch def
-	r 2 div
-	y0 exch sub
-	/ybot exch def
-	r 3 sqrt 2 div mul dup
-	xcen exch sub
-	/xleft exch def
-	xcen add
-	/xright exch def
-	newpath xleft ytop moveto xcen ybot lineto xright ytop lineto
-	Slw setlinewidth
-	Slrgb setrgbcolor
-	S
-} def
-/Lcs {
-	currentlinecap
-	1 setlinecap
-} def
-/Lcr {
-	setlinecap
-} def
-/Sbp {
-	newpath
-} def
-/Sep {
-	/sfill exch def
-	closepath
-	/salign exch def
-	Lcs
-	salign 0 eq {
-		sfill Sfill
-		gsave
-		Slw 2 mul setlinewidth
-		clip
-		Slrgb setrgbcolor
-		S
-		grestore
-	} if
-	salign 1 eq {
-		sfill Sfill
-		Slw setlinewidth
-		Slrgb setrgbcolor
-		S
-	} if
-	salign 2 eq {
-		gsave
-		Slw 2 mul setlinewidth
-		Slrgb setrgbcolor
-		S
-		grestore
-		sfill Sfill
-	} if
-	newpath
-	Lcr
-} def
-/Sbpa {
-	newpath
-} def
-/Sepa {
-	Slw setlinewidth
-	Slrgb setrgbcolor
-	currentlinejoin
-	1 setlinejoin
-	S
-	setlinejoin
-	newpath
-} def
-/Stransrot {
-	/anglep exch def
-	yratio mul
-	/y exch def
-	xratio mul
-	/x exch def
-	x y translate
-	anglep rotate
-	x neg y neg translate
-} def
-/cp {currentpoint} def 
-/M {moveto} def 
-/rm {rmoveto} def 
-/S {
-	Slw 0.000 eq {
-		newpath
-	} if
-	Slw 0.000 ne {
-		stroke
-	} if
-} def
-/L {Slw setlinewidth Slrgb setrgbcolor lineto Lcs S Lcr} def 
-/PL {Slw setlinewidth Slrgb setrgbcolor lineto} def 
-/MF-Helvetica {
-  /newfontname exch def
-  /fontname exch def
-  /fontdict fontname findfont def
-  /newfont fontdict maxlength dict def
-  fontdict {
-  exch dup /FID eq {pop pop} {exch newfont 3 1 roll put} ifelse
+%!PS-Adobe-3.0 EPSF-3.0
+%%Creator: cairo 1.18.4 (https://cairographics.org)
+%%CreationDate: Wed Apr 29 12:25:57 2026
+%%Pages: 1
+%%DocumentData: Clean7Bit
+%%LanguageLevel: 3
+%%BoundingBox: 0 0 525 338
+%%EndComments
+%%BeginProlog
+50 dict begin
+/q { gsave } bind def
+/Q { grestore } bind def
+/cm { 6 array astore concat } bind def
+/w { setlinewidth } bind def
+/J { setlinecap } bind def
+/j { setlinejoin } bind def
+/M { setmiterlimit } bind def
+/d { setdash } bind def
+/m { moveto } bind def
+/l { lineto } bind def
+/c { curveto } bind def
+/h { closepath } bind def
+/re { exch dup neg 3 1 roll 5 3 roll moveto 0 rlineto
+      0 exch rlineto 0 rlineto closepath } bind def
+/S { stroke } bind def
+/f { fill } bind def
+/f* { eofill } bind def
+/n { newpath } bind def
+/W { clip } bind def
+/W* { eoclip } bind def
+/BT { } bind def
+/ET { } bind def
+/BDC { mark 3 1 roll /BDC pdfmark } bind def
+/EMC { mark /EMC pdfmark } bind def
+/cairo_store_point { /cairo_point_y exch def /cairo_point_x exch def } def
+/Tj { show currentpoint cairo_store_point } bind def
+/TJ {
+  {
+    dup
+    type /stringtype eq
+    { show } { -0.001 mul 0 cairo_font_matrix dtransform rmoveto } ifelse
   } forall
-  newfont /FontName newfontname put
-  newfont /Encoding ISOLatin1Encoding put
-  newfontname newfont definefont pop
+  currentpoint cairo_store_point
+} bind def
+/cairo_selectfont { cairo_font_matrix aload pop pop pop 0 0 6 array astore
+    cairo_font exch selectfont cairo_point_x cairo_point_y moveto } bind def
+/Tf { pop /cairo_font exch def /cairo_font_matrix where
+      { pop cairo_selectfont } if } bind def
+/Td { matrix translate cairo_font_matrix matrix concatmatrix dup
+      /cairo_font_matrix exch def dup 4 get exch 5 get cairo_store_point
+      /cairo_font where { pop cairo_selectfont } if } bind def
+/Tm { 2 copy 8 2 roll 6 array astore /cairo_font_matrix exch def
+      cairo_store_point /cairo_font where { pop cairo_selectfont } if } bind def
+/g { setgray } bind def
+/rg { setrgbcolor } bind def
+/d1 { setcachedevice } bind def
+/cairo_data_source {
+  CairoDataIndex CairoData length lt
+    { CairoData CairoDataIndex get /CairoDataIndex CairoDataIndex 1 add def }
+    { () } ifelse
 } def
-/Helvetica /Helvetica-0 MF-Helvetica
-/Slw 0.120 def
-1.000 1.000 1.000 setrgbcolor
-0 0 396.000 288.000 Sbgfill
-/Sfill {
-	/sfill exch def
-	sfill 1 eq {
-		Ssrgb setrgbcolor
-		gsave
-		fill
-		grestore
-	} if
-} def
-/Sstroke {
-	/sstroke exch def
-	sstroke 1 eq {
-		Slw setlinewidth
-		Slrgb setrgbcolor
-		S
-	} if
-	newpath
-} def
-/Slrgb {1.000 1.000 1.000} def
-/Strgb {1.000 1.000 1.000} def
-/Ssrgb {1.000 1.000 1.000} def
-/Slw 0.576 def
-0 0 31999 23272 0 1 Srect
-23 23 31976 23249 1 0 Srect
-/Slw 0.691 def
-/Slrgb {0.000 0.000 0.000} def
-/Strgb {0.000 0.000 0.000} def
-/Slw 1.037 def
-Sbpa
-4240 21508 Sm
-5038 21332 SPl
-5836 21050 SPl
-6634 20734 SPl
-7432 20276 SPl
-8230 19801 SPl
-9028 19044 SPl
-9825 17953 SPl
-10623 16562 SPl
-11421 14608 SPl
-12219 12619 SPl
-13017 10296 SPl
-13815 8377 SPl
-14612 6969 SPl
-15410 5807 SPl
-16208 5103 SPl
-17006 5050 SPl
-17804 5455 SPl
-18602 5983 SPl
-19400 6898 SPl
-20197 8078 SPl
-20995 9521 SPl
-21793 11633 SPl
-22591 13675 SPl
-23389 15805 SPl
-24187 17583 SPl
-24985 19167 SPl
-25782 20153 SPl
-26580 20716 SPl
-27378 21227 SPl
-28176 21420 SPl
-28974 21561 SPl
-29772 21684 SPl
-30570 21790 SPl
-Sepa
-/Slrgb {0.376 0.376 0.376} def
-/Ssrgb {0.376 0.376 0.376} def
-4240 21508 255 0 1 Scc 
-4240 21508 213 1 0 Scc 
-5038 21332 255 0 1 Scc 
-5038 21332 213 1 0 Scc 
-5836 21050 255 0 1 Scc 
-5836 21050 213 1 0 Scc 
-6634 20734 255 0 1 Scc 
-6634 20734 213 1 0 Scc 
-7432 20276 255 0 1 Scc 
-7432 20276 213 1 0 Scc 
-8230 19801 255 0 1 Scc 
-8230 19801 213 1 0 Scc 
-9028 19044 255 0 1 Scc 
-9028 19044 213 1 0 Scc 
-9825 17953 255 0 1 Scc 
-9825 17953 213 1 0 Scc 
-10623 16562 255 0 1 Scc 
-10623 16562 213 1 0 Scc 
-11421 14608 255 0 1 Scc 
-11421 14608 213 1 0 Scc 
-12219 12619 255 0 1 Scc 
-12219 12619 213 1 0 Scc 
-13017 10296 255 0 1 Scc 
-13017 10296 213 1 0 Scc 
-13815 8377 255 0 1 Scc 
-13815 8377 213 1 0 Scc 
-14612 6969 255 0 1 Scc 
-14612 6969 213 1 0 Scc 
-15410 5807 255 0 1 Scc 
-15410 5807 213 1 0 Scc 
-16208 5103 255 0 1 Scc 
-16208 5103 213 1 0 Scc 
-17006 5050 255 0 1 Scc 
-17006 5050 213 1 0 Scc 
-17804 5455 255 0 1 Scc 
-17804 5455 213 1 0 Scc 
-18602 5983 255 0 1 Scc 
-18602 5983 213 1 0 Scc 
-19400 6898 255 0 1 Scc 
-19400 6898 213 1 0 Scc 
-20197 8078 255 0 1 Scc 
-20197 8078 213 1 0 Scc 
-20995 9521 255 0 1 Scc 
-20995 9521 213 1 0 Scc 
-21793 11633 255 0 1 Scc 
-21793 11633 213 1 0 Scc 
-22591 13675 255 0 1 Scc 
-22591 13675 213 1 0 Scc 
-23389 15805 255 0 1 Scc 
-23389 15805 213 1 0 Scc 
-24187 17583 255 0 1 Scc 
-24187 17583 213 1 0 Scc 
-24985 19167 255 0 1 Scc 
-24985 19167 213 1 0 Scc 
-25782 20153 255 0 1 Scc 
-25782 20153 213 1 0 Scc 
-26580 20716 255 0 1 Scc 
-26580 20716 213 1 0 Scc 
-27378 21227 255 0 1 Scc 
-27378 21227 213 1 0 Scc 
-28176 21420 255 0 1 Scc 
-28176 21420 213 1 0 Scc 
-28974 21561 255 0 1 Scc 
-28974 21561 213 1 0 Scc 
-29772 21684 255 0 1 Scc 
-29772 21684 213 1 0 Scc 
-30570 21790 255 0 1 Scc 
-30570 21790 213 1 0 Scc 
-/Slw 0.691 def
-/Slrgb {0.000 0.000 0.000} def
-3626 3626 3626 22457 Sln
-3626 4241 3239 4241 Sln
-2754 4241 0
-/Helvetica-0 findfont 970 yratio mul scalefont setfont
-(0) stringwidth pop add
-2 div xratio div
-dup 4 3 roll exch 90.000 cos mul sub 3 1 roll 90.000 sin mul sub 2 copy
-/fntsize {/Helvetica-0 findfont exch scalefont setfont } def
-90.000 970
-(0) Stxtl
-(0) stringwidth pop xratio div
-dup 4 3 roll exch 90.000 cos mul add 3 1 roll 90.000 sin mul add 2 copy
-pop pop pop pop
-3626 7761 3239 7761 Sln
-2754 7761 0
-/Helvetica-0 findfont 970 yratio mul scalefont setfont
-(.2) stringwidth pop add
-2 div xratio div
-dup 4 3 roll exch 90.000 cos mul sub 3 1 roll 90.000 sin mul sub 2 copy
-/fntsize {/Helvetica-0 findfont exch scalefont setfont } def
-90.000 970
-(.2) Stxtl
-(.2) stringwidth pop xratio div
-dup 4 3 roll exch 90.000 cos mul add 3 1 roll 90.000 sin mul add 2 copy
-pop pop pop pop
-3626 11282 3239 11282 Sln
-2754 11282 0
-/Helvetica-0 findfont 970 yratio mul scalefont setfont
-(.4) stringwidth pop add
-2 div xratio div
-dup 4 3 roll exch 90.000 cos mul sub 3 1 roll 90.000 sin mul sub 2 copy
-/fntsize {/Helvetica-0 findfont exch scalefont setfont } def
-90.000 970
-(.4) Stxtl
-(.4) stringwidth pop xratio div
-dup 4 3 roll exch 90.000 cos mul add 3 1 roll 90.000 sin mul add 2 copy
-pop pop pop pop
-3626 14802 3239 14802 Sln
-2754 14802 0
-/Helvetica-0 findfont 970 yratio mul scalefont setfont
-(.6) stringwidth pop add
-2 div xratio div
-dup 4 3 roll exch 90.000 cos mul sub 3 1 roll 90.000 sin mul sub 2 copy
-/fntsize {/Helvetica-0 findfont exch scalefont setfont } def
-90.000 970
-(.6) Stxtl
-(.6) stringwidth pop xratio div
-dup 4 3 roll exch 90.000 cos mul add 3 1 roll 90.000 sin mul add 2 copy
-pop pop pop pop
-3626 18323 3239 18323 Sln
-2754 18323 0
-/Helvetica-0 findfont 970 yratio mul scalefont setfont
-(.8) stringwidth pop add
-2 div xratio div
-dup 4 3 roll exch 90.000 cos mul sub 3 1 roll 90.000 sin mul sub 2 copy
-/fntsize {/Helvetica-0 findfont exch scalefont setfont } def
-90.000 970
-(.8) Stxtl
-(.8) stringwidth pop xratio div
-dup 4 3 roll exch 90.000 cos mul add 3 1 roll 90.000 sin mul add 2 copy
-pop pop pop pop
-3626 21843 3239 21843 Sln
-2754 21843 0
-/Helvetica-0 findfont 970 yratio mul scalefont setfont
-(1) stringwidth pop add
-2 div xratio div
-dup 4 3 roll exch 90.000 cos mul sub 3 1 roll 90.000 sin mul sub 2 copy
-/fntsize {/Helvetica-0 findfont exch scalefont setfont } def
-90.000 970
-(1) Stxtl
-(1) stringwidth pop xratio div
-dup 4 3 roll exch 90.000 cos mul add 3 1 roll 90.000 sin mul add 2 copy
-pop pop pop pop
-1687 13042 0
-/Helvetica-0 findfont 970 yratio mul scalefont setfont
-(power) stringwidth pop add
-2 div xratio div
-dup 4 3 roll exch 90.000 cos mul sub 3 1 roll 90.000 sin mul sub 2 copy
-/fntsize {/Helvetica-0 findfont exch scalefont setfont } def
-90.000 970
-(power) Stxtl
-(power) stringwidth pop xratio div
-dup 4 3 roll exch 90.000 cos mul add 3 1 roll 90.000 sin mul add 2 copy
-pop pop pop pop
-3626 3626 31184 3626 Sln
-4241 3626 4241 3239 Sln
-4241 2366 0
-/Helvetica-0 findfont 970 yratio mul scalefont setfont
-(1.6) stringwidth pop add
-2 div xratio div
-dup 4 3 roll exch 0.000 cos mul sub 3 1 roll 0.000 sin mul sub 2 copy
-/fntsize {/Helvetica-0 findfont exch scalefont setfont } def
-0.000 970
-(1.6) Stxtl
-(1.6) stringwidth pop xratio div
-dup 4 3 roll exch 0.000 cos mul add 3 1 roll 0.000 sin mul add 2 copy
-pop pop pop pop
-10624 3626 10624 3239 Sln
-10624 2366 0
-/Helvetica-0 findfont 970 yratio mul scalefont setfont
-(1.8) stringwidth pop add
-2 div xratio div
-dup 4 3 roll exch 0.000 cos mul sub 3 1 roll 0.000 sin mul sub 2 copy
-/fntsize {/Helvetica-0 findfont exch scalefont setfont } def
-0.000 970
-(1.8) Stxtl
-(1.8) stringwidth pop xratio div
-dup 4 3 roll exch 0.000 cos mul add 3 1 roll 0.000 sin mul add 2 copy
-pop pop pop pop
-17007 3626 17007 3239 Sln
-17007 2366 0
-/Helvetica-0 findfont 970 yratio mul scalefont setfont
-(2) stringwidth pop add
-2 div xratio div
-dup 4 3 roll exch 0.000 cos mul sub 3 1 roll 0.000 sin mul sub 2 copy
-/fntsize {/Helvetica-0 findfont exch scalefont setfont } def
-0.000 970
-(2) Stxtl
-(2) stringwidth pop xratio div
-dup 4 3 roll exch 0.000 cos mul add 3 1 roll 0.000 sin mul add 2 copy
-pop pop pop pop
-23389 3626 23389 3239 Sln
-23389 2366 0
-/Helvetica-0 findfont 970 yratio mul scalefont setfont
-(2.2) stringwidth pop add
-2 div xratio div
-dup 4 3 roll exch 0.000 cos mul sub 3 1 roll 0.000 sin mul sub 2 copy
-/fntsize {/Helvetica-0 findfont exch scalefont setfont } def
-0.000 970
-(2.2) Stxtl
-(2.2) stringwidth pop xratio div
-dup 4 3 roll exch 0.000 cos mul add 3 1 roll 0.000 sin mul add 2 copy
-pop pop pop pop
-29772 3626 29772 3239 Sln
-29772 2366 0
-/Helvetica-0 findfont 970 yratio mul scalefont setfont
-(2.4) stringwidth pop add
-2 div xratio div
-dup 4 3 roll exch 0.000 cos mul sub 3 1 roll 0.000 sin mul sub 2 copy
-/fntsize {/Helvetica-0 findfont exch scalefont setfont } def
-0.000 970
-(2.4) Stxtl
-(2.4) stringwidth pop xratio div
-dup 4 3 roll exch 0.000 cos mul add 3 1 roll 0.000 sin mul add 2 copy
-pop pop pop pop
-17405 1299 0
-/Helvetica-0 findfont 970 yratio mul scalefont setfont
-(b2Ha) stringwidth pop add
-2 div xratio div
-dup 4 3 roll exch 0.000 cos mul sub 3 1 roll 0.000 sin mul sub 2 copy
-/fntsize {/Helvetica-0 findfont exch scalefont setfont } def
-0.000 970
-(b2Ha) Stxtl
-(b2Ha) stringwidth pop xratio div
-dup 4 3 roll exch 0.000 cos mul add 3 1 roll 0.000 sin mul add 2 copy
-pop pop pop pop
-S showpage
+/cairo_flush_ascii85_file { cairo_ascii85_file status { cairo_ascii85_file flushfile } if } def
+/cairo_image { image cairo_flush_ascii85_file } def
+/cairo_imagemask { imagemask cairo_flush_ascii85_file } def
+%%EndProlog
+%%BeginSetup
+%%BeginResource: font f-0-0
+%!FontType1-1.1 f-0-0 1.0
+11 dict begin
+/FontName /f-0-0 def
+/PaintType 0 def
+/FontType 1 def
+/FontMatrix [0.001 0 0 0.001 0 0] readonly def
+/FontBBox {0 -217 708 729                                    } readonly def
+/Encoding 256 array
+0 1 255 {1 index exch /.notdef put} for
+dup 32 /space put
+dup 40 /parenleft put
+dup 41 /parenright put
+dup 46 /period put
+dup 48 /zero put
+dup 49 /one put
+dup 50 /two put
+dup 52 /four put
+dup 53 /five put
+dup 54 /six put
+dup 55 /seven put
+dup 56 /eight put
+dup 72 /H put
+dup 97 /a put
+dup 98 /b put
+dup 101 /e put
+dup 105 /i put
+dup 108 /l put
+dup 110 /n put
+dup 111 /o put
+dup 112 /p put
+dup 114 /r put
+dup 116 /t put
+dup 118 /v put
+dup 119 /w put
+readonly def
+currentdict end
+currentfile eexec
+f983ef0097ece636fb4a96c74d26ab84185f6dfa4a16a7a1c27bbe3f1156aea698df336d20b467
+b10e7f33846656653c5ac6962759d3056cbdb3190bac614b984bf5a132dc418192443014ba63de
+800d392b6fea026574bb2535fd7bb5338f35bf15a88ea328fdaa49670c7852e3d060f3c5d6b07f
+2ef6d0f22646c5d18e19a2ae3ee120390f6dd96f76dcf1e127de5e9299077a00c17c0d71e36e5b
+9d5ec58fceda57739a6a4214d4b79d6c48d2784b60c320323c7acddddf34db833cac0cf109f799
+69d114a330d372e5c978a66acc84e3fe5557f6240856a013ffaa0199444e5c5036f775eba4a5c5
+8cde66cf604b9aca2178431127b8a1ff7ed633a65c04600af5f573483112251caf36d87fcbcc51
+7cdc80a7fdf8e3c5ced0c3bfb6f2429abb36ea697fc697c357abd25d6b8d5f4a0a6892d4646a67
+931a9b9b60596a1aea2e0962018e26e0221a8452b0a8174dc1901738de1715402716d75689a9f9
+82380b6e571adf3da96d3a2f84e82865eff2238378100bd3e7fcfc9e69cab031ddbaf57812effc
+66cdf5f4394235d426a9235c76fc301043cba088dd953ebbbf63755374852962c78501c2ef9fc2
+80e4dcf3f25f769d41ca8111cb86d093bfd34bb1ce20f34dbf017922db78fd86d2c4bf727681d9
+6c21f73a8e9c033823ed7cce1962d4ff3ab0d368a446bb8161a41f199201ee2d31d9625aca7208
+14e3332b74444191f08736691958facea2d368dbef950599e13d1dbc6dd0b345d84f85b758500a
+c9fbeec1f320accada59b915ca688f5a70af282d9aa0bbe332c3e38c8205f7ca74f71d02cd481b
+86f16d691bbaaffd1c40cb0d19ff6a4ac6e74fe970c903341ec13595873fb25275b15b26535568
+a1f44fc7299c1b7fa02ead325032d36c2243ef04a1758b6b1c0fd8f978359491554bcae78b2b7d
+a64842e945b7e9401599ade2e71bb3c42b6c264e2714bbf952a4ef77c6b70ace85e34fd82c5c60
+fe201f1c4156ac94dddbf17cecde040cee389838420f1d2aec49e53179e0d94657654d7d3bf7b8
+1dd82d951ea78a24a8833ccd6ce569e3456e75ac40e7376a8a13fd5173bcdde0b377e28542046b
+44b5836bf4f37701fcbaf798791acfe01cb895b4384cb197a37d832cd7a15072e61e39663dcac5
+0067b6353cd075b063c0aafd39d8bed8636ade0e24cafba2053014e7afb3ad7351da979cab88c6
+fdd576a34f472a246f80ffc03a15fd66ed255f7067d46c508108724790a45e27fd6af8396be37b
+44fb87265906d16a7c4080c4cf31216a165ad8b72e52f39fe9d3cda24420635f956f9cedb20d35
+9f6083a3dc4bf8558a8618ec1cd619ffdf7126ca5635db4bddf6899591a657582e6bf031b3d0ae
+e97a5626670e490cdf1196b57d41ee190692f2d49b3a872703f032d3d1be30a3c132f0a939711b
+96f7131cd613bd48db70f5f93cf7420aa98e76733fa4ac203a7f5267c67c997d66d0491d2d2910
+3ce93c277413fc94f394b9704c7ebfdfcb98c656e5795f74e08fc35bcaf8e8885f4c1d4f73b448
+bee2a020acaf376234ff5cb6c3f3dabb5eae0b39aad8ea5125740372947d4a1f6f04bcfb9a0147
+840522f4837c25d4a3fbcb8f22de9a80cb3d13a7ab18076a13b9ada1345830530cc7a5050b4af5
+b86526320c42da4590a9b699b56ad0781fd572992e4cfcc696d257c911558d44376ebcdfd2e5fb
+6bd737248970b243543faf651d4366d34170f270960a98df7b745772ced683266e1c4a420ad19b
+89f88398ed756c763adf76d320285e0aaf53a8e4189296f491d0f113054b1de3870e56711a7f3a
+3c105274c67bc6a8f630534841c7a1c27eed85b2f0448066afe9c963f9db0af8c8f2baece7d439
+7c1b70d92f33186635e667e1f7ec958241b856bde2c4fd331ceb5092baf4eeffa170889ecde05c
+c5716fb5044a179bc78afda0b86e9d5937a2bdc096db8397d198cb4c4d53d4880dc5b93fe8c6e3
+d2f752ecf42e29f4286b0fe983d483da0061851c435a5f4847f79521926c657b64880364749d78
+8eee96655bb9f99235a34e249be0456582caa6a64c7d929e0b7a42ed0dd6204cc456cbea438211
+a02e091dd7659a4de404840a41b8ae157afa0606fad64920d7a080a80090e4001769127da81931
+ded8fa3537288e1a08f46c2d3726aed6216903f4249a7feac56e83731917cd1318bb2fc26be332
+c03d0f4b3904a87a8ef91506dc9c322d6f391b184573e528e71159468bbac06bacf77e9c9ab561
+cbef11a2db4199b9c5665e2e59a463d62c78229046ef2bec01f51179b739f86f263e4804b7ce19
+862c171d89d78bc1a698e05d5f8e4212662197a368178b5f1654b056a91a936ffed12f65346b77
+44bce9771f7e674e71e5b9c3e9f2de400877127ad9e3c89596e184ee3b55cb96c5d792e2dd31e2
+004a871df045d700f816b6bb05b7b069ea0f4b0a55527d08844629db1e67e453229f94da60393a
+0c9267dc2411516d9c5afaf1e952065dd16791e52152b4269d09be68fd3d077ba0bf168c4d7812
+0a61eb99ae9958996b79c2e6795e23dbdc6cd8641ff47dc3a99cf29ba4275f379e8a9b89f0653f
+b76fe7d875889bde3f878101c7511b839f5b0762cd207c1ed06c61ef8908eb854de0ee041ce2ae
+cc7c11203120a7e053c018b1a80272c36fbebde9cd163e3f7e011ae71d60c03feb118ae5101f29
+30bc5c538f380db4f5398a76217dc2110a5ca5a7c99dbeb6a3d8d79fff31382ef929b2c8f0ee49
+2ba593a1230f74a094bbbe2adc28cb3b9a003c1ff51f00f3a308f7e81ce96d5b14fc1bdb30fd99
+7016e2a4a5c17de68237550fc48e33d6431d58051b3e0a9ff0d6ac1736814119472ae323f7689b
+f78028a47a31b4ac885dcdf5992ff6382533a39386c38e36a1e423434529c689ef37c8c36ad1cb
+7404b916c961d525c27eca6cd16ef9da828eb4ef66bbc423891f0e3953b3c848d657579bc26f57
+46c96d1886fb6e2ebbcc16f517a0e743ae62c497263d3072480f4bd81714ec17142c289ff62d83
+e08c21ede522641bb0c9dcd0129ff9c81d4fd4ebe7411d9afd42ceaefaed541411be32e8294eb5
+77483942199e9239ceae10682d049707f3245f0d4e3ef395920e76b3efe6ab37e0aa501bd57113
+258d25245c9af7a2fc20e059c67b167c30955a594e2d87fbdbc45e45a087a3dbe74c6471adca77
+14fbf5516ae13f02373cbbdde1ece8f1e1c24eea80189ef14f36e1324dc9d9c4b05e2e6b2296a3
+c47cb6f4b6c6fadfca4e55a5d6f3f1d01fd357b37aedb2e1545ecadb736784d21d7c07f8e617d2
+cf105d78743ec9e0c70bedb2e5241b1aefcc5984f35cd126a40ad8e26ef9cd994a3850058360b3
+b3d740a57783ef40dae260eeb3687c15ef3c0b2890d204e55c3dd348146c588c35668f7fec7f47
+8b36b98b6acf381af72150683c8eaebbdc8505d1edbdcccc74a9430e3e78a8e9a0ffa5d6a80b7f
+b98767ebf5ad162bae8d4bed7cec0aa52c48b6695e51a0de6d2f8a9ea0b0646f6a7004ea4a4e99
+1e0606ce5fa22603ffcfbf45736ef99d7610e03ee3d6926019f4524ce7194ca83946c418678e8f
+b8c48c10acd3e6c7615f14ff4ee3d2e3f23d193a0b16016a67e60b673a777f9433853401503ad1
+55869880eeaa85d8e1e083b6dd7ec9dce031e832198e04a172b9f8cfed22a638e666036f179665
+75cc0293b43bb5f682fc38fa770c406d0f81eb47316c52067b58938db4a83bf0cf5c488ca374cc
+57f36864c8224576ce359f83aaae832d2889302ee827a3b853453e03f868e196cbd3939a5185f7
+3a37eb38825a1772b4ead2840f06a8bbaf071a1fe4482e0893236280bbc953ce2a9d42491f178b
+0ab9ab7f2a6486c8963af796611aadb08995d604b57d8326395cf4279de37f1a0ac07765d32322
+6f2a7bcac6d8815eb5ff19eadb1a0e57676e1cc5f38771ea9d8c4780273629f2e43cb14d5222a6
+e5f060481b8c95cd9af6e35869e9231d1453cf705e6b650a1f9eef8e2ebf75317437c12b1f78aa
+8c7fea9cd4dcda28425a0c12814d866b3657eebbfaf52449e456d8ba7431e94d9aaa7f9d23128d
+998e8bc5d7d7ce1406ffc636d8189ecdeab58d0d4ced296c44ffe7bde2725f6d26a35ac6e9d8b9
+ef60ef1a79da48a77d9347e2a8ab442c47bb84b73d3fe4d2bd8e6272e8fd4f8022a5e4abbc4bc0
+91e39b5ca84c0d44fda5cbad22252881d234e88d0a45deb7e1afe668a050b15d551c5659d4873e
+7b0a4e201ce9c314a186de5cc31be10dd953042eb7d932dfedf5ff9adbc2b07ba3f792bad9b106
+ffa6fb04fbdc7b4b87706e5ae88d2c5a73e3b36ed6b75707748c5afd2af638a1cb39e4f05f9032
+b46db0252b9015adad53c9d8aaf547a15f84806606c7672850a7e76ea724f91244cd3a724928f3
+537c00f9d0eaf85a778b45f319c4df77391b6838a2227c5aa0c08c734a7d80c175f672da211a43
+1c9978ae498a15b6e0d73172e5013940a99799e6f8285accc1ec34bc0ffa371460c711a40fe7fe
+5037dac30fe6e91c180c12a9b8278abffe9e4adaa6d5137e746eee3a8c42268ad3ac5f91084b0e
+baedd1ea1624ec451ab551df169b2e7bc9a066bb3bac89c51e65cfd123d54ce581fb212160cc42
+41b0437ab97cea9d65403a36152687d6a6f1c1101c673ce42565440aea8b37b9dcfeceec8c53f8
+cd3c2277ad06416f2d8153bc5b325b988ef3352a09b5009a1b063ea9e45ad70df9845398b2f4f9
+147ee8b428bf9c25147254739beb6f5c4f0436d5e63dc42103140d5420543d384864af52404e8b
+bf1856fe7f15e350476213c1b28adfa43b70b0d2ea2ba60d0ec9b06d763f3a6da65b2b898651ad
+af1d6f5400877030d8b45acff2a3e6ad0ae20000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+cleartomark
+%%EndResource
+%%BeginResource: font f-1-0
+%!FontType1-1.1 f-1-0 1.0
+11 dict begin
+/FontName /f-1-0 def
+/PaintType 0 def
+/FontType 1 def
+/FontMatrix [0.001 0 0 0.001 0 0] readonly def
+/FontBBox {-22 -189 766 729                                  } readonly def
+/Encoding 256 array
+0 1 255 {1 index exch /.notdef put} for
+dup 32 /space put
+dup 48 /zero put
+dup 50 /two put
+dup 58 /colon put
+dup 61 /equal put
+dup 72 /H put
+dup 80 /P put
+dup 95 /underscore put
+dup 101 /e put
+dup 102 /f put
+dup 111 /o put
+dup 114 /r put
+dup 115 /s put
+dup 116 /t put
+dup 119 /w put
+dup 120 /x put
+readonly def
+currentdict end
+currentfile eexec
+f983ef0097ece636fb4a96c74d26ab84185f6dfa4a16a7a1c27bbe3f1156aea698df336d20b467
+b10e7f33846656653c5ac6962759d3056cbdb3190bac614b984bf5a132dc418192443014ba63de
+800d392b6fea026574bb2535fd7bb5338f35bf15a88ea328fdaa49670c7852e3d060f3c5d6b07f
+2ef6d0f22646c5d18e19a2ae3ee120390f6dd96f76dcf1e127de5e9299077a00c17c0d71e36e5b
+9d5ec58fceda57739a6a4214d4b79d6c48d2784b60c320323c7acddddf34db833cac0cf109f799
+69d114a330d372e5c978a66acc84e3fe5557f6240856a013ffaa0199444e5c5036f775eba4a5c5
+8cde66cf604b9aca2178431127b8a1ff7ed633a65c04600af5f573483112251cacaecc7da90d73
+c5ec91557783f026804a22f6155bc35b68d0fe30e7bae7a170134489283f67be0388b70bbedade
+38bcc8f1663abac205d1d9453f9c85ae5f4f80483caa0091f05e6a04e24f17c86a2c6079a83ae8
+b7bb57333eeec73bd354c28d24c9575a89457f0f491c9eab374849569716fd02202e1b48dbe83e
+956cd8bd9d493a070e7dd9a2a4421d9e3ff25d81fc9a2ca47d148bd67f7190e9856d264c70c1b4
+cc302bcb5455c2d3651e7a1d3acbb5a088a36507934516062ade4749969fdc34fb53f650adbee4
+2f649b3ba695b70bbc3dee003e56dedee67b003425ec5cb7c482cb805285fc41a75b7d1efc82f1
+934425132bf6c87333dce61db99ac4a6913d13e98ef95e55c4751d0c4f7211b5b5ccaf6cbb5e61
+669dc81df192689ea97fbcc9189fe2bab3da51d79cd1907bb47e4e974de451abb425a67fc5d5d7
+3f14704bb6e5ebdb7da1e9aba474b79c50d5ce7fe5d3639ee28b13d46715e9350642785ff59cb1
+00c24118731d34a0b0641cba9a1236e31f14bc8fa227daab2b6002890f6d47a28f074c223fe548
+7e64e649a50ab076e1ae4eef1fbad6d87a7ea35b817df585791577ccd061a6389c6b1cbf0039a3
+125b26d34c9bece986a460de88a575a6ca79c5a7c250a1e39e23dddd9d1aa0d0c0c264e6a9fc1b
+68f0f1fe5837d907a9eefe927b7f6b6a8d11fecd8e93b769a7ac06a81ec2312d878582c83422a7
+f459cf47f6f606f34d1dc9168a9d46f91425af62865a0bd15587d98651d2a0074723ae4ea00f68
+7d88848f9e4c2e491bad44e2a259933f293367986e21893ba21fd6a8a3265204a956e371fe3c0d
+69f19d8b048c0051a8f08d005deb3728e25d93aba52cce395c24cf704e6aef0c68aeaf704bb5ff
+f03c1ece4f1c573d67c93216ef8ae6a7c9320d907438dbe2c674ba182977a5848d417bcc98f5fb
+71d459a144abacfb751d995a85a8fd1a5c7b5d21208e283916c91e9f8822a385729428c3c7432a
+1469823ab7a7a2df5c34db00bf80d7acf14c9771949ef46afee67e355430166e0d5c642a878e1e
+7dfaa2c0d2e2fa041faa6f2381245dc37d8e95c03a4a3b45a6b2cd7798dca362bae1457944484b
+a1fab4eea282b2c82f83832feed8bcea76ccdc5b5f3993b2d804c5d07fad5a55f817fd04d04bfc
+49b4844ac6bb4a0e4aad509fb09df842aef88f34ba6686c694d3a92f0b7508d066cab2dfd4aa02
+c50c0dac28b074f808d73b9db4d184e325630955a09791b6729c20a4d3851d95161aa3e4e93414
+710bffe6a62a39a57f949eb819505f09e3f7394dabafd86480099c45c554a879104e10420c3f67
+769e16c54acf774a07775d4e4561808e6fb3f23ec1a5aa2dc3a3756f9135eb3a1e99df92291944
+52c3585f4352258ba26610dba970c6a38dbe7b90baba3a49c51b1272169580b6c0054927093330
+b1e47ff85390106a38ded6836bd24c747a623fae22f78792c5322a3c8737913137e3dfd92558ed
+fd878fd3227b75fc3ee82ee17f9b2236c7f8370d8dd6b719260b6834b8cfc8a8488be8d09d7390
+da04723d2baa0c0134a918d88c2e4215a590f85497a2e19a806f94ad20fc3c852ff503dec92a72
+8d97b6d77cec2aa5ad6c4be81781e4a61f5928c714b13bc52ee56abfd7892419ea8f04a52f1d0d
+758d2e3fe286f44663a3a38e0074ae0f1e2e957049e05ff2a8a19a9f8a61c40f62f42d02fe742b
+33748b30784b7779cf4ef3ad2623513abff566424dc2536a2c30f9eea56c7d1bb037dad7f0a5d9
+56f69b4b2e0fa67de6c9777a4ca8593f801e09747dac79bfa1b6187e9e6b9666555de43f5c5b8f
+be72274b76183d1c8018118774894d0537d0cc10d6f76256194a0a6f89150d74b89e53dee51e43
+51ac0e9f7ec0d728c29fcfcf9ece93d7703bc2d26461e9ea6dd65c87aef28aef0f732b59b121fa
+67134b91fac1b9038b657772b96e62c2fc5a08ba9cf5fc3ef1cc2493643a1c118af2ac2d4015cb
+14c671857fd6c4fb5f872aa13997f6485e8b954d23dbab4c8f8aca2ebc8eb060e5562c8421f660
+3b89a600041a2179ef4fbfa17151c04f5a78f25da22be5703c3367663dc7c370066d5414260530
+e493dc3b6d58ef99c14cf8552ec4ad33778b80db75ef1f1de96aec839349e59e31730eb91ddb4f
+84ddb7900fd4fc2fd942eb32a6ef1e9c5abec2a1dc4634ea49227a9383a196ae8a89304b4d8160
+33557b422288b57860d6be6ea73f1317a09c55958d06a09132f3c089ff99d8c6b180dbff6beea7
+b0e7b8c93b20d730b436919fb0c533d7afe821ea130e723ee103b217fa993832d615c843906ac8
+92f71ae6ad8efa5903c50a38509a0d35c8fe4bdfef27ca5e463c60b9f7a7bcfae2c8bc6d9a06d3
+eb3950da60b5bc5666451d61c7d9837c8ddf3ff7a15339839740fe7ccba2d1c2f144ffea0750ac
+742be113fcf291412ff681c8049f88287d58e418d55acb4100d35d859511cd392355708d8d73a0
+8c20c03562265cb7f6db14eecc3d5bd640d92b866e846aa1d18a37146c9743d3047b42fe052508
+8571f524afc97c151d734a6c568a8cf7e4485a3a5eea67d7f3c03937e7ec4dde53597b0f43cf4e
+5d8798ab8768976282f51ba4138c1f51c8b87739ea6247a46661b007fbd451c72989d9232e1154
+dfd90f7e293036acd85ca3306834dcfb03dd9a4499ecab197fc4bc6f5b48f49b4bbd7e3ca934f0
+6a27c78cf3d70777abe53e99ad9ab63dea9c2ab16945e5bfa23e155fd750c50a743ef5c3b8d3ff
+43d2706ded64ad2ac038af4eedcb6e1d8a327226c615e4b59f97b9e971f446e304c6e5aa9b5c74
+791106f9b01618140ddb935950ed4b12b244326905e1214cfac399beb70a050d59963b68184eff
+36a96107bc1fb46444d30d93942b5571a0581704782ffaffeac8f51dcd4f71267a9b8e562ab320
+6b8a7356e48979cffcf13ce9a084adb7fa413cf20bbcbd8b248d2986f97244bd8b3d0ffa814ba2
+b1b3d7caf73cf7e36547bd475cb6fb805c6804e09147738f506524f37d8877dcb85b60bb1c2dbc
+740000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+cleartomark
+%%EndResource
+%%BeginResource: font f-1-1
+%!FontType1-1.1 f-1-1 1.0
+11 dict begin
+/FontName /f-1-1 def
+/PaintType 0 def
+/FontType 1 def
+/FontMatrix [0.001 0 0 0.001 0 0] readonly def
+/FontBBox {20 -229 610 729                                   } readonly def
+/Encoding 256 array
+0 1 255 {1 index exch /.notdef put} for
+dup 1 /uni03B2 put
+readonly def
+currentdict end
+currentfile eexec
+f983ef0097ece636fb4a96c74d26ab84185f6dfa4a16a7a1c27bbe3f1156aea698df336d20b467
+b10e7f33846656653c5ac6962759d3056cbdb3190bac614b984bf5a132dc418192443014ba63de
+800d392b6fea026574bb2535fd7bb5338f35bf15a88ea328fdaa49670c7852e3d060f3c5d6b07f
+2ef6d0f22646c5d18e19a2ae3ee120390f6dd96f76dcf1e127de5e9299077a00c17c0d71e36e5b
+9d5ec58fceda57739a6a4214d4b79d6c48d2784b60c320323c7acddddf34db833cac0cf109f799
+69d114a330d372e5c978a66acc84e3fe5557f6240856a013ffaa0199444e5c5036f775eba4a5c5
+8cde66cf604b9aca2178431127b8a1ff7ed633a65c04600af5f573483112251cae134058d6a192
+3c6b565d778d9618b31789d664bb543a0e576f2cf8e000b8c4d09f4e99d6df27d97e61255c27fb
+9815e9e405a0f061883f6caac1738a511ee423d2fcbb5a41c530b2cbedbd303448221c4ed17394
+1f89fbbaad956b59f1cfb83cd7385d722136ed866be693d9c7871401bd4d9d0a621b0494d23f0b
+d47e750ebaf91692a729b40308615805e8e1580531a5ced23c88717f3883b487dfd61051128911
+a684b6efad417995f12f73caa450fcd7a30600927a941f8752480073ac886f44405f3411f617a1
+51beaefb877048bfd9ef6f8b550bc4954d7fb5ee3ab3605b08a163e96ce265138cfd584eefd093
+4159b1d161c30ff723fe4931919da69b23c5e9dc175186430139f0ade28874c1116ad897507d9c
+fde39e460fd41d8e0bd1b800e954a7a1bad0c93182465584b4d91e751f50dd0246604e1a96408a
+a6b8f5ccf04572e79c11b00f4b79cc7cc5f2ee3b044b7dd255758aaa1dd6a33f050a5485d8ccc9
+e0535b3ac49badde5c3cae67d13d8fc68c202da6637fa2620a3b561636fd9936335386bc66ebd4
+a2e2af5e2e2fd2118b00a907cae361697e5ee66ba7081a082cb25f9a0000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000
+cleartomark
+%%EndResource
+%%EndSetup
+%%Page: 1 1
+%%BeginPageSetup
+%%PageBoundingBox: 0 0 525 338
+%%EndPageSetup
+q 0 0 525 338 rectclip
+1 0 0 -1 0 338 cm q
+1 g
+0 0 525 337.5 re f
+49.5 27 463.5 266.25 re f
+0 g
+BT
+10.5 0 0 -10.5 239.528252 323.676 Tm
+/f-0-0 1 Tf
+(b2Ha \(alternative\))Tj
+-9.540084 1.379286 Td
+(1.75)Tj
+12.540584 0 Td
+(2.00)Tj
+12.540584 0 Td
+(2.25)Tj
+0.000000625849 -10.5 -10.499999 -0.000000625849 21.366 174.420744 Tm
+(p)Tj
+0.000000625849 -10.5 -10.499999 -0.000000625849 21.366 168.582744 Tm
+(o)Tj
+0.000000625849 -10.5 -10.499999 -0.000000625849 21.366 162.744745 Tm
+(w)Tj
+0.000000625849 -10.5 -10.499999 -0.000000625849 21.366001 155.163746 Tm
+(e)Tj
+0.000000625849 -10.5 -10.499999 -0.000000625849 21.366001 149.325746 Tm
+(r)Tj
+10.5 0 0 -10.5 27.405 246.268347 Tm
+(0.2)Tj
+0 4.915128 Td
+(0.4)Tj
+0 4.915127 Td
+(0.6)Tj
+0 4.915128 Td
+(0.8)Tj
+10.5 0 0 -10.5 27.405 39.832988 Tm
+(1.0)Tj
+10.5 0 0 -10.5 212.17576 21.710992 Tm
+/f-1-0 1 Tf
+(Power of test of H0: )Tj
+/f-1-1 1 Tf
+<01>Tj
+/f-1-0 1 Tf
+(_x = 2)Tj
+ET
+0.27451 0.509804 0.705882 rg
+1.5 w
+0 J
+0 j
+[] 0.0 d
+2 M q 1 0 0 1 0 0 cm
+70.566 42.199 m 83.734 42.715 l 96.902 45.813 l 110.07 48.133 l 123.238
+ 52.004 l 136.406 60.52 l 149.574 73.164 l 162.742 92 l 175.91 113.418 l
+ 189.078 138.965 l 202.246 165.027 l 215.41 194.188 l 228.578 229.797 l 
+241.746 253.277 l 254.914 271.086 l 268.082 278.824 l 281.25 280.375 l 294.418
+ 279.082 l 307.586 269.277 l 320.754 253.535 l 333.922 231.859 l 347.09 
+209.926 l 360.254 179.996 l 373.422 151.609 l 386.59 121.16 l 399.758 98.969
+ l 412.926 81.422 l 426.094 65.164 l 439.262 57.164 l 452.43 48.648 l 465.598
+ 44.004 l 478.766 41.168 l 491.934 39.102 l S Q
+72.418 42.199 m 72.418 39.73 68.719 39.73 68.719 42.199 c 68.719 44.668
+ 72.418 44.668 72.418 42.199 c h
+72.418 42.199 m f
+85.586 42.715 m 85.586 40.246 81.887 40.246 81.887 42.715 c 81.887 45.184
+ 85.586 45.184 85.586 42.715 c h
+85.586 42.715 m f
+98.754 45.813 m 98.754 43.344 95.055 43.344 95.055 45.813 c 95.055 48.277
+ 98.754 48.277 98.754 45.813 c h
+98.754 45.813 m f
+111.922 48.133 m 111.922 45.668 108.219 45.668 108.219 48.133 c 108.219
+ 50.602 111.922 50.602 111.922 48.133 c h
+111.922 48.133 m f
+125.09 52.004 m 125.09 49.535 121.387 49.535 121.387 52.004 c 121.387 54.473
+ 125.09 54.473 125.09 52.004 c h
+125.09 52.004 m f
+138.258 60.52 m 138.258 58.051 134.555 58.051 134.555 60.52 c 134.555 62.988
+ 138.258 62.988 138.258 60.52 c h
+138.258 60.52 m f
+151.426 73.164 m 151.426 70.695 147.723 70.695 147.723 73.164 c 147.723
+ 75.633 151.426 75.633 151.426 73.164 c h
+151.426 73.164 m f
+164.594 92 m 164.594 89.535 160.891 89.535 160.891 92 c 160.891 94.469 
+164.594 94.469 164.594 92 c h
+164.594 92 m f
+177.758 113.418 m 177.758 110.953 174.059 110.953 174.059 113.418 c 174.059
+ 115.887 177.758 115.887 177.758 113.418 c h
+177.758 113.418 m f
+190.926 138.965 m 190.926 136.496 187.227 136.496 187.227 138.965 c 187.227
+ 141.434 190.926 141.434 190.926 138.965 c h
+190.926 138.965 m f
+204.094 165.027 m 204.094 162.559 200.395 162.559 200.395 165.027 c 200.395
+ 167.496 204.094 167.496 204.094 165.027 c h
+204.094 165.027 m f
+217.262 194.188 m 217.262 191.719 213.563 191.719 213.563 194.188 c 213.563
+ 196.656 217.262 196.656 217.262 194.188 c h
+217.262 194.188 m f
+230.43 229.797 m 230.43 227.328 226.73 227.328 226.73 229.797 c 226.73 
+232.266 230.43 232.266 230.43 229.797 c h
+230.43 229.797 m f
+243.598 253.277 m 243.598 250.813 239.895 250.813 239.895 253.277 c 239.895
+ 255.746 243.598 255.746 243.598 253.277 c h
+243.598 253.277 m f
+256.766 271.086 m 256.766 268.617 253.063 268.617 253.063 271.086 c 253.063
+ 273.551 256.766 273.551 256.766 271.086 c h
+256.766 271.086 m f
+269.934 278.824 m 269.934 276.359 266.23 276.359 266.23 278.824 c 266.23
+ 281.293 269.934 281.293 269.934 278.824 c h
+269.934 278.824 m f
+283.102 280.375 m 283.102 277.906 279.398 277.906 279.398 280.375 c 279.398
+ 282.84 283.102 282.84 283.102 280.375 c h
+283.102 280.375 m f
+296.27 279.082 m 296.27 276.617 292.566 276.617 292.566 279.082 c 292.566
+ 281.551 296.27 281.551 296.27 279.082 c h
+296.27 279.082 m f
+309.438 269.277 m 309.438 266.809 305.734 266.809 305.734 269.277 c 305.734
+ 271.746 309.438 271.746 309.438 269.277 c h
+309.438 269.277 m f
+322.605 253.535 m 322.605 251.07 318.902 251.07 318.902 253.535 c 318.902
+ 256.004 322.605 256.004 322.605 253.535 c h
+322.605 253.535 m f
+335.77 231.859 m 335.77 229.395 332.07 229.395 332.07 231.859 c 332.07 
+234.328 335.77 234.328 335.77 231.859 c h
+335.77 231.859 m f
+348.938 209.926 m 348.938 207.461 345.238 207.461 345.238 209.926 c 345.238
+ 212.395 348.938 212.395 348.938 209.926 c h
+348.938 209.926 m f
+362.105 179.996 m 362.105 177.527 358.406 177.527 358.406 179.996 c 358.406
+ 182.461 362.105 182.461 362.105 179.996 c h
+362.105 179.996 m f
+375.273 151.609 m 375.273 149.141 371.574 149.141 371.574 151.609 c 371.574
+ 154.078 375.273 154.078 375.273 151.609 c h
+375.273 151.609 m f
+388.441 121.16 m 388.441 118.691 384.742 118.691 384.742 121.16 c 384.742
+ 123.629 388.441 123.629 388.441 121.16 c h
+388.441 121.16 m f
+401.609 98.969 m 401.609 96.5 397.906 96.5 397.906 98.969 c 397.906 101.438
+ 401.609 101.438 401.609 98.969 c h
+401.609 98.969 m f
+414.777 81.422 m 414.777 78.953 411.074 78.953 411.074 81.422 c 411.074
+ 83.891 414.777 83.891 414.777 81.422 c h
+414.777 81.422 m f
+427.945 65.164 m 427.945 62.695 424.242 62.695 424.242 65.164 c 424.242
+ 67.633 427.945 67.633 427.945 65.164 c h
+427.945 65.164 m f
+441.113 57.164 m 441.113 54.699 437.41 54.699 437.41 57.164 c 437.41 59.633
+ 441.113 59.633 441.113 57.164 c h
+441.113 57.164 m f
+454.281 48.648 m 454.281 46.184 450.578 46.184 450.578 48.648 c 450.578
+ 51.117 454.281 51.117 454.281 48.648 c h
+454.281 48.648 m f
+467.445 44.004 m 467.445 41.539 463.746 41.539 463.746 44.004 c 463.746
+ 46.473 467.445 46.473 467.445 44.004 c h
+467.445 44.004 m f
+480.613 41.168 m 480.613 38.699 476.914 38.699 476.914 41.168 c 476.914
+ 43.633 480.613 43.633 480.613 41.168 c h
+480.613 41.168 m f
+493.781 39.102 m 493.781 36.637 490.082 36.637 490.082 39.102 c 490.082
+ 41.57 493.781 41.57 493.781 39.102 c h
+493.781 39.102 m f
+Q q
+49.5 280 462.5 2 re W n
+0.501961 g
+0.9 w
+0 J
+0 j
+[ 2.7 2.7] 0 d
+1.154701 M q 1 0 0 1 0 0 cm
+49.5 281.148 m 513 281.148 l S Q
+Q q
+0 g
+0.75 w
+0 J
+0 j
+[] 0.0 d
+1.154701 M q 1 0 0 1 0 0 cm
+149.574 293.625 m 149.574 297.375 l S Q
+q 1 0 0 1 0 0 cm
+281.25 293.625 m 281.25 297.375 l S Q
+q 1 0 0 1 0 0 cm
+412.926 293.625 m 412.926 297.375 l S Q
+q 1 0 0 1 0 0 cm
+49.125 242.441 m 45.375 242.441 l S Q
+q 1 0 0 1 0 0 cm
+49.125 190.832 m 45.375 190.832 l S Q
+q 1 0 0 1 0 0 cm
+49.125 139.223 m 45.375 139.223 l S Q
+q 1 0 0 1 0 0 cm
+49.125 87.613 m 45.375 87.613 l S Q
+q 1 0 0 1 0 0 cm
+49.125 36.004 m 45.375 36.004 l S Q
+q 1 0 0 1 0 0 cm
+49.125 293.25 m 513.375 293.25 l S Q
+q 1 0 0 1 0 0 cm
+49.5 293.625 m 49.5 26.625 l S Q
+q 1 0 0 1 0 0 cm
+49.125 27 m 513.375 27 l S Q
+q 1 0 0 1 0 0 cm
+513 293.625 m 513 26.625 l S Q
+Q q
+149 27 2 8 re W n
+q
+149 27 2 8 re W n
+% Fallback Image: x=149 y=27 w=2 h=8 res=300ppi size=918
+[ 2.16 0 0 -8.16 149 35.16 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceGray setcolorspace
+<<
+  /ImageType 1
+  /Width 9
+  /Height 34
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 9 0 0 -34 0 34 ]
+>>
+cairo_image
+ Gar8OJ:b/,W2Pq;+Sc!#iPXRQ6"#q.N<'#ElP@8~>
+Q
+Q q
+280 27 2 8 re W n
+q
+280 27 2 8 re W n
+% Fallback Image: x=280 y=27 w=2 h=8 res=300ppi size=918
+[ 2.16 0 0 -8.16 280 35.16 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceGray setcolorspace
+<<
+  /ImageType 1
+  /Width 9
+  /Height 34
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 9 0 0 -34 0 34 ]
+>>
+cairo_image
+ Gar8OJ:]U#Ll.'^8c'#$%j+"5rI:&_PlUk_/Jau~>
+Q
+Q q
+412 27 2 8 re W n
+q
+412 27 2 8 re W n
+% Fallback Image: x=412 y=27 w=2 h=8 res=300ppi size=918
+[ 2.16 0 0 -8.16 412 35.16 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceGray setcolorspace
+<<
+  /ImageType 1
+  /Width 9
+  /Height 34
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 9 0 0 -34 0 34 ]
+>>
+cairo_image
+ Gar8OJ:b/8Pc1OZ['[4?s*m1ZpujpJN&%Uk!(5WZTE~>
+Q
+Q q
+49 35 464 2 re W n
+q
+49 35 464 2 re W n
+% Fallback Image: x=49 y=35 w=464 h=2 res=300ppi size=52218
+[ 464.16 0 0 -2.16 49 37.16 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceGray setcolorspace
+<<
+  /ImageType 1
+  /Width 1934
+  /Height 9
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 1934 0 0 -9 0 9 ]
+>>
+cairo_image
+ Gb"0T0b+4]'SYMX15.,%$B#Id@S.$5Vq8QaM30_(ngHso5s`[(k*G`Us0mU/rQX#_c$n%4X
+ gO5H!-,2GT@"T#mSW:3H34@.[\:^pW%hQ,(bTPSY-GCfoE/CF;U3Z/+KdBZ(;0b.Y,0pK2d
+ jGD7V:Zf?!U&_H3;)+;VFQXJ@KGgD=e#@=AWLMe/0fQ$l:c:\$3ErUkc*GcMQf7&D-#kN8=
+ PSD9f'C%2c>1`MJS2(L4V_i8V^%N_d&FC((n9L5Qt.UW2l'0jN3F/nur?Ys4em`<u~>
+Q
+Q q
+149 37 2 50 re W n
+q
+149 37 2 50 re W n
+% Fallback Image: x=149 y=37 w=2 h=50 res=300ppi size=5643
+[ 2.16 0 0 -50.16 149 87.16 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceRGB setcolorspace
+<<
+  /ImageType 1
+  /Width 9
+  /Height 209
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 0 1 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 9 0 0 -209 0 209 ]
+>>
+cairo_image
+ Gb"0L0+5W^*6.MmV]Z6L%0h`/6doG;-t4ou/@$T@VINgbLbKZM'Fk&PTF6Jt_Sd,66d$Hn?
+ 1`F;QK&X.`u$%SlsHNPZHn(e+:ne]!eETZ&.%pGU^k(9a3N4p@b[u!Npc>0g\jhq78Hlr=c
+ 69&,[O[%9qM]JQVjY96Aa9KE+&RVM;'u&Ed&:spaJ-fR&q5mi`@0]>8]R@X([NTq"&TfnkD
+ bJI.QGs7XU3#0;H^UI`\2eJO'6/:Iho^Du~>
+Q
+Q q
+280 37 2 50 re W n
+q
+280 37 2 50 re W n
+% Fallback Image: x=280 y=37 w=2 h=50 res=300ppi size=5643
+[ 2.16 0 0 -50.16 280 87.16 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceGray setcolorspace
+<<
+  /ImageType 1
+  /Width 9
+  /Height 209
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 9 0 0 -209 0 209 ]
+>>
+cairo_image
+ Gb"[2s8W+S%j1fMs*p7far"]K1.E.VN)9eu$ioQ>"]G~>
+Q
+Q q
+412 37 2 50 re W n
+q
+412 37 2 50 re W n
+% Fallback Image: x=412 y=37 w=2 h=50 res=300ppi size=5643
+[ 2.16 0 0 -50.16 412 87.16 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceRGB setcolorspace
+<<
+  /ImageType 1
+  /Width 9
+  /Height 209
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 0 1 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 9 0 0 -209 0 209 ]
+>>
+cairo_image
+ Gb"[2*s@&kqXkC.*^+iA*u0`,NCo1&NCo1&NCo1&NCo1&NCo1&NCo1&NCo1&NCo1&NCo<Yp
+ &<-1XAZh5r[V,r*37T-Xd@k4[K%3&If;NWmHL/.B.%OU2/hZg\bg7E`IV^BcE$pb4!<le6o
+ U>dq_3[8e?q)]d[l9OSLIM3p2.Ngo(L7Vs8PI)+2@f2R5Wii[N)jW*,DjJ^@NhW'_V@LhZ6
+ Nd_cR6GNqc5S~>
+Q
+Q q
+49 87 464 2 re W n
+q
+49 87 464 2 re W n
+% Fallback Image: x=49 y=87 w=464 h=2 res=300ppi size=52218
+[ 464.16 0 0 -2.16 49 89.16 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceRGB setcolorspace
+<<
+  /ImageType 1
+  /Width 1934
+  /Height 9
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 0 1 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 1934 0 0 -9 0 9 ]
+>>
+cairo_image
+ Gb"0Wc"dtY(ru1FbAq8^?#qFu6+fdF-OVp_H8_"&$R-FPU6hS[ML&*'q]b^8[C$,rO;AS!U
+ e)\cA:rR.NN(IYOL^1ZXbi.m0RQ+OF_@:ESs^\RR7JTtFnu"8?N?ab<i]6eW`H0@B)M5eql
+ +?aNa-o(f/**pK:DuC!:j9Y-/)),?MD#H!5S*0D>W>K:$6+sI!VdGf_t"!VJ1p2dqgog<!r
+ []KgHqWdr\k38bM<2BGgg"P0;sq\dZK<2X0d5qP[oofm+XP8P#l_!$G3$SJLT>Ol3,Y!-"U
+ Pe#7>Wd+LKC=\nb^H9<5bmAA?V#$i\Y8/;U<2,3]<Hm5O2)&Xk)J6F^rbXPYj)O3>OeGXU:
+ -0X"Ck=-pOZO?ha*/R'M[$t/Kk&i6UJ0D>u5'8D=n(]864P]:C"N)o]]1F?5""b5fj9l(l,
+ h2nEk#G<Mbnj,^G<#cdm-Mn^TcgZS!.Y1teGt-;`A>%<1Q0Nf_O2@Dq41hN#UIq#'IK".E&
+ ]D3C0fHc!'i-%AS&JGV39o=;ap<QjFVG)qI"_UE[:^96*&ONU>8cu'sDBR!">EA]7#.RjeL
+ #hl(q;&l@#1C\LcHoBps[T('$HO0eoA9>(dh0!N8ZjNJ`4spNG<%*;*)[j?IVb$32K.)\iA
+ RLR<FREBTn>m:1X8'Q-kQTJ1A\,"XWlKmB.egU;NJDSs"5%GlKG\,TBU4TL!5+fPYG*$hsk
+ G<MODFue+A:aFQk'Lkt05^D35eK*2[mar8@oB:(ooXuj\!":HBC&idbcX5ESYHGCj?ZUR2s
+ $tuH>p60OTJ2OD!6XmqWU<kF8hT#tL$)r-U_s0*#a/p&J<Oj)([c+N*`$'Ym/G%U,h2l/-B
+ dZO1C1WJ~>
+Q
+Q q
+149 89 2 49 re W n
+q
+149 89 2 49 re W n
+% Fallback Image: x=149 y=89 w=2 h=49 res=300ppi size=5535
+[ 2.16 0 0 -49.2 149 138.2 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceGray setcolorspace
+<<
+  /ImageType 1
+  /Width 9
+  /Height 205
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 9 0 0 -205 0 205 ]
+>>
+cairo_image
+ Gb"[2ki'G:s$:%W1!1>EN&!j?UPr%S?3UCaW8ju~>
+Q
+Q q
+280 89 2 49 re W n
+q
+280 89 2 49 re W n
+% Fallback Image: x=280 y=89 w=2 h=49 res=300ppi size=5535
+[ 2.16 0 0 -49.2 280 138.2 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceGray setcolorspace
+<<
+  /ImageType 1
+  /Width 9
+  /Height 205
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 9 0 0 -205 0 205 ]
+>>
+cairo_image
+ Gb"[2s8W+S%j1fMs*p7far"]K1.E.VN)9dc"os8+ins~>
+Q
+Q q
+412 89 2 49 re W n
+q
+412 89 2 49 re W n
+% Fallback Image: x=412 y=89 w=2 h=49 res=300ppi size=5535
+[ 2.16 0 0 -49.2 412 138.2 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceGray setcolorspace
+<<
+  /ImageType 1
+  /Width 9
+  /Height 205
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 9 0 0 -205 0 205 ]
+>>
+cairo_image
+ Gb"[2s4>/DO8adI-tAJrar"]K1.E.V%"&H`-s>Qf~>
+Q
+Q q
+49 138 464 2 re W n
+q
+49 138 464 2 re W n
+% Fallback Image: x=49 y=138 w=464 h=2 res=300ppi size=52218
+[ 464.16 0 0 -2.16 49 140.16 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceRGB setcolorspace
+<<
+  /ImageType 1
+  /Width 1934
+  /Height 9
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 0 1 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 1934 0 0 -9 0 9 ]
+>>
+cairo_image
+ Gb"0WheQ,0(ru1<Q[(<Z+VNU!?$%NJ/qiScm^u[:)`7sXejXE)m4N-]Rr&]NX23pp3_.PJm
+ +=-0S`j7cOF@VQGA;8R'2Lg)?^s@=F)g,`pn6eA,SF-b3#qo(!4m9ah,7Uf>*[A7T7&`e?!
+ >l?2k0a2F5tr^FBAOc[G,OSDOShIF;=ingU3l%"7+G346rI*2sFQae7^\_\ES)rdTHRcB<b
+ R_ZE+1'2#t='WYO:0*dXfbc#_N"Oj4>"1R`%YPAC1sH['a\OSg5l$R="t"&OrR)M!,jeV_U
+ 7cZjB.=*Is7]Dsd`W<P&ek$JPb<7A1qKDMip/rW%o%6uYs<6+$=do;)hTs"Hh9<6UsmrMc9
+ 3X^=YI;-lO;uJ[e9BQJO=fk^\j/,_R87qsR1";5D_me5%^RY#i]lYlc<\B``\>e*GdTHRcB
+ @1DBZE-;6@%-A[WMpL1kY`fC[enM;Zud)Ym-<SGmnNKQb-lCu!1Gp.A&_5$S!D8#!+U8`\h
+ i?lBNqoe/rZ+<AB_R*j`8dP!5N608;*iYJ8R3oMVVNd42u3=PIpkqrZR_F!0a@+i*O'c)VC
+ L]gu!'V=#q6hUT"HjQt`QfTo`ugK>Cq!!-BY*M`Z?"9:^/?phV[qkImkOgs&LT"e]!^T/Yf
+ ME?+3o!8uDM)gcgF>(4HEr;X'>gPhW.\KdXK!.6[\1W)XM!4m/I;6a$ZoCT/O?>AcK$_+iu
+ 5G[lPd#<m?!%(S8al(^1$Zi;2e"1Y6r"^(`!@VP4.ah8u:lM8T[sP/Y02;,n?:d1,!9Imo!
+ DFL1j3dAIoP!'Cc@nKVW<T#_BrZX`:%Lh;~>
+Q
+Q q
+149 140 2 50 re W n
+q
+149 140 2 50 re W n
+% Fallback Image: x=149 y=140 w=2 h=50 res=300ppi size=5643
+[ 2.16 0 0 -50.16 149 190.16 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceGray setcolorspace
+<<
+  /ImageType 1
+  /Width 9
+  /Height 209
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 9 0 0 -209 0 209 ]
+>>
+cairo_image
+ Gb"[2ki'G:s$:%W1!1>EN&!j?UPr%S`=)_NaTa!~>
+Q
+Q q
+280 140 2 50 re W n
+q
+280 140 2 50 re W n
+% Fallback Image: x=280 y=140 w=2 h=50 res=300ppi size=5643
+[ 2.16 0 0 -50.16 280 190.16 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceGray setcolorspace
+<<
+  /ImageType 1
+  /Width 9
+  /Height 209
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 9 0 0 -209 0 209 ]
+>>
+cairo_image
+ Gb"[2s8W+S%j1fMs*p7far"]K1.E.VN)9eu$ioQ>"]G~>
+Q
+Q q
+412 140 2 50 re W n
+q
+412 140 2 50 re W n
+% Fallback Image: x=412 y=140 w=2 h=50 res=300ppi size=5643
+[ 2.16 0 0 -50.16 412 190.16 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceGray setcolorspace
+<<
+  /ImageType 1
+  /Width 9
+  /Height 209
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 9 0 0 -209 0 209 ]
+>>
+cairo_image
+ Gb"[2s4>/DO8adI-tAJrar"]K1.E.V$q_B;NTC=B~>
+Q
+Q q
+49 190 464 2 re W n
+q
+49 190 464 2 re W n
+% Fallback Image: x=49 y=190 w=464 h=2 res=300ppi size=52218
+[ 464.16 0 0 -2.16 49 192.16 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceRGB setcolorspace
+<<
+  /ImageType 1
+  /Width 1934
+  /Height 9
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 0 1 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 1934 0 0 -9 0 9 ]
+>>
+cairo_image
+ Gb"0WheQ+u*67U@Q[.P_FW,D7Y.A9P5sjmX(IDrfDHbEV-5Ns2ejX[>-ad,41F[ueH#1&Lk
+ *G!pO]eCELTBnN7d#F@.X]QfGe`_YptWrGkMmd_1`A6_`l?#I!J"K[Xk%AkV,EH$!dMf(<u
+ ^>"QQ;]B)gkA14rkU_W4Jt[ldAo9r+#7khHbEK4I$.YWmtjaDOShIF;=inZH:3[__@f9eH#
+ 6\;@WP*m<e`Im1m[HrT9lNF=tA4=K2C?3]cMac`K8)m`PH2kO__7)UK"\C&f/N9=8K&C8i6
+ l)(>Z<?FI>P5B^1q-(P5/Q<R/B]C2,h>FX'O!+3n3o;Z\EgQp+di69X'B6W#\^<B.2!rA/+
+ Al[[bkoK">!&.rW:rk>L5Tl_cl<l<U$NPK%'FLhBF?2"E"n7ggVD.9r]MC[c8EU&%agQ%d2
+ jm?/3X^Ho=/2r>9m?-Q9&])rF=s4^Q=[&,alRQk=TDjN-71'AWWD=CV&JRV`kks#q>L4b/8
+ ];sk5tR:V&JirGUhmj:jr*6#O,JYs&c9%BM:#.O[qkleY[&h!C/;t7Urd*==d'W!B_b*V;s
+ hWcS'd2c3=!hrr0X3RrZ%jSHZf9;bp<Z+(TRF%I%+_s%9,NWgdb2.\-_CL+F;So:dE/^%%g
+ @d+br5ld!76cc2HV6g7j+cg[YQi&0EW5=]?qNfKTXQBof"%"oE3!GG0?W5qjG5[u@q5]8<W
+ 4nlALV8S[A0#2+%WWB<6+3V5'cJE>-k5kk);@Pm$/Caa-a&3B=G'q`KHuIPTO<:*!4Zr.'7
+ g&[BV&Jif+75grZZ/LI?!g,nk5kk,;@Pm$C8q1AYVr<k~>
+Q
+Q q
+149 192 2 49 re W n
+q
+149 192 2 49 re W n
+% Fallback Image: x=149 y=192 w=2 h=49 res=300ppi size=5535
+[ 2.16 0 0 -49.2 149 241.2 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceGray setcolorspace
+<<
+  /ImageType 1
+  /Width 9
+  /Height 205
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 9 0 0 -205 0 205 ]
+>>
+cairo_image
+ Gb"[2ki'G:s$:%W1!1>EN&!j?UPr%S?3UCaW8ju~>
+Q
+Q q
+280 192 2 49 re W n
+q
+280 192 2 49 re W n
+% Fallback Image: x=280 y=192 w=2 h=49 res=300ppi size=5535
+[ 2.16 0 0 -49.2 280 241.2 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceGray setcolorspace
+<<
+  /ImageType 1
+  /Width 9
+  /Height 205
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 9 0 0 -205 0 205 ]
+>>
+cairo_image
+ Gb"[2s8W+S%j1fMs*p7far"]K1.E.VN)9dc"os8+ins~>
+Q
+Q q
+412 192 2 49 re W n
+q
+412 192 2 49 re W n
+% Fallback Image: x=412 y=192 w=2 h=49 res=300ppi size=5535
+[ 2.16 0 0 -49.2 412 241.2 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceGray setcolorspace
+<<
+  /ImageType 1
+  /Width 9
+  /Height 205
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 9 0 0 -205 0 205 ]
+>>
+cairo_image
+ Gb"[2s4>/DO8adI-tAJrar"]K1.E.V%"&H`-s>Qf~>
+Q
+Q q
+49 241 464 2 re W n
+q
+49 241 464 2 re W n
+% Fallback Image: x=49 y=241 w=464 h=2 res=300ppi size=52218
+[ 464.16 0 0 -2.16 49 243.16 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceRGB setcolorspace
+<<
+  /ImageType 1
+  /Width 1934
+  /Height 9
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 0 1 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 1934 0 0 -9 0 9 ]
+>>
+cairo_image
+ Gb"0W]h;R,*/F(]QT5n]]`u'Td`k2^*AY-h:+j7W:a[2%MCk(@748F!<a2=>Cb6Q?`.TCN@
+ OsHt+_aKc=45fWS>j%s70C;G&'kKY9],*)n.7^U:rmDBqu)!E^api\-i6Vl6:#o*!$+4JrU
+ nIoCs1_JBMNji4Jl;aWp?Ne/k^,6=+*gYgrIh@Z%_K5\b%]Y\gWh9lFNtFC=6;dT[!?1q^o
+ tu;5sYaMc(#Bs)ndXY+]f-)X84?E-,-ISd$jA<9':ilG%WmQJA<_mb;sMB`KtVW<Q`a8i6V
+ /;5sY%Blk]aY!Z-G8a0OM&kY$!l").%5)=eh.i0!<daJ20KMi8p@$GC+`hQK8\5MS\o\S'k
+ /V0jIAF;tL=F(lJK2R]`E./l(8*3uMTt<\NSH:)E^cs6t!">_sot\@n.b1tET)sOG.[A/";
+ _FE#h?#rL00U`<^LeIS?C0LPcT!mD:tJE*T9nC9ms4irMu*d+(>b;4"[G/0j/D:@==d'_!J
+ !'9#(r4QF`_`(;Vg$Z\IS[P8Z1%<:!mWRH4'_$V0B7/A+M:?W,$?1ZC[;P#&f=<j6F44`F@
+ 8"i%`^(S*iuK@!"TCPEh^D5W]o()sY"+,SJO0!2.U5qYDVj!6dp3#&m:T(,,K%eW2%%3U'u
+ A"A1OhAim?nE.#KMpe3>Z8l#P^,>'fnK;hacgU8T^5+aJ=!+s>`12BUD06P]I!,0VsSA=3K
+ ],/_n,c%?S"&c+_\o-Nt\F^P]anXVu9--uYrlL9D#!bsg>?gC(C"teu>6(>@!eC>).KV:C0
+ .I%5^=ZcFSW%kBQHng2V5HV']VpW*a;,;uLVk]VN]eA"HnIPkJ>RQg&V.^IMi)ub$)a7C~>
+Q
+Q q
+149 243 2 51 re W n
+q
+149 243 2 51 re W n
+% Fallback Image: x=149 y=243 w=2 h=51 res=300ppi size=5751
+[ 2.16 0 0 -51.12 149 294.12 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceGray setcolorspace
+<<
+  /ImageType 1
+  /Width 9
+  /Height 213
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 9 0 0 -213 0 213 ]
+>>
+cairo_image
+ Gb"[2ki'G:s$:%W1!1>EN&!j?FD'ss"(a=5_T@%GAPb@/P_#H8XK/C;A./SL(grW:V<,p$5
+ k(D*J`.qH0`[Z.#0m~>
+Q
+Q q
+280 243 2 51 re W n
+q
+280 243 2 51 re W n
+% Fallback Image: x=280 y=243 w=2 h=51 res=300ppi size=5751
+[ 2.16 0 0 -51.12 280 294.12 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceRGB setcolorspace
+<<
+  /ImageType 1
+  /Width 9
+  /Height 213
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 0 1 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 9 0 0 -213 0 213 ]
+>>
+cairo_image
+ Gb"[2*s!G"_!g0qs.b0CWDTWlWDTWlWDTWlWDTWlWDTWlWDTWlWDTWl.@NkWqY"^^jeoe-:
+ UI2_f"L4a[^-KNJ,90)f:V:hYPP\GGAGoaN'(=QVU%5X-90LP6K=Tc`YhmTarB%R)B-\\$L
+ ?N%.2C4:3iHcCl]9r(Q^u'p(D81+T7:+Us(9BcK,N/3(<nurA*9,8&)I_pA2>\m.Q&\5.YT
+ 3\N!+62^rXS&aCQJ%X?luS0JIkIC`jPI),*^t&G:89h?@p#Y;^.W~>
+Q
+Q q
+412 243 2 51 re W n
+q
+412 243 2 51 re W n
+% Fallback Image: x=412 y=243 w=2 h=51 res=300ppi size=5751
+[ 2.16 0 0 -51.12 412 294.12 ] concat
+/cairo_ascii85_file currentfile /ASCII85Decode filter def
+/DeviceGray setcolorspace
+<<
+  /ImageType 1
+  /Width 9
+  /Height 213
+  /Interpolate false
+  /BitsPerComponent 8
+  /Decode [ 0 1 ]
+  /DataSource cairo_ascii85_file /FlateDecode filter
+  /ImageMatrix [ 9 0 0 -213 0 213 ]
+>>
+cairo_image
+ Gb"[2s4>/DO8adI-tAJrar"]K1?d!8]mJqr[;1!TIaS3"B/(:MSio,YmejD(?O)FW7i>DH`
+ l:KZ]"5o$`XE\leZ.l"Q?K<0Xnr(t1'7Uh:b_sgYPP7~>
+Q
+Q Q
+showpage
+%%Trailer
+end
 %%EOF

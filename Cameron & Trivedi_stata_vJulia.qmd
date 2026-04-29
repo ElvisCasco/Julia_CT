@@ -485,8 +485,12 @@ forms:
 function test_stata(model, vars=nothing; values=nothing,
                     depvar::AbstractString="docvis",
                     V=nothing, restrictions=nothing,
-                    mtest::Bool=false)
-    β     = StatsBase.coef(model)
+                    mtest::Bool=false,
+                    β=nothing)
+    # `β` keyword override lets you test NB / GMM / quantile-regression
+    # coefficients using the original (Poisson) model fit's `coefnames` for
+    # lookup. Pass the V from the same alternate fit (e.g. `nb_unr.V_glm`).
+    β     = β === nothing ? StatsBase.coef(model) : collect(β)
     Vmat  = V === nothing ? Matrix(StatsBase.vcov(model)) : Matrix(V)
     names = string.(StatsBase.coefnames(model))
     p_idx(v) = (i = findfirst(==(string(v)), names);
@@ -571,6 +575,67 @@ function test_stata(model, vars=nothing; values=nothing,
         Printf.@printf("         Prob > chi2 = %9.4f\n", pval)
     end
     return (; chi2=chi2, df=df, p=pval)
+end
+
+"""
+    lrtest_stata(ll_unrestricted, ll_restricted, df)
+
+Stata-style `lrtest` for two nested ML models. Computes
+LR = 2·(ll_unr − ll_res), reports `LR chi2(df)` and `Prob > chi2`, with
+Stata's "Assumption: restrict nested within unrestrict" header line.
+
+Use after fitting two `*_stata` models (e.g. two `nbreg_stata` calls with
+different formulas) and pass the `.ll` fields. `df` is the number of
+restrictions (regressors dropped between the unrestricted and restricted
+models).
+"""
+function lrtest_stata(ll_unr::Real, ll_res::Real, df::Int)
+    LR = 2 * (Float64(ll_unr) - Float64(ll_res))
+    p  = 1 - Distributions.cdf(Distributions.Chisq(df), LR)
+    println("Likelihood-ratio test")
+    println("Assumption: restrict nested within unrestrict")
+    println()
+    Printf.@printf(" LR chi2(%d) = %.2f\n", df, LR)
+    Printf.@printf("Prob > chi2 = %.4f\n", p)
+    return (; LR, df, p)
+end
+
+"""
+    power_stata(numsims, numobs, b2_null, b2_alt, nominal; seed=10101) -> Float64
+
+Stata-style `power` rclass program for OLS test-size and test-power Monte
+Carlo. Each rep generates `numobs` observations from the DGP
+
+    x ~ χ²(1),    y = 1 + b2_alt · x + (χ²(1) − 1)
+
+then fits OLS, computes the two-sided t-test p-value for H0: β_x = b2_null,
+and counts the share below `nominal`. When `b2_null == b2_alt` the result
+is the empirical TEST SIZE; otherwise it is the empirical TEST POWER.
+
+Bypasses `regress_stata` inside the loop (which would print every fit) and
+uses `FixedEffectModels.reg` directly — ~9 ms per rep, so 1,000 reps in
+~9 s. The first call also pays Julia's JIT compilation cost (~5 s).
+
+Pass a different `seed` for replication studies; default 10101 matches
+Stata's `set seed 10101` convention used throughout the textbook.
+"""
+function power_stata(numsims::Int, numobs::Int, b2_null::Real, b2_alt::Real,
+                    nominal::Float64; seed::Int = 10101)
+    Random.seed!(seed)
+    pvals = Vector{Float64}(undef, numsims)
+    @inbounds for i in 1:numsims
+        x  = rand(Distributions.Chisq(1), numobs)
+        y  = 1 .+ b2_alt .* x .+ (rand(Distributions.Chisq(1), numobs) .- 1)
+        df = DataFrames.DataFrame(x = x, y = y)
+        m  = FixedEffectModels.reg(df, GLM.@formula(y ~ x))
+        β  = StatsBase.coef(m)
+        V  = StatsBase.vcov(m)
+        ix = findfirst(==("x"), string.(StatsBase.coefnames(m)))
+        t  = (β[ix] - b2_null) / sqrt(V[ix, ix])
+        pvals[i] = 2 * (1 - Distributions.cdf(
+            Distributions.TDist(StatsBase.dof_residual(m)), abs(t)))
+    end
+    return count(<(nominal), pvals) / numsims
 end
 
 """
@@ -2446,7 +2511,7 @@ p-values, and confidence intervals, matching the format of Stata's
 Works with any `StatsBase`-compatible OLS model, e.g. the output of
 `FixedEffectModels.reg(df, @formula(y ~ x2 + x3))`.
 """
-function regress_stata(model; level::Float64=0.95)
+function regress_stata(model; level::Float64=0.95, noheader::Bool=false)
     β      = StatsBase.coef(model)
     V      = StatsBase.vcov(model)
     se     = sqrt.(max.(LinearAlgebra.diag(V), 0.0))
@@ -2489,22 +2554,25 @@ function regress_stata(model; level::Float64=0.95)
         return Printf.@sprintf("%*s", w, s)
     end
 
-    # ── ANOVA table + summary-stats block
-    println()
-    Printf.@printf("%12s | %10s %10s %10s    %-13s = %10d\n",
-                   "Source", "SS", "df", "MS", "Number of obs", n)
-    println("-"^13, "+", "-"^34, "   ",
-            Printf.@sprintf("%-13s = %10.2f", "F($k, $dof_r)", Fstat))
-    Printf.@printf("%12s | %s %10d %s    %-13s = %10.4f\n",
-                   "Model", _g(mss, 10), k, _g(mss/k, 10), "Prob > F", pF)
-    Printf.@printf("%12s | %s %10d %s    %-13s = %10.4f\n",
-                   "Residual", _g(rss, 10), dof_r, _g(rss/dof_r, 10),
-                   "R-squared", r2)
-    println("-"^13, "+", "-"^34, "   ",
-            Printf.@sprintf("%-13s = %10.4f", "Adj R-squared", ar2))
-    Printf.@printf("%12s | %s %10d %s    %-13s = %10.4f\n",
-                   "Total", _g(tss, 10), n-1, _g(tss/(n-1), 10),
-                   "Root MSE", rmse)
+    # ── ANOVA table + summary-stats block (skipped when `noheader=true`,
+    # matching Stata's `regress y x, noheader` option)
+    if !noheader
+        println()
+        Printf.@printf("%12s | %10s %10s %10s    %-13s = %10d\n",
+                       "Source", "SS", "df", "MS", "Number of obs", n)
+        println("-"^13, "+", "-"^34, "   ",
+                Printf.@sprintf("%-13s = %10.2f", "F($k, $dof_r)", Fstat))
+        Printf.@printf("%12s | %s %10d %s    %-13s = %10.4f\n",
+                       "Model", _g(mss, 10), k, _g(mss/k, 10), "Prob > F", pF)
+        Printf.@printf("%12s | %s %10d %s    %-13s = %10.4f\n",
+                       "Residual", _g(rss, 10), dof_r, _g(rss/dof_r, 10),
+                       "R-squared", r2)
+        println("-"^13, "+", "-"^34, "   ",
+                Printf.@sprintf("%-13s = %10.4f", "Adj R-squared", ar2))
+        Printf.@printf("%12s | %s %10d %s    %-13s = %10.4f\n",
+                       "Total", _g(tss, 10), n-1, _g(tss/(n-1), 10),
+                       "Root MSE", rmse)
+    end
     println()
 
     # ── Coefficient table
@@ -2541,7 +2609,8 @@ Example:
     regress_stata(df5, :y, [:x2, :x3]; vcov=Vcov.robust())
 """
 function regress_stata(df::DataFrames.AbstractDataFrame, y, xs;
-                       level::Float64=0.95, vcov=nothing, weights=nothing)
+                       level::Float64=0.95, vcov=nothing, weights=nothing,
+                       noheader::Bool=false)
     ys  = Symbol(y)
     xsv = xs isa Union{Symbol,AbstractString} ? [Symbol(xs)] :
           [Symbol(v) for v in xs]
@@ -2550,7 +2619,7 @@ function regress_stata(df::DataFrames.AbstractDataFrame, y, xs;
     m = vcov === nothing ?
         FixedEffectModels.reg(df, f; kw...) :
         FixedEffectModels.reg(df, f, vcov; kw...)
-    regress_stata(m; level=level)
+    regress_stata(m; level=level, noheader=noheader)
     return nothing
 end
 
@@ -9325,6 +9394,222 @@ function poisson_stata(df, formula; vce::Symbol=:robust, level::Float64=0.95,
               Wald, Wald_p, ll, pseudo_r2, n, k,
               # Originals (GLM order) preserved for any code that needs them:
               β_glm=β, V_glm=V, X_glm=Xm, coefnames_glm=cn)
+end
+
+"""
+    nbreg_stata(df, formula; vce=:oim, level=0.95, quiet=false) -> NamedTuple
+
+Stata-style `nbreg <depvar> <regs>, [vce(robust)] nolog`. Fits the NB2
+model jointly in (β, lnα) by maximising the log-likelihood
+
+    lnf_i = lnΓ(y_i + 1/α) − lnΓ(1/α) − lnΓ(y_i + 1)
+            − (y_i + 1/α) · ln(1 + α·μ_i) + y_i·ln(α) + y_i·θ_i,
+    θ_i = x_iᵀβ,  μ_i = exp(θ_i)
+
+via `Optim.LBFGS` with autodiff and uses the inverse Hessian as the OIM
+vcov. Prints the Stata header (Number of obs / LR chi2(k) / Prob > chi2 /
+Pseudo R²) followed by the coefficient table with `/lnalpha` and `alpha`
+rows, and finally the LR test of `α = 0` (NB → Poisson) reported as
+`chibar2(01)` with the half-mixture p-value `0.5·P(χ²₁ > LR)`.
+
+Returns `(; model, β_glm, V_glm, coefnames_glm, lnα, α, ll, n, k,
+LR_alpha, p_chibar)`.
+"""
+function nbreg_stata(df, formula; vce::Symbol=:oim, level::Float64=0.95,
+                    quiet::Bool=false)
+    needed = StatsModels.termvars(formula)
+    dfc = DataFrames.dropmissing(df[:, needed])
+    for c in needed
+        col = dfc[!, c]
+        if eltype(col) <: Union{Missing, Float32} || eltype(col) === Float32
+            dfc[!, c] = Float64.(col)
+        end
+    end
+
+    # Fit Poisson first: gives β starting values + LL_pois for the LR test
+    m_pois  = GLM.glm(formula, dfc, Distributions.Poisson(), GLM.LogLink())
+    β0      = GLM.coef(m_pois)
+    ll_pois = GLM.loglikelihood(m_pois)
+    yv      = Float64.(GLM.response(m_pois))
+    Xm      = GLM.modelmatrix(m_pois)
+    cn      = GLM.coefnames(m_pois)
+    n       = size(Xm, 1)
+    k       = size(Xm, 2)
+
+    # NB log-likelihood (parameters are β stacked with lnα — last entry)
+    function nb_nll(p)
+        β  = p[1:k]; α = exp(p[k + 1])
+        η  = Xm * β; μ = exp.(η); inv_α = 1 / α
+        ll = sum(SpecialFunctions.loggamma.(yv .+ inv_α) .-
+                 SpecialFunctions.loggamma(inv_α) .-
+                 SpecialFunctions.loggamma.(yv .+ 1) .-
+                 (yv .+ inv_α) .* log.(1 .+ α .* μ) .+
+                 yv .* log(α) .+ yv .* η)
+        return -ll
+    end
+    # Use NelderMead (derivative-free) to avoid forwarding ForwardDiff Duals
+    # through `SpecialFunctions.gamma_inc`, which lacks Dual methods and
+    # produces "no method matching" errors during autodiff. We get a high-
+    # quality optimum from LBFGS (warm-started from Poisson β) but refine via
+    # NelderMead and use central finite differences for the Hessian.
+    p0  = Float64.(vcat(β0, log(1.0)))
+    res = Optim.optimize(nb_nll, p0, Optim.NelderMead(),
+                         Optim.Options(g_tol     = 1e-10,
+                                       x_abstol  = 1e-10,
+                                       f_reltol  = 1e-12,
+                                       iterations = 5000))
+    p̂   = Float64.(Optim.minimizer(res))
+    β̂   = p̂[1:k]
+    lnα = p̂[k + 1]
+    α   = exp(lnα)
+    ll  = -nb_nll(p̂)::Float64
+
+    # OIM vcov from inverse Hessian via central finite differences (avoids
+    # any autodiff path through gamma_inc / loggamma).
+    function _fd_hessian(f::Function, x::AbstractVector{<:Real})
+        n_p = length(x)
+        H   = zeros(n_p, n_p)
+        h   = sqrt(sqrt(eps(Float64))) .* max.(abs.(x), 1.0)  # ~1e-4 step
+        f0  = f(x)
+        for i in 1:n_p
+            xpi = copy(x); xmi = copy(x)
+            xpi[i] += h[i]; xmi[i] -= h[i]
+            fpi, fmi = f(xpi), f(xmi)
+            H[i, i] = (fpi - 2*f0 + fmi) / h[i]^2
+            for j in (i+1):n_p
+                xpp = copy(x); xpp[i] += h[i]; xpp[j] += h[j]
+                xpm = copy(x); xpm[i] += h[i]; xpm[j] -= h[j]
+                xmp = copy(x); xmp[i] -= h[i]; xmp[j] += h[j]
+                xmm = copy(x); xmm[i] -= h[i]; xmm[j] -= h[j]
+                H[i, j] = H[j, i] =
+                    (f(xpp) - f(xpm) - f(xmp) + f(xmm)) / (4 * h[i] * h[j])
+            end
+        end
+        return H
+    end
+    H = _fd_hessian(nb_nll, p̂)
+    V = LinearAlgebra.inv(LinearAlgebra.Symmetric(H))
+    se_full = sqrt.(LinearAlgebra.diag(V))
+    se_β    = se_full[1:k]
+    se_lnα  = se_full[k + 1]
+    se_α    = α * se_lnα                   # delta method on exp(lnα)
+
+    # CIs
+    crit  = Distributions.quantile(Distributions.Normal(), 1 - (1-level)/2)
+    z_β   = β̂ ./ se_β
+    p_β   = 2 .* (1 .- Distributions.cdf.(Distributions.Normal(), abs.(z_β)))
+    ci_lo_β = β̂ .- crit .* se_β
+    ci_hi_β = β̂ .+ crit .* se_β
+    lnα_lo, lnα_hi = lnα - crit*se_lnα, lnα + crit*se_lnα
+    α_lo,   α_hi   = exp(lnα_lo),       exp(lnα_hi)
+
+    # Null model (intercept-only NB) for pseudo R². Closed form for β:
+    # β̂_0 = log(mean(y)). For α we do a 1D maximization (Nelder–Mead, no
+    # autodiff — autodiff into `loggamma`/`gamma_inc` doesn't always have
+    # ForwardDiff methods, so we keep the null fit derivative-free).
+    ȳ      = Statistics.mean(yv)
+    β0_null = log(ȳ)
+    function nb_ll_null_α(α::Float64)
+        μ = fill(ȳ, length(yv))
+        inv_α = 1 / α
+        sum(SpecialFunctions.loggamma.(yv .+ inv_α) .-
+            SpecialFunctions.loggamma(inv_α) .-
+            SpecialFunctions.loggamma.(yv .+ 1) .-
+            (yv .+ inv_α) .* log.(1 .+ α .* μ) .+
+            yv .* log(α) .+ yv .* β0_null)
+    end
+    res0 = Optim.optimize(α -> -nb_ll_null_α(exp(α[1])), [log(1.0)],
+                          Optim.NelderMead())
+    α̂_null   = exp(Float64(Optim.minimizer(res0)[1]))
+    ll_null  = nb_ll_null_α(α̂_null)
+    pseudo_r2 = 1 - ll / ll_null
+
+    # LR chi2 (model vs intercept only) — NB likelihood ratio
+    LR    = 2 * (ll - ll_null)
+    LR_p  = 1 - Distributions.cdf(Distributions.Chisq(k - 1), LR)
+
+    # LR for α = 0 (NB vs Poisson). Half-mixture p-value: 0.5 · P(χ²₁ > LR)
+    LR_α  = 2 * (ll - ll_pois)
+    p_chibar = LR_α <= 0 ? 1.0 :
+               0.5 * Distributions.ccdf(Distributions.Chisq(1), LR_α)
+
+    # Stata `%9.0g` formatter (sign-aware, see `poisson_stata`)
+    function g9(x; w::Int=10, sig::Int=7)
+        (ismissing(x) || !isfinite(x)) && return lpad(".", w)
+        sig_use = sig
+        s = Printf.@sprintf("%.*g", sig_use, x)
+        cap = (0 < abs(x) < 1 && x < 0) ? 10 : 9
+        while length(s) > cap && sig_use > 1
+            sig_use -= 1
+            s = Printf.@sprintf("%.*g", sig_use, x)
+        end
+        0 < abs(x) < 1 && (s = replace(s, r"^(-?)0\." => s"\1."))
+        lpad(s, w)
+    end
+    function commafmt(num)
+        s = string(abs(num)); parts = String[]; i = length(s)
+        while i >= 1; push!(parts, s[max(1, i-2):i]); i -= 3; end
+        (num < 0 ? "-" : "") * join(reverse(parts), ",")
+    end
+
+    if !quiet
+        println()
+        # Header (`poisson`-style: title left, right column auto-sized)
+        nstr = commafmt(n)
+        wstr = Printf.@sprintf("%.2f", LR)
+        pstr = Printf.@sprintf("%.4f", LR_p)
+        rstr = Printf.@sprintf("%.4f", pseudo_r2)
+        vw   = maximum(length, (nstr, wstr, pstr, rstr))
+        Printf.@printf("%-56s%-13s = %*s\n",
+                       "Negative binomial regression", "Number of obs", vw, nstr)
+        Printf.@printf("%56s%-13s = %*s\n", "",
+                       "LR chi2($(k-1))", vw, wstr)
+        Printf.@printf("%-56s%-13s = %*s\n",
+                       "Dispersion: mean", "Prob > chi2", vw, pstr)
+        Printf.@printf("%-56s%-13s = %*s\n",
+                       Printf.@sprintf("Log likelihood = %.4f", ll),
+                       "Pseudo R2", vw, rstr)
+        println()
+
+        # Coefficient table — Stata order: slopes first, _cons last, then
+        # /lnalpha and alpha.
+        intercept_idx = findfirst(==("(Intercept)"), cn)
+        slope_idx     = setdiff(1:k, [intercept_idx])
+        ord           = intercept_idx === nothing ? collect(slope_idx) :
+                                                    vcat(slope_idx, [intercept_idx])
+        println("-"^78)
+        Printf.@printf("%12s | Coefficient  Std. err.      z    P>|z|     [%g%% conf. interval]\n",
+                       string(formula.lhs), 100*level)
+        println("-"^13, "+", "-"^64)
+        for i in ord
+            label = cn[i] == "(Intercept)" ? "_cons" : cn[i]
+            Printf.@printf("%12s | %s  %s  %s   %s    %s  %s\n",
+                           label, g9(β̂[i]; w=10), g9(se_β[i]; w=9),
+                           Printf.@sprintf("%7.2f", z_β[i]),
+                           Printf.@sprintf("%.3f", p_β[i]),
+                           g9(ci_lo_β[i]; w=9), g9(ci_hi_β[i]; w=10))
+        end
+        println("-"^13, "+", "-"^64)
+        Printf.@printf("%12s | %s  %s%26s%s  %s\n",
+                       "/lnalpha", g9(lnα; w=10), g9(se_lnα; w=9), "",
+                       g9(lnα_lo; w=9), g9(lnα_hi; w=10))
+        println("-"^13, "+", "-"^64)
+        Printf.@printf("%12s | %s  %s%26s%s  %s\n",
+                       "alpha", g9(α; w=10), g9(se_α; w=9), "",
+                       g9(α_lo; w=9), g9(α_hi; w=10))
+        println("-"^78)
+        # LR α=0 row (Stata's exact wording)
+        chibar_str = LR_α >= 1e4 ? Printf.@sprintf("%.1e", LR_α) :
+                     Printf.@sprintf("%.2f", LR_α)
+        Printf.@printf("LR test of alpha=0: chibar2(01) = %-15s Prob >= chibar2 = %.3f\n",
+                       chibar_str, p_chibar)
+    end
+
+    return (; model = m_pois, β_glm = β̂, V_glm = V[1:k, 1:k],
+              coefnames_glm = cn,
+              lnα, se_lnα, α, se_α,
+              ll, ll_pois, ll_null, pseudo_r2,
+              n, k, LR, LR_p, LR_α, p_chibar)
 end
 
 """
@@ -18663,62 +18948,97 @@ nlcom_stata(β -> exp(β[i_p]), β, V;
 ### 12.4.1 Likelihood-ratio tests
 
 ```{julia}
-# Negative binomial estimator (default ML SEs from GLM.jl negbin)
-nb12 = GLM.negbin(GLM.@formula(docvis ~ private + chronic + female + income),
-                  df12, GLM.LogLink())
-println(nb12)
+# `nbreg_stata` (chunk 1) fits NB2 jointly in (β, lnα) by maximising the NB
+# log-likelihood via Optim with autodiff, takes the inverse Hessian as the
+# OIM vcov, and prints the full Stata-style table including /lnalpha, alpha,
+# and the LR test `chibar2(01)` of α = 0 (NB → Poisson, half-mixture p).
+# Self-contained — uses `setup_mus10`'s data subset (5-var dropmissing).
+nbreg_stata(setup_mus10(;
+    vars = [:docvis, :private, :chronic, :female, :income], quiet = true).df,
+    GLM.@formula(docvis ~ private + chronic + female + income));
 ```
 
 ### 12.4.2 LR tests
 
 ```{julia}
-# Note: testing α = 0 (NB vs Poisson) would normally use a force-LR
-println("α = 0 boundary test: see lrtest with corrected p-value below.")
+# `testnl exp([lnalpha]_cons) = 0` is a delta-method Wald test that the NB
+# dispersion α (= exp(lnα)) is zero — i.e. the data is Poisson. Stata uses
+# this as an alternative to the LR `chibar2(01)` test reported in §12.4.1.
+#
+# Refit the NB model (quiet = true), pull out lnα and its standard error,
+# and feed to `testnl_stata` with a 1-element parameter vector (lnα alone)
+# and a 1×1 vcov.
+nb_fit = nbreg_stata(setup_mus10(;
+    vars = [:docvis, :private, :chronic, :female, :income], quiet = true).df,
+    GLM.@formula(docvis ~ private + chronic + female + income); quiet = true)
+
+testnl_stata(p -> exp(p[1]), [nb_fit.lnα],
+             reshape([nb_fit.se_lnα^2], 1, 1);
+             label = "exp([lnalpha]_cons) = 0");
 ```
 
 ```{julia}
-# LR test: NB unrestricted vs NB restricted (drop private + chronic)
-nb_unr = GLM.negbin(GLM.@formula(docvis ~ private + chronic + female + income),
-                    df12, GLM.LogLink())
-nb_res = GLM.negbin(GLM.@formula(docvis ~ female + income),
-                    df12, GLM.LogLink())
-LR = 2 * (GLM.loglikelihood(nb_unr) - GLM.loglikelihood(nb_res))
-@printf("LR χ²(2) = %.3f, p = %.4f\n",
-        LR, 1 - Distributions.cdf(Distributions.Chisq(2), LR))
+# LR test of nested NB models. Stata's `estimates store` lets you save two
+# fits and compare; in Julia we just hold them in two NamedTuples and pass
+# `.ll` to `lrtest_stata`. The unrestricted model has 4 slopes (private,
+# chronic, female, income); the restricted model drops 2 (private, chronic),
+# so df = 2.
+df_nb = setup_mus10(;
+    vars = [:docvis, :private, :chronic, :female, :income], quiet = true).df
+nb_unr = nbreg_stata(df_nb,
+    GLM.@formula(docvis ~ private + chronic + female + income); quiet = true)
+nb_res = nbreg_stata(df_nb,
+    GLM.@formula(docvis ~ female + income); quiet = true)
+
+lrtest_stata(nb_unr.ll, nb_res.ll, 2);
 ```
 
 ```{julia}
-# LR test the other way (symmetric)
-@printf("LR (restricted vs unrestricted) = %.3f\n", LR)
+# Stata accepts the two stored estimates in either order — `lrtest unrestrict
+# restrict` and `lrtest restrict unrestrict` produce identical output (Stata
+# figures out which is nested within which from the regressor lists). Our
+# `lrtest_stata` takes the log-likelihoods directly, so we pass them in the
+# same order regardless of the Stata argument order. The `nb_unr`/`nb_res`
+# fits from the previous chunk are reused.
+lrtest_stata(nb_unr.ll, nb_res.ll, 2);
 ```
 
 ```{julia}
-# Wald test of the same restriction (β_private = β_chronic = 0) on NB model
-β = GLM.coef(nb_unr); V = GLM.vcov(nb_unr); cn = GLM.coefnames(nb_unr)
-idx = [findfirst(==(v), cn) for v in ("private", "chronic")]
-βs = β[idx]; Vs = V[idx, idx]
-W = βs' * LinearAlgebra.inv(Vs) * βs
-@printf("Wald χ²(2) = %.3f, p = %.4f\n",
-        W, 1 - Distributions.cdf(Distributions.Chisq(2), W))
+# Wald test of the same nested hypothesis (chronic = 0, private = 0) on the
+# NB fit. `nb_unr.model` is the Poisson initialiser used for coefnames
+# lookup, but we override β and V with the NB fit's values via the keyword
+# arguments `β` and `V`. Stata prints the variables in the order typed:
+# "test chronic private".
+test_stata(nb_unr.model, ["chronic", "private"];
+           β = nb_unr.β_glm, V = nb_unr.V_glm);
 ```
 
 ```{julia}
-# Manual LR test of NB vs Poisson (test α = 0; boundary of parameter space)
-ll_nb   = GLM.loglikelihood(nb_unr)
-pois_m  = GLM.glm(GLM.@formula(docvis ~ private + chronic + female + income),
-                  df12, Distributions.Poisson(), GLM.LogLink())
-ll_pois = GLM.loglikelihood(pois_m)
-LR = -2 * (ll_pois - ll_nb)
-@printf("LR (NB vs Poisson) = %.3f, raw p = %.4f, corrected p = %.4f\n",
-        LR,
-        1 - Distributions.cdf(Distributions.Chisq(1), LR),
-        (1 - Distributions.cdf(Distributions.Chisq(1), LR)) / 2)   # boundary correction
+# Manual LR test of NB vs Poisson (i.e. H0: α = 0). The Stata code uses
+# `chi2tail(1, lr)` which assumes a χ²(1) null distribution — note this is
+# theoretically incorrect because α = 0 is on the parameter boundary. The
+# proper test uses the half-mixture `chibar2(01)` distribution (reported by
+# `nbreg` and via `nb_unr.p_chibar`); the two p-values differ by a factor
+# of 2. We replicate the manual calculation exactly: `nb_unr` already
+# stores both `ll` (NB) and `ll_pois` (Poisson), so we just compute the LR
+# and pass it to `Distributions.ccdf(Chisq(1), ⋅)` (avoids cdf underflow
+# at extreme tails).
+ll_unr = nb_unr.ll
+ll_res = nb_unr.ll_pois
+lr     = -2 * (ll_res - ll_unr)
+p      = Distributions.ccdf(Distributions.Chisq(1), lr)
+@printf("LR = %.5f with p = %.3e\n", lr, p)
 ```
 
 ```{julia}
-# Same with corrected p-value (boundary)
-@printf("Corrected p-value = %.4f\n",
-        (1 - Distributions.cdf(Distributions.Chisq(1), LR)) / 2)
+# Same NB-vs-Poisson LR test as the manual chunk, but routed through the
+# `lrtest_stata` helper for the standard Stata output block. The "force"
+# part is implicit: our helper just needs the two log-likelihoods and df,
+# so it doesn't enforce Stata's nested-command check. Dividing the
+# returned p by 2 gives the half-mixture (`chibar2(01)`) corrected p-value
+# for the boundary parameter α = 0.
+res = lrtest_stata(nb_unr.ll, nb_unr.ll_pois, 1)
+@printf("Corrected p-value for LR-test = %.10f\n", res.p / 2)
 ```
 
 ## 12.5 Lagrange multiplier (score) test
@@ -18730,30 +19050,57 @@ LR = -2 * (ll_pois - ll_nb)
 ### 12.5.3 LM test by auxiliary regression
 
 ```{julia}
-# LM test that β_private = β_chronic = 0 in NB model — auxiliary regression
-# 1. Estimate restricted model
-nb_r = GLM.negbin(GLM.@formula(docvis ~ female + income),
-                  df12, GLM.LogLink())
-# 2. Score residuals at restricted estimates
-μ_r = GLM.predict(nb_r)
-score_r = df12.docvis .- μ_r       # Poisson-style score for the mean equation
+# LM (score) test of H0: β_private = 0, β_chronic = 0 in NB regression
+# of docvis on female + income + private + chronic.
+#
+# Method (Stata's auxiliary-regression form):
+# 1. Fit the restricted NB model (`docvis ~ female + income`); get β̃ and α̃.
+# 2. Compute per-obs scores at the restricted estimates:
+#       eqscore_i = (y_i − μ̃_i) / (1 + α̃·μ̃_i),  μ̃_i = exp(x̃_i'β̃)
+#       ascore_i  = (1/α̃)·[ψ(1/α̃) − ψ(y_i + 1/α̃) + ln(1 + α̃μ̃_i)] + eqscore_i
+# 3. Build the score matrix S with one column per parameter
+#    (β_cons, β_female, β_income, β_private, β_chronic, lnα).
+# 4. Regress 1 on S without an intercept; LM = N · R² (uncentered) on χ²(2)
+#    (df = number of constraints = 2).
 
-# 3. Auxiliary regression: regress 1 on score-weighted regressors
-df12c = DataFrames.dropmissing(df12[:, [:docvis, :private, :chronic, :female, :income]])
-score_r = df12c.docvis .- GLM.predict(nb_r, df12c)
-df12c.score = score_r
-df12c.s_int   = score_r .* 1
-df12c.s_priv  = score_r .* df12c.private
-df12c.s_chron = score_r .* df12c.chronic
-df12c.s_fem   = score_r .* df12c.female
-df12c.s_inc   = score_r .* df12c.income
+s_lm = setup_mus10(;
+    vars = [:docvis, :female, :income, :private, :chronic], quiet = true)
+df_lm = s_lm.df
+y     = Float64.(df_lm.docvis)
 
-df12c.one = ones(DataFrames.nrow(df12c))
-m_aux = FixedEffectModels.reg(df12c,
-    GLM.@formula(one ~ s_int + s_priv + s_chron + s_fem + s_inc + 0))
-LM = DataFrames.nrow(df12c) * FixedEffectModels.r2(m_aux)
-@printf("LM = N·R² = %.3f, p (χ²₂) = %.4f\n",
-        LM, 1 - Distributions.cdf(Distributions.Chisq(2), LM))
+# Restricted NB fit
+nb_r  = nbreg_stata(df_lm, GLM.@formula(docvis ~ female + income); quiet = true)
+i_c   = findfirst(==("(Intercept)"), nb_r.coefnames_glm)
+i_f   = findfirst(==("female"),      nb_r.coefnames_glm)
+i_i   = findfirst(==("income"),      nb_r.coefnames_glm)
+β̃     = nb_r.β_glm
+α̃     = nb_r.α
+μ̃     = exp.(β̃[i_c] .+ β̃[i_f] .* df_lm.female .+ β̃[i_i] .* df_lm.income)
+
+eqscore = (y .- μ̃) ./ (1 .+ α̃ .* μ̃)
+ascore  = (1/α̃) .* (SpecialFunctions.digamma(1/α̃) .-
+                    SpecialFunctions.digamma.(y .+ 1/α̃) .+
+                    log.(1 .+ α̃ .* μ̃)) .+ eqscore
+
+# Score matrix S — one column per restricted-model parameter PLUS the two
+# constrained-to-zero coefficients (private, chronic) and α.
+S = hcat(eqscore .* 1.0,
+         eqscore .* df_lm.female,
+         eqscore .* df_lm.income,
+         eqscore .* df_lm.private,
+         eqscore .* df_lm.chronic,
+         ascore)
+
+# Auxiliary regression: 1 ~ S, no constant.  R² (uncentered) for OLS:
+#   R² = β̂' (S'S) β̂ / Σy²,   with y_i ≡ 1, so Σy² = N → LM = N·R² = β̂' S'S β̂.
+N      = length(y)
+one_v  = Base.ones(N)                 # local name avoids shadowing Base.ones
+β̂_aux  = (S' * S) \ (S' * one_v)
+ŷ_aux  = S * β̂_aux
+LM     = sum(abs2, ŷ_aux)              # ≡ N · uncentered R²
+p_lm  = Distributions.ccdf(Distributions.Chisq(2), LM)
+
+@printf("LM = N x uncentered Rsq = %.5f and p = %.3e\n", LM, p_lm)
 ```
 
 ## 12.6 Test size and power
@@ -18763,105 +19110,176 @@ LM = DataFrames.nrow(df12c) * FixedEffectModels.r2(m_aux)
 ### 12.6.2 Test size
 
 ```{julia}
-# Quick check on a single sample
+# One sample from a small-N DGP: x ~ N(12, 2), y = 10 + 0.06·x + N(0, 0.3),
+# n = 25. Used downstream for the test-power simulation. The CSV
+# `12_6_2.csv` is generated FROM STATA (so the realization matches the
+# textbook's MT64 sequence):
+#
+#     . set seed 10101
+#     . set obs 25
+#     . gen x = 12 + rnormal(0, 2)
+#     . generate y = 10 + 0.06*x + rnormal(0, 0.3)
+#     . export delimited "12_6_2.csv", replace
+#
+# We import that CSV here so summarize/regress output uses Stata's (x, y).
+# The commented Julia generator below is a fallback when running outside
+# the Stata-Julia bridge (note: Xoshiro256++ ≠ MT64, different realization).
+#=
 Random.seed!(10101)
-N = 25
-x_s = 12 .+ 2 .* randn(N)
-y_s = 10 .+ 0.06 .* x_s .+ 0.3 .* randn(N)
-df_s = DataFrames.DataFrame(y = y_s, x = x_s)
-println(FixedEffectModels.reg(df_s, GLM.@formula(y ~ x)))
+df_dgp = DataFrames.DataFrame(x = 12 .+ 2 .* randn(25))
+df_dgp.y = 10 .+ 0.06 .* df_dgp.x .+ 0.3 .* randn(25)
+CSV.write("12_6_2.csv", df_dgp)
+=#
+df_dgp = CSV.read("12_6_2.csv", DataFrames.DataFrame)
+
+summarize_stata(df_dgp, [:x, :y])
+regress_stata(df_dgp, :y, [:x]; noheader = true);
 ```
 
 ```{julia}
-# 1000 simulations: each computes the p-value of H0: β_x = 2
-function size_sim(numsims::Int; numobs = 150, β0 = 2.0, βtrue = 2.0)
-    Random.seed!(10101)
-    pvals = Float64[]
-    for _ in 1:numsims
-        x = Distributions.rand(Distributions.Chisq(1), numobs)
-        y = 1 .+ βtrue .* x .+ (Distributions.rand(Distributions.Chisq(1), numobs) .- 1)
-        df = DataFrames.DataFrame(y = y, x = x)
-        m  = FixedEffectModels.reg(df, GLM.@formula(y ~ x))
-        cn = FixedEffectModels.coefnames(m)
-        i  = findfirst(==("x"), cn)
-        β̂  = FixedEffectModels.coef(m)[i]
-        se = sqrt(FixedEffectModels.vcov(m)[i, i])
-        t  = (β̂ - β0) / se
-        p  = 2 * (1 - Distributions.cdf(Distributions.TDist(numobs - 2), abs(t)))
-        push!(pvals, p)
-    end
-    return pvals
+# Monte-Carlo test-size check (Stata: `forvalues i = 1/1000 { … postfile … }`).
+# Each rep generates n = 150 obs from the DGP
+#     x ~ χ²(1),   y = 1 + 2·x + (χ²(1) − 1)   [mean-zero error]
+# fits OLS, and records the two-sided t-test p-value for H0: β_x = 2 (the
+# DGP truth). Under H0 the empirical CDF of these p-values should be ≈
+# Uniform(0, 1); the §12.6.2 "Test size" table just counts the share below
+# 0.05 (≈5%).
+#
+# We bypass `regress_stata` inside the loop (it always prints) and use
+# `FixedEffectModels.reg` directly, then build the t-statistic and p-value
+# manually. The p-values are saved to `pvalues_12_6_2.csv` as a DataFrame
+# column (Stata's `postfile sim pvalues using pvalues` analogue), so
+# downstream §12.6.2 and §12.6.3 chunks can read them back without rerunning
+# the 1000-rep loop.
+function _one_rep_size(n::Int = 150, β2_null::Float64 = 2.0)
+    x   = rand(Distributions.Chisq(1), n)
+    y   = 1 .+ 2 .* x .+ (rand(Distributions.Chisq(1), n) .- 1)
+    df  = DataFrames.DataFrame(x = x, y = y)
+    m   = FixedEffectModels.reg(df, GLM.@formula(y ~ x))
+    β   = StatsBase.coef(m)
+    V   = StatsBase.vcov(m)
+    i_x = findfirst(==("x"), string.(StatsBase.coefnames(m)))
+    t   = (β[i_x] - β2_null) / sqrt(V[i_x, i_x])
+    dofr = StatsBase.dof_residual(m)
+    return 2 * (1 - Distributions.cdf(Distributions.TDist(dofr), abs(t)))
 end
 
-pvals = size_sim(1000)
+Random.seed!(10101)
+print("running 1000 reps... ")
+t0 = time()
+pvalues = [_one_rep_size() for _ in 1:1000]
+@printf("done in %.2fs\n", time() - t0)
+
+df_sim = DataFrames.DataFrame(pvalues = pvalues)
+CSV.write("pvalues_12_6_2.csv", df_sim)
+@printf("Saved %d p-values to pvalues_12_6_2.csv\n", DataFrames.nrow(df_sim));
 ```
 
 ```{julia}
-@printf("p-values from 1000 simulations: mean=%.4f, sd=%.4f\n",
-        Statistics.mean(pvals), Statistics.std(pvals))
+#=
+* Summarize the p-value from each of the 1000 tests
+use pvalues, clear 
+summarize pvalues
+=#
+df_sim = CSV.read("pvalues_12_6_2.csv", DataFrames.DataFrame)
+summarize_stata(df_sim, :pvalues)
 ```
 
 ```{julia}
-# Test size at level 0.05
-@printf("Test size = %.4f\n", Statistics.mean(pvals .< 0.05))
-```
-
-```{julia}
-# 95% binomial CI for the size estimate (Wilson interval)
-p̂ = Statistics.mean(pvals .< 0.05); n = length(pvals)
-se = sqrt(p̂ * (1 - p̂) / n)
-@printf("95%% CI on size: [%.4f, %.4f]\n", p̂ - 1.96 * se, p̂ + 1.96 * se)
+# Empirical test size at the 5% nominal level: share of the 1000 simulated
+# p-values that fall below 0.05. Under H0 (β_x = 2 is the DGP truth) and a
+# correctly-sized test this should be ≈ 0.05; deviations indicate
+# under- or over-rejection.
+n_rej = count(<(0.05), df_sim.pvalues)
+@printf("Test size from %d simulations = %.4f\n",
+        DataFrames.nrow(df_sim), n_rej / DataFrames.nrow(df_sim))
 ```
 
 ### 12.6.3 Test power
 
 ```{julia}
-# Compute power for a given (H0, Ha) pair
-function power_sim(numsims::Int; numobs, β0, βtrue, α = 0.05)
-    pvals = size_sim(numsims; numobs = numobs, β0 = β0, βtrue = βtrue)
-    return Statistics.mean(pvals .< α)
-end
+# `power_stata` lives in chunk 1 (helpers). It's the Julia analogue of the
+# Stata `program power, rclass`: pass `(numsims, numobs, b2_null, b2_alt,
+# nominal)` and it returns the empirical share of p-values below `nominal`
+# from `numsims` reps of the χ²(1) DGP. When `b2_null == b2_alt` it returns
+# empirical TEST SIZE; otherwise empirical TEST POWER. The chunk-1
+# docstring has the full DGP and timing notes.
+@doc power_stata
 ```
 
 ```{julia}
-# Size: H0: β=2, βtrue=2  (should be close to α)
-@printf("Size (β0=2, βtrue=2) = %.4f\n",
-        power_sim(1000; numobs = 150, β0 = 2.0, βtrue = 2.0))
+# Size = power of test of b2H0=2 when b2Ha=2, S=1000, N=150, alpha=0.05
+power_stata(1000, 150, 2.00, 2.00, 0.05)
 ```
 
 ```{julia}
-# Power against βtrue = 2.2
-@printf("Power (β0=2, βtrue=2.2) = %.4f\n",
-        power_sim(1000; numobs = 150, β0 = 2.0, βtrue = 2.2))
+#=
+* Power of test of b2H0=2 when b2Ha=2.2, S=1000, N=150, alpha=0.05
+power 1000 150 2.00 2.20 0.05
+display r(power) " is the test power"
+=#
+power = power_stata(1000, 150, 2.00, 2.20, 0.05)
+@printf("Power of test of b2H0=%.2f when b2Ha=%.2f, S=%d, N=%d, alpha=%.2f is %.4f\n",
+        2.00, 2.20, 1000, 150, 0.05, power)
 ```
 
 ```{julia}
-# Power curve: βtrue from 1.6 to 2.4 in steps of 0.025
-βtrues = 1.6:0.025:2.4
-powers = [power_sim(500; numobs = 150, β0 = 2.0, βtrue = b) for b in βtrues]
-@printf("Power range: %.4f to %.4f\n", minimum(powers), maximum(powers))
+# Power curve: H0: β_x = 2 against alternatives β_alt ∈ {1.6, 1.625, …, 2.4}
+# (34 values, 1000 reps each; n = 150, α = 0.05). Stata's `postfile … forvalues
+# … post … postclose` is just `(b2Ha, power)` rows; in Julia we collect those
+# into a DataFrame, write to `musr/simresults.csv`, and call `summarize_stata`.
+#
+# Total runtime ≈ 34 × 0.2 s ≈ 7 s after the JIT warm-up (the chunk-1
+# `power_stata` is already compiled by the §12.6.3 size call above).
+
+mkpath("musr")
+b2Ha_grid = collect(1.6:0.025:2.4)
+print("running 34 × 1000 reps... ")
+t0 = time()
+power_grid = [power_stata(1000, 150, 2.00, b, 0.05) for b in b2Ha_grid]
+@printf("done in %.2fs\n", time() - t0)
+
+df_pow = DataFrames.DataFrame(b2Ha = b2Ha_grid, power = power_grid)
+CSV.write("musr/simresults.csv", df_pow)
+summarize_stata(df_pow, [:b2Ha, :power]);
 ```
 
 ```{julia}
-# Plot the power curve
-fig_pw = CairoMakie.Figure(size = (700, 400))
-ax = CairoMakie.Axis(fig_pw[1, 1], xlabel = "βtrue",
-                      ylabel = "Power",
-                      title  = "Power curve for H₀: β = 2")
-CairoMakie.lines!(ax, collect(βtrues), powers, linewidth = 2)
-CairoMakie.scatter!(ax, collect(βtrues), powers)
-CairoMakie.hlines!(ax, [0.05], color = :red, linestyle = :dash)
-fig_pw
+# Plot the power curve from `df_pow` (defined in the previous chunk).
+# Stata's `twoway connected` becomes a CairoMakie line+scatter overlay.
+# Save as EPS to match Stata's `graph export musr/mus12power.eps`.
+fig_pow = CairoMakie.Figure(size = (700, 450))
+ax_pow  = CairoMakie.Axis(fig_pow[1, 1],
+    xlabel = "b2Ha (alternative)",
+    ylabel = "power",
+    title  = "Power of test of H0: β_x = 2",
+)
+CairoMakie.lines!(ax_pow, df_pow.b2Ha, df_pow.power,
+                  color = :steelblue, linewidth = 2)
+CairoMakie.scatter!(ax_pow, df_pow.b2Ha, df_pow.power,
+                    color = :steelblue, markersize = 7)
+CairoMakie.hlines!(ax_pow, [0.05]; linestyle = :dash, color = :gray,
+                   linewidth = 1.2)
+
+mkpath("musr")
+CairoMakie.save("musr/mus12power.eps", fig_pow)
+fig_pow
 ```
+
 
 ### 12.6.4 Asymptotic test power
 
 ```{julia}
-# Power of χ²(1) test with noncentrality parameter λ at critical value 3.84
-λ = 5.67
-critical = 3.84
-power = 1 - Distributions.cdf(Distributions.NoncentralChisq(1, λ), critical)
-@printf("Asymptotic power = %.4f\n", power)
+#=
+* Power of chi(1) test when noncentrality parameter lambda = 5.67
+display 1-nchi2(1,5.67,3.84)
+=#
+lambda = 5.67
+alpha  = 0.05
+crit   = Distributions.quantile(Distributions.Chisq(1), 1 - alpha)
+power   = 1 - Distributions.cdf(Distributions.NoncentralChisq(1, lambda), crit)
+@printf("Power of chi(1) test when noncentrality parameter lambda = %.2f is %.4f\n", lambda, power)
+
 ```
 
 ## 12.7 Specification tests
