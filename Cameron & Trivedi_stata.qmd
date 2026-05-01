@@ -5450,6 +5450,7 @@ set seed 10101
 quietly set obs 25
 gen x = 12 + rnormal(0,2)
 quietly generate y = 10 + 0.06*x + rnormal(0,0.3)
+export delimited "12_6_2.csv", replace
 summarize x y
 regress y x, noheader
 ```
@@ -5682,7 +5683,7 @@ matrix list e(b_bs)
 bootstrap, reps(400) seed(10101) nodots noheader: poisson docvis chronic
 ```
 
-### 13.4.3 􀄌ootstrap standard error from a Stata estimation command
+### 13.4.3 Bootstrap standard error from a Stata estimation command
 
 ```{python}
 %%stata
