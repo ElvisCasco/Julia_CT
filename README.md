@@ -71,6 +71,17 @@ The Julia translation covers all 18 chapters of *Microeconometrics Using Stata* 
 - **A. Programming in Julia** (replaces "Programming in Stata") — functions, control flow, modules.
 - **B. Native Julia matrix algebra** (replaces Mata) — linear algebra patterns used throughout the book.
 
+## Testing status
+
+The notebook has been executed end-to-end and verified for **Chapters 1–14 and Chapter 18**. Chapters 15–17 are translated but have not yet been fully re-tested in the latest environment.
+
+All packages and helper functions used anywhere in the notebook are loaded and defined in two upfront sections, so any chapter can be run independently after these are evaluated:
+
+- **Julia setup** — top-of-notebook cell that calls `using` on every required package (CairoMakie, CategoricalArrays, CSV, Chain, DataFrames, Downloads, FixedEffectModels, GLM, HypothesisTests, PrettyTables, ReadStatTables, RegressionTables, Statistics, StatsBase, LinearAlgebra, KernelDensity, Loess, RDatasets, Random, Printf, Optim, Distributions, SpecialFunctions, MixedModels, Combinatorics).
+- **Chapter 1 — Stata basics** — defines all reusable helper functions used by later chapters (table formatting, summary statistics, regression-output helpers, panel utilities, bootstrap/jackknife wrappers, etc.).
+
+If you want to run only a specific chapter, evaluate the *Julia setup* cell and the helpers in *Chapter 1* first.
+
 ## Notes
 
 - PDFs of the textbooks are **not included** (copyright); please obtain them from the publisher.

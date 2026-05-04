@@ -8300,7 +8300,7 @@ corr mdu L.mdu
 poisson mdu lcoins ndisease female age lfam child, vce(cluster id)
 ```
 
-### 18.6.4 PA Poisson esil:imator
+### 18.6.4 PA Poisson esimimator
 
 ```{python}
 %%stata
@@ -8328,7 +8328,7 @@ xtpoisson mdu lcoins ndisease female age lfam child, re
 // Not included in book
 * Poisson random-effects estimator with normal intercept and default standard errors
 xtpoisson mdu lcoins ndisease female age lfam child, re normal
-estimates store poisrenormal
+*estimates store poisrenormal
 ```
 
 ```{python}
