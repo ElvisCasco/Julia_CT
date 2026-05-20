@@ -17,7 +17,7 @@ execute:
   warning: true
   error: true
 freeze: auto
-jupyter: python312-fresh
+jupyter: nbstata
 ---
 
 Use kernel Python 3.12.10
@@ -30,7 +30,12 @@ Use kernel Python 3.12.10
 
 # Stata setup instructions (for Stata 19)
 
-```{python}
+Using the `nbstata` Jupyter kernel — it reads `~/.config/nbstata/nbstata.conf`
+for the `stata_dir` / `edition` settings, so no Python setup chunk is needed
+at runtime. The pystata-based setup that used to live here (kept below as
+plain text for reference) was:
+
+```
 import stata_setup
 import sys
 from contextlib import redirect_stdout
@@ -60,94 +65,79 @@ with open('nul', 'w') as fnull, redirect_stdout(fnull):
 
 ### 1.3.2 Example: The summarize command
 
-```{python}
-%%stata
+```{stata}
 sysuse auto.dta
 summarize
 ```
 
-```{python}
-%%stata
+```{stata}
 summarize mpg price weight , separator(2)
 ```
 
 ### 1.3.3 Example: The regress command
 
-```{python}
-%%stata
+```{stata}
 regress mpg price weight
 ```
 
-```{python}
-%%stata
+```{stata}
 by foreign: regress mpg price weight if weight < 4000, vce (robust)
 ```
 
-```{python}
-%%stata
+```{stata}
 quietly regress mpg price weight
 ```
 
-```{python}
-%%stata
+```{stata}
 * Factor variable for rep78 - base category is omitted
 clear
 sysuse auto
 summarize i.rep78
 ```
 
-```{python}
-%%stata
+```{stata}
 * Factor variable for rep78 - no category is omitted
 summarize ibn.rep78
 ```
 
-```{python}
-%%stata
+```{stata}
 * Factor variables for interaction between two categorical variables
 summarize i.rep78#i.foreign, allbaselevels
 ```
 
-```{python}
-%%stata
+```{stata}
 * Factor variables for interaction between categorical and continuous variables
 summarize i.rep78#c.weight
 ```
 
-```{python}
-%%stata
+```{stata}
 * Factor variables for interaction between two continuous variables
 regress mpg price c.weight c.weight#c.weight, noheader
 ```
 
 ### 1.3.4 Abbreviations, case sensitivity, and wildcards
 
-```{python}
-%%stata
+```{stata}
 summarize t*
 ```
 
 ### 1.3.5 Arithmetic, relational, and logical operators
 
-```{python}
-%%stata
+```{stata}
 display -2*(9/ (8+2-7))^2
 ```
 
-```{python}
-%%stata
+```{stata}
 display 2/0
 ```
 
-```{python}
-%%stata
+```{stata}
 regress mpg price weight if weight <= 4000 & price <= 10000
 ```
 
 ### 1.3.6 Error messages
 
-```{python}
-%%stata
+```{stata}
 *regress mpg notthere
 ```
 
@@ -157,15 +147,13 @@ regress mpg price weight if weight <= 4000 & price <= 10000
 
 ### 1.4.2 Running do-files
 
-```{python}
-%%stata
+```{stata}
 *do example. do
 ```
 
 ### 1.4.3 log files
 
-```{python}
-%%stata
+```{stata}
 *log using example.txt, text replace
 ```
 
@@ -177,8 +165,7 @@ regress mpg price weight if weight <= 4000 & price <= 10000
 
 ### 1.4.5 Comments and long lines
 
-```{python}
-%%stata
+```{stata}
 * Demonstrate use of comments
 * This program reads in system file auto.dta and gets summary statistics
 clear // Remove data from memory
@@ -190,8 +177,7 @@ summarize
 
 ### 1.4.6 Different implementations of Stata
 
-```{python}
-%%stata
+```{stata}
 *set matsize 300
 ```
 
@@ -199,8 +185,7 @@ summarize
 
 ### 1.5.1 Scalars
 
-```{python}
-%%stata
+```{stata}
 * Scalars: Example
 scalar a = 2*3
 scalar b = "2 times 3 = "
@@ -209,15 +194,13 @@ display b a
 
 ### 1.5.2 Matrices
 
-```{python}
-%%stata
+```{stata}
 *Matrix commands : Example
 matrix define A = ( 1,2,3 \ 4,5,6 )
 matrix list A
 ```
 
-```{python}
-%%stata
+```{stata}
 scalar c = A[2,3]
 display c
 ```
@@ -226,53 +209,45 @@ display c
 
 ### 1.6.1 Using results from the r-class command summarize
 
-```{python}
-%%stata
+```{stata}
 * Illustrate use of return list for r-class command summarize
 summarize mpg
 ```
 
-```{python}
-%%stata
+```{stata}
 return list
 ```
 
-```{python}
-%%stata
+```{stata}
 * Illustrate use of r()
 quietly summarize mpg
 scalar range = r(max) - r(min)
 display "Sample range = " range
 ```
 
-```{python}
-%%stata
+```{stata}
 *Save a result in r() as a scalar
 scalar mpgmean = r(mean)
 ```
 
 ### 1.6.2 Using results from the e-class command regress
 
-```{python}
-%%stata
+```{stata}
 regress mpg price weight
 ```
 
-```{python}
-%%stata
+```{stata}
 * *ereturn list after e-class command regress
 ereturn list
 ```
 
-```{python}
-%%stata
+```{stata}
 * Use of e() where scalar
 scalar r2 = e(mss ) / ( e(mss) + e(rss) )
 display "r-squared = " r2
 ```
 
-```{python}
-%%stata
+```{stata}
 * Use of e() where matrix
 matrix best = e(b)
 scalar bprice = best[1,1]
@@ -286,8 +261,7 @@ display "t statistic for H O : b_price = 0 is " tprice
 
 ### 1.7.1 Global macros
 
-```{python}
-%%stata
+```{stata}
 * Global macro definition and use
 global xlist price weight
 regress mpg $xlist , noheader // $ prefix is necessary
@@ -295,22 +269,19 @@ regress mpg $xlist , noheader // $ prefix is necessary
 
 ### 1.7.2 local macros
 
-```{python}
-%%stata
+```{stata}
 * Local macro definition and use
 local xlist "price weigh"
 regress mpg `xlist', noheader // single quotes are necessary
 ```
 
-```{python}
-%%stata
+```{stata}
 * Local macro definition without double quotes
 local y mpg
 regress `y' `xlist', noheader
 ```
 
-```{python}
-%%stata
+```{stata}
 * Local macro definition through function evaluation
 local z = 2+2
 display `z'
@@ -318,8 +289,7 @@ display `z'
 
 ### 1.7.3 Scalar or macro?
 
-```{python}
-%%stata
+```{stata}
 * Scalars disappear after clear all but macro does not
 global b 3
 local c 4
@@ -328,28 +298,24 @@ clear
 display $b_ _skip(3) `c' // display macros
 ```
 
-```{python}
-%%stata
+```{stata}
 * display the scalar
 display d 
 ```
 
-```{python}
-%%stata
+```{stata}
 clear all
 display $b _skip(3) `c' // display macros
 ```
 
-```{python}
-%%stata
+```{stata}
 * display the scalar
 *display d 
 ```
 
 ## 1.8 Looping commands
 
-```{python}
-%%stata
+```{stata}
 * Make artificial dataset of 100 observations on 4 uniform variables
 clear
 set obs 100
@@ -361,8 +327,7 @@ generate x3var = runiform()
 generate x4var = runiform()
 ```
 
-```{python}
-%%stata
+```{stata}
 * Manually obtain the sum of four variables
 generate sum = x1var + x2var + x3var + x4var
 summarize sum
@@ -370,8 +335,7 @@ summarize sum
 
 ### 1.8.1 The foreach loop
 
-```{python}
-%%stata
+```{stata}
 * foreach loop with a variable list
 quietly replace sum = 0
 foreach var of varlist x1var x2var x3var x4var {
@@ -382,8 +346,7 @@ summarize sum
 
 ### 1.8.2 The forvalues loop
 
-```{python}
-%%stata
+```{stata}
 * forvalues loop to create a swn of variables
 quietly replace sum = 0
 forvalues i = 1/4 {
@@ -392,8 +355,7 @@ forvalues i = 1/4 {
 summarize sum
 ```
 
-```{python}
-%%stata
+```{stata}
 // Not included in book
 * foreach loop with a number list
 quietly replace sum = 0
@@ -405,8 +367,7 @@ summarize sum
 
 ### 1.8.3 The while loop
 
-```{python}
-%%stata
+```{stata}
 * While loop and local macros to create a sum of variables
 quietly replace sum = 0
 local i 1
@@ -423,8 +384,7 @@ summarize sum
 
 ## 1.10 Template do-file
 
-```{python}
-%%stata
+```{stata}
 *log close
 * 1. Program name
 * mus01p2template.do is a template do-file
@@ -460,13 +420,11 @@ exit, clear
 
 ## 1.11 User-written commands
 
-```{python}
-%%stata
+```{stata}
 findit instrumental variables
 ```
 
-```{python}
-%%stata
+```{stata}
 findit ivreg2
 ```
 
@@ -490,64 +448,54 @@ findit ivreg2
 
 ### 2.3.1 General principles
 
-```{python}
-%%stata
+```{stata}
 * Remove current dataset from memory
 clear
 ```
 
-```{python}
-%%stata
+```{stata}
 * Set memory to 100 mb
 *set memory 100m
 ```
 
-```{python}
-%%stata
+```{stata}
 * Save data as a Stata dataset
 *save mydata.dta, replace
 ```
 
-```{python}
-%%stata
+```{stata}
 sysuse auto.dta
 * Quick check that data are read in correctly
 list in 1/5 // list the first five observations
 ```
 
-```{python}
-%%stata
+```{stata}
 * describe the variables
 describe 
 ```
 
-```{python}
-%%stata
+```{stata}
 summarize 
 * descriptive statistics for the variables
 ```
 
 ### 2.3.2 Inputting data already in Stata format
 
-```{python}
-%%stata
+```{stata}
 * Read in existing Stata dataset
 use "mus2/mus202psid92m.dta", clear
 ```
 
-```{python}
-%%stata
+```{stata}
 * Read i n dataset from an Internet web site
 use http://www.stata-press.com/data/r10/census.dta, clear
 ```
 
-```{python}
-%%stata
+```{stata}
 clear
 ```
 
-```{python}
-%%stata
+```{stata}
 * Data input froo keyboard
 input str20 name age female income
     "Barry" 25 0 4 0 . 9 9 0
@@ -556,8 +504,7 @@ input str20 name age female income
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 list, clean
 ```
 
@@ -567,20 +514,17 @@ list, clean
 
 ### 2.3.5 Inputting text data from a spreadsheet
 
-```{python}
-%%stata
+```{stata}
 * Read data from a csv file that includes variable names using insheet
 clear
 insheet using "mus2/mus202file1.csv"
 ```
 
-```{python}
-%%stata
+```{stata}
 list, clean
 ```
 
-```{python}
-%%stata
+```{stata}
 * Read data from a csv file without variable names and assign names
 clear
 insheet name age female income using mus2/mus202file2.csv
@@ -588,8 +532,7 @@ insheet name age female income using mus2/mus202file2.csv
 
 ### 2.3.6 Inputting text data 1n free format
 
-```{python}
-%%stata
+```{stata}
 * Read data from free-format text file using infile
 clear
 infile str20 name age female income using mus2/mus202file2.csv
@@ -598,16 +541,14 @@ list, clean
 
 ### 2.3.7 Inputting text data in fixed format
 
-```{python}
-%%stata
+```{stata}
 * Read data from fixed-format text file using infix
 clear
 infix str20 name 1-10 age 11-12 female 13 income 14-20 using mus2/mus202file3.txt
 list, clean
 ```
 
-```{python}
-%%stata
+```{stata}
 * Read data using infix where an observation spans more than one line
 clear
 infix str20 name 1-10 age 11-12 female 13 2: income 1-7 using mus2/mus202file4.txt
@@ -615,8 +556,7 @@ infix str20 name 1-10 age 11-12 female 13 2: income 1-7 using mus2/mus202file4.t
 
 ### 2.3.8 Dictionary files
 
-```{python}
-%%stata
+```{stata}
 * Read in data with dictionary file
 *infile using mus02dict
 ```
@@ -627,8 +567,7 @@ infix str20 name 1-10 age 11-12 female 13 2: income 1-7 using mus2/mus202file4.t
 
 ### 2.4.1 PSiD example
 
-```{python}
-%%stata
+```{stata}
 * mus02psid92m.do
 clear
 #delimit ;
@@ -668,22 +607,19 @@ label variable er30754  "ANN WORK HRS                  92"  ;
 #delimit cr;    //  Change delimiter to default cr
 ```
 
-```{python}
-%%stata
+```{stata}
 * Data description
 describe
 ```
 
-```{python}
-%%stata
+```{stata}
 * Data summary
 summarize
 ```
 
 ### 2.4.2 Naming and labeling variables
 
-```{python}
-%%stata
+```{stata}
 * Rename variables
 rename er32000 sex
 rename er30736 age
@@ -692,8 +628,7 @@ rename er30750 earnings
 rename er30754 hours
 ```
 
-```{python}
-%%stata
+```{stata}
 * Relabel some of the variables
 label variable age "AGE OF INDIVIDUAL"
 label variable education "COMPLETED EDUCATION"
@@ -701,30 +636,26 @@ label variable earnings "TOT LABOR INCOME"
 label variable hours "ANN WORK HRS"
 ```
 
-```{python}
-%%stata
+```{stata}
 * Define the label gender for the values taken by variable sex
 label define gender 1 male 2 female
 label values sex gender
 list sex in 1/2, clean
 ```
 
-```{python}
-%%stata
+```{stata}
 * Data summary of key variables after renaming
 summarize sex age education earnings hours
 ```
 
 ### 2.4.3 Viewing data
 
-```{python}
-%%stata
+```{stata}
 * List first 2 observations of two of the variables
 list age hours in 1/2, clean
 ```
 
-```{python}
-%%stata
+```{stata}
 * Tabulate all values taken by a single variable
 tabulate education
 ```
@@ -733,52 +664,44 @@ tabulate education
 
 ### 2.4.5 Missing values
 
-```{python}
-%%stata
+```{stata}
 * Replace missing values with missing-data code
 replace education = . if education == 0 | education == 99
 ```
 
-```{python}
-%%stata
+```{stata}
 * Listing of variable including missing value
 list education in 46/48, clean
 ```
 
-```{python}
-%%stata
+```{stata}
 * Example of data analysis with some missing values
 summarize education age
 ```
 
-```{python}
-%%stata
+```{stata}
 * Replace missing values with missing-data code
 replace earnings = . if education >= .
 replace hours = . if education >= .
 ```
 
-```{python}
-%%stata
+```{stata}
 * Assign more than one missing code
 replace education = .a if education == 0
 replace education = .b if education == 99
 ```
 
-```{python}
-%%stata
+```{stata}
 * This command will include missing values
 list education in 40/60 if education > 16, clean
 ```
 
-```{python}
-%%stata
+```{stata}
 * This command will not include missing values
 list education in 40/60 if education > 16 & education < . , clean
 ```
 
-```{python}
-%%stata
+```{stata}
 * Replace missing values 1o1ith missing-data code
 replace earnings = . if education >= .
 replace hours = . if education >= .
@@ -788,46 +711,40 @@ replace hours = . if education >= .
 
 ### 2.4.7 Transforming data (generate, replace, egen, recode)
 
-```{python}
-%%stata
+```{stata}
 * Summarize cleaned up data
 summarize sex age education earnings
 ```
 
 #### The generate and replace commands
 
-```{python}
-%%stata
+```{stata}
 * Create identifier using generate command
 generate id = _n
 ```
 
-```{python}
-%%stata
+```{stata}
 * Create new variable using generate command
 generate lnearns = ln(earnings)
 ```
 
 #### The egen command
 
-```{python}
-%%stata
+```{stata}
 * Create new variable using egen command
 egen aveearnings = mean(earnings) if earnings < .
 ```
 
 #### The recode command
 
-```{python}
-%%stata
+```{stata}
 * Replace existing data using the recode command
 recode education (1/11=1) (12=2) (13/15=3) (16/17=4), generate(edcat) 
 ```
 
 #### The by prefix
 
-```{python}
-%%stata
+```{stata}
 * Create new variable using bysort: prefix
 bysort education: egen aveearnsbyed = mean(earnings)
 sort id
@@ -835,100 +752,85 @@ sort id
 
 #### Indicator variables
 
-```{python}
-%%stata
+```{stata}
 * Create indicator variable using generate command with logical operators
 generate d1 = earnings > 0 if earnings < .
 ```
 
-```{python}
-%%stata
+```{stata}
 summarize d1
 ```
 
-```{python}
-%%stata
+```{stata}
 * Create indicator variable using generate and replace commands
 generate d2 = 0
 replace d2 = 1 if earnings > 0
 replace d2 = . if earnings >= .
 ```
 
-```{python}
-%%stata
+```{stata}
 * Create indicator variable using recode commands
 recode earnings (0=0) (1/999999=1), generate(d3)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Verify that three methods create the same indicator variable
 // summarize d1 d2 d3
 summarize d1 d2 d3
 ```
 
-```{python}
-%%stata
+```{stata}
 * Create a set of indicator variables using tabulate with generate() option
 quietly tabulate edcat, generate(eddummy)
 summarize eddummy*
 ```
 
-```{python}
-%%stata
+```{stata}
 * Create a set of indicator variables using command xi
 xi i.edcat, noomit
 summarize _I*
 ```
 
-```{python}
-%%stata
+```{stata}
 * Command Yith a variable list that includes indicators created using xi:
 xi : summarize i.edcat
 ```
 
-```{python}
-%%stata
+```{stata}
 * Set of indicator variables using factor variables - no category is omitted
 summarize ibn.edcat
 ```
 
 #### interactions
 
-```{python}
-%%stata
+```{stata}
 * Create interactive variable using generate commands
 generate d1education = d1*education
 ```
 
-```{python}
-%%stata
+```{stata}
 * Create set of interactions betyeen cat variable and set of indicators
 drop _Iedcat_*
 xi i.edcat*earnings, noomit
 ```
 
-```{python}
-%%stata
+```{stata}
 summarize _I*
 ```
 
-```{python}
-%%stata
+```{stata}
 * Create a set of interactions between a categorical and a set of indicators
 drop _I*
 xi i.edcat*i.d1, noomit
 ```
 
-```{python}
-%%stata
+```{stata}
 summarize _I*
 ```
 
 #### Demeaning
 
-```{python}
-%%stata
+```{stata}
 * Create demeaned variables
 egen double aveage = mean(age)
 generate double agedemean = age - aveage
@@ -938,41 +840,35 @@ summarize agedemean agesqdemean
 
 ### 2.4.8 Saving data
 
-```{python}
-%%stata
+```{stata}
 * Save as Stata data file
 save musr/mus02psid92m_test.dta, replace
 ```
 
-```{python}
-%%stata
+```{stata}
 * Save as comma-separated values spreadsheet
 outsheet age education eddummy* earnings d1 hours using musr/mus02psid92m_test.csv, comma replace
 ```
 
-```{python}
-%%stata
+```{stata}
 * Save as formatted text (ascii) file
 outfile age education eddummy* earnings d1 hours using musr/mus02psid92m.asc, replace
 ```
 
 ### 2.4.9 Selecting the sample
 
-```{python}
-%%stata
+```{stata}
 * Select the sample used in a single command using the if qualifier
 summarize earnings lnearns if age >= 35 & age <= 44 
 ```
 
-```{python}
-%%stata
+```{stata}
 * Select the sample using command keep
 keep if (lnearns != .) & (age >= 35 & age <= 44) 
 summarize earnings lnearns
 ```
 
-```{python}
-%%stata
+```{stata}
 * Select the sample using keep and drop commands
 use musr/mus02psid92m.dta, clear
 keep lnearns age
@@ -985,8 +881,7 @@ drop in 1/1000
 
 ### 2.5.2 Preserving and restoring a dataset
 
-```{python}
-%%stata
+```{stata}
 clear all
 * Commands preserve and restore illustrated
 use musr/mus02psid92m.dta, clear
@@ -1002,8 +897,7 @@ list age in 1/1, noheader clean
 
 ### 2.5.4 Merging datasets
 
-```{python}
-%%stata
+```{stata}
 * Create first dataset with every third observation
 use musr/mus02psid92m.dta, clear
 keep if mod(_n,3) == 0 
@@ -1012,8 +906,7 @@ list in 1/4, clean
 quietly save musr/merge1.dta, replace
 ```
 
-```{python}
-%%stata
+```{stata}
 * Create second dataset with every second observation
 use musr/mus02psid92m.dta, clear
 keep if mod(_n,2) == 0 
@@ -1022,8 +915,7 @@ list in 1/4, clean
 quietly save musr/merge2.dta, replace
 ```
 
-```{python}
-%%stata
+```{stata}
 * Merge two datasets with some observations and variables different
 clear
 use musr/merge1.dta
@@ -1033,15 +925,13 @@ sort id
 list in 1/4, clean
 ```
 
-```{python}
-%%stata
+```{stata}
 tab _merge
 ```
 
 ### 2.5.5 Appending datasets
 
-```{python}
-%%stata
+```{stata}
 * Append two datasets with some observations and variables different
 clear
 use musr/merge1.dta
@@ -1056,15 +946,13 @@ list in 1/5, clean
 
 #### Example graph commands
 
-```{python}
-%%stata
+```{stata}
 use musr/mus02psid92m.dta, clear
 twoway scatter lnearns hours
 graph export musr/mus02two1.eps, replace
 ```
 
-```{python}
-%%stata
+```{stata}
 * More advanced graphics command with two plots and with several options
 graph twoway (scatter lnearns hours, msize(small))     ///
    (lfit lnearns hours, lwidth(medthick)),             ///
@@ -1074,8 +962,7 @@ graph export musr/mus02two2.eps, replace
 
 #### Saving and exporting graphs
 
-```{python}
-%%stata
+```{stata}
 * More advanced graph example 
 graph twoway (scatter lnearns hours, msize(small))    ///
   (lfit lnearns hours, lwidth(medthick)),             ///
@@ -1083,8 +970,7 @@ graph twoway (scatter lnearns hours, msize(small))    ///
 graph export musr/mus02examplefigure.eps, replace
 ```
 
-```{python}
-%%stata
+```{stata}
 * Combine graphs saved as graph1 . gph and graph2. gph
 *graph combine graph1 graph2
 ```
@@ -1093,21 +979,18 @@ graph export musr/mus02examplefigure.eps, replace
 
 ### 2.6.2 Box-and-whisker plot
 
-```{python}
-%%stata
+```{stata}
 * Simple box-and-Yhisker plot
 graph box hours
 ```
 
-```{python}
-%%stata
+```{stata}
 use musr/mus02psid92m.dta, clear
 label define edtype 1 "< High School" 2 "High School" 3 "Some College" 4 "College Degree"
 label values edcat edtype
 ```
 
-```{python}
-%%stata
+```{stata}
 * Box and whisker plot of single variable over several categories
 graph box hours, over(edcat) scale(1.2) marker(1,msize(vsmall))   ///
   ytitle("Annual hours worked by education") yscale(titlegap(*5)) 
@@ -1116,13 +999,11 @@ quietly graph export musr/mus02boxfig.eps, replace
 
 ### 2.6.3 Histogram
 
-```{python}
-%%stata
+```{stata}
 histogram lnearns
 ```
 
-```{python}
-%%stata
+```{stata}
 * Histogram with bin width and start value set
 histogram lnearns, width(0.25) start(4.0)
 graph export musr/mus02hist.eps, replace
@@ -1130,20 +1011,17 @@ graph export musr/mus02hist.eps, replace
 
 ### 2.6.4 Kernel density plot
 
-```{python}
-%%stata
+```{stata}
 kdensity lnearns
 ```
 
-```{python}
-%%stata
+```{stata}
 * Kernel density plot with bandwidth set and fitted normal density overlaid
 kdensity lnearns, bwidth(0.20) normal n(4000)
 graph export musr/mus02kd1.eps, replace
 ```
 
-```{python}
-%%stata
+```{stata}
 * Histogram and nonparametric kernel density estimate 
 histogram lnearns if lnearns > 0, width(0.25) kdensity             ///
   kdenopts(bwidth(0.2) lwidth(medthick))                               ///
@@ -1156,14 +1034,12 @@ graph export musr/mus02histdens.eps, replace
 
 ### 2.6.5 Twoway scatterplots and fitted lines
 
-```{python}
-%%stata
+```{stata}
 * Simple two-way scatterplot
 scatter lnearns hours
 ```
 
-```{python}
-%%stata
+```{stata}
 * Two-way scatterplot and quadratic regression curve with 95% ci for y|x  
 twoway (qfitci lnearns hours, stdf)  (scatter lnearns hours, msize(small))
 graph export musr/mus02scatter2.eps, replace
@@ -1171,8 +1047,7 @@ graph export musr/mus02scatter2.eps, replace
 
 ### 2.6.6 lowess, kernel, local linear, and nearest-neighbor regression
 
-```{python}
-%%stata
+```{stata}
 * Scatterplot with lowess and local linear nonparametric regression
 graph twoway (scatter lnearns hours, msize(tiny))                 ///
   (lowess lnearns hours, clstyle(p1) lwidth(medthick))            /// 
@@ -1188,8 +1063,7 @@ quietly graph export musr/mus02twoway.eps, replace
 
 ### 2.6.7 Multiple scatterplots
 
-```{python}
-%%stata
+```{stata}
 * Multiple scatterplots
 label variable age "Age"
 label variable lnearns "Log earnings"
@@ -1211,8 +1085,7 @@ graph matrix lnearns hours age, by(edcat) msize(small)
 
 ### 3.2.2 Variable description
 
-```{python}
-%%stata
+```{stata}
 set more off
 version 11
 clear all
@@ -1220,8 +1093,7 @@ set linesize 82
 set scheme s1mono  /* Graphics scheme */
 ```
 
-```{python}
-%%stata
+```{stata}
 * Variable description for medical expenditure dataset
 use musr/mus03data.dta
 describe totexp ltotexp posexp suppins phylim actlim totchr age female income
@@ -1229,75 +1101,64 @@ describe totexp ltotexp posexp suppins phylim actlim totchr age female income
 
 ### 3.2.3 Summary statistics
 
-```{python}
-%%stata
+```{stata}
 * Summary statistics for medical expenditure dataset
 summarize totexp ltotexp posexp suppins phylim actlim totchr age female income
 ```
 
-```{python}
-%%stata
+```{stata}
 * Tabulate variable
 tabulate income if income <= 0
 ```
 
 ### 3.2.4 More-detailed summary statistics
 
-```{python}
-%%stata
+```{stata}
 * Detailed summary statistics of a single variable
 summarize totexp, detail
 ```
 
 ### 3.2.5 Tables for data
 
-```{python}
-%%stata
+```{stata}
 * Two-way table of frequencies
 table female totchr
 ```
 
-```{python}
-%%stata
+```{stata}
 * Two-way table with row and column percentages and Pearson chi-squared
 tabulate female suppins, row col chi2
 ```
 
-```{python}
-%%stata
+```{stata}
 * Three-way table of frequencies
 table female totchr suppins
 ```
 
-```{python}
-%%stata
+```{stata}
 * One-way table of summary statistics
 table female, statistic(count totchr) statistic(mean totchr) statistic(sd totchr) statistic(p50 totchr)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Two-way table of summary statistics
 table female suppins, statistic(count totchr) statistic(mean totchr)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Summary statistics obtained using command tabstat
 tabstat totexp ltotexp, stat (count mean p50 sd skew kurt) col(stat)
 ```
 
 ### 3.2.6 Statistical tests
 
-```{python}
-%%stata
+```{stata}
 ttest totexp, by(suppins)
 ```
 
 ### 3.2.7 Data plots
 
-```{python}
-%%stata
+```{stata}
 * Kernel density plots with adjustment for highly skewed data
 kdensity totexp if posexp==1, generate (kx1 kd1) n(500) 
 graph twoway (line kd1 kx1) if kx1 < 40000, name(levels)
@@ -1307,8 +1168,7 @@ graph combine levels logs, iscale(1.0)
 graph export musr/mus03fig1.eps, replace
 ```
 
-```{python}
-%%stata
+```{stata}
 graph export musr/mus03fig1.eps, replace
 ```
 
@@ -1330,22 +1190,19 @@ graph export musr/mus03fig1.eps, replace
 
 ### 3.4.1 Correlations
 
-```{python}
-%%stata
+```{stata}
 * Pairwise correlations for dependent variable and regressor variables
 correlate ltotexp suppins phylim actlim totchr age female income
 ```
 
 ### 3.4.2 The regress command
 
-```{python}
-%%stata
+```{stata}
 * OLS regression with heteroskedasticity-robust standard errors
 regress ltotexp suppins phylim actlim totchr age female income, vce(robust)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Display stored results and list available postestimation commands
 ereturn list
 help regress postestimation
@@ -1353,24 +1210,21 @@ help regress postestimation
 
 ### 3.4.3 Hypothesis tests
 
-```{python}
-%%stata
+```{stata}
 * Wald test of equality of coefficients
 quietly regress ltotexp suppins phylim actlim totchr age female ///
   income, vce(robust)
 test phylim = actlim
 ```
 
-```{python}
-%%stata
+```{stata}
 *  Joint test of statistical significance of several variables
 test phylim actlim totchr
 ```
 
 ### 3.4.4 Tables of output from several regressions
 
-```{python}
-%%stata
+```{stata}
 * Store and then tabulate results from multiple regressions
 quietly regress ltotexp suppins phylim actlim totchr age female income, vce(robust)
 estimates store REG1
@@ -1381,22 +1235,19 @@ estimates table REG1 REG2, b(%9.4f) se stats(N r2 F ll) keep(suppins income educ
 
 ### 3.4.5 Even better tables of regression output
 
-```{python}
-%%stata
+```{stata}
 * Tabulate results using user-written command esttab to produce cleaner output
 esttab REG1 REG2, b(%10.4f) se scalars(N r2 F ll) mtitles ///
   keep(suppins income educyr) title("Model comparison of REG1-REG2")
 ```
 
-```{python}
-%%stata
+```{stata}
 * Write tabulated results to a file in latex table format
 quietly esttab REG1 REG2 using musr/mus03table.tex, replace b(%10.4f) se scalars(N r2 F ll) ///
    mtitles keep(suppins age income educyr _cons) title("Model comparison of REG1-REG2")
 ```
 
-```{python}
-%%stata
+```{stata}
 * Add a user-calculated statistic to the table
 estimates drop REG1 REG2
 quietly regress ltotexp suppins phylim actlim totchr age female ///
@@ -1410,29 +1261,25 @@ estimates store REG2
 esttab REG1 REG2, b(%10.4f) se scalars(F pvalue) mtitles keep(suppins) 
 ```
 
-```{python}
-%%stata
+```{stata}
 * Factor variables for sets of indicator variables and interactions
 regress ltotexp suppins phylim actlim totchr age female c.income ///
  i.famsze c.income#i.famsze, vce(robust) noheader allbaselevels
 ```
 
-```{python}
-%%stata
+```{stata}
 * Test joint significance of sets of indicator variables and interactions
 testparm i.famsz c.income#i.famsze
 ```
 
-```{python}
-%%stata
+```{stata}
 * Compute the average marginal effect in model with interactions
 quietly regress totexp suppins phylim actlim totchr age female c.income ///
  i.famsze c.income#i.famsze, vce(robust) noheader allbaselevels
 margins, dydx(income)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Compute elasticity for a specified regressor
 quietly regress totexp suppins phylim actlim totchr age female income, vce(robust)
 margins, eyex(totchr) atmean
@@ -1444,8 +1291,7 @@ margins, eyex(totchr) atmean
 
 ### 3.5.2 Residual diagnostic plots
 
-```{python}
-%%stata
+```{stata}
 * Plot of residuals against fitted values
 quietly regress ltotexp suppins phylim actlim totchr age female income, ///
   vce(robust)
@@ -1453,8 +1299,7 @@ rvfplot
 graph export musr/mus03fig2.eps, replace
 ```
 
-```{python}
-%%stata
+```{stata}
 * Details on the outlier residuals
 predict uhat, residual
 predict yhat, xb
@@ -1463,8 +1308,7 @@ list totexp ltotexp yhat uhat if uhat < -5, clean
 
 ### 3.5.3 Influential observations
 
-```{python}
-%%stata
+```{stata}
 * Compute dfits that combines outliers and leverage
 quietly regress ltotexp suppins phylim actlim totchr age female income
 predict dfits, dfits
@@ -1473,8 +1317,7 @@ display "dfits threshold = "  %6.3f threshold
 tabstat dfits, stat (min p1 p5 p95 p99 max) format(%9.3f) col(stat)
 ```
 
-```{python}
-%%stata
+```{stata}
 list dfits totexp ltotexp yhat uhat if abs(dfits) > 2*threshold & e(sample), clean
 ```
 
@@ -1484,24 +1327,21 @@ list dfits totexp ltotexp yhat uhat if abs(dfits) > 2*threshold & e(sample), cle
 
 #### Test of the Box-Cox model
 
-```{python}
-%%stata
+```{stata}
 * Boxcox model with lhs variable transformed
 boxcox totexp suppins phylim actlim totchr age female income if totexp>0, nolog
 ```
 
 #### Test of the functional form of the conditional mean
 
-```{python}
-%%stata
+```{stata}
 * Variable augmentation test of conditional mean using estat ovtest
 quietly regress ltotexp suppins phylim actlim totchr age female ///
   income, vce(robust)
 estat ovtest
 ```
 
-```{python}
-%%stata
+```{stata}
 * Link test of functional form of conditional mean 
 quietly regress ltotexp suppins phylim actlim totchr age female ///
   income, vce(robust)
@@ -1510,22 +1350,19 @@ linktest
 
 #### Heteroskedasticity test
 
-```{python}
-%%stata
+```{stata}
 * Heteroskedasticity tests using estat hettest and option iid
 quietly regress ltotexp suppins phylim actlim totchr age female income
 estat hettest, iid
 ```
 
-```{python}
-%%stata
+```{stata}
 estat hettest suppins phylim actlim totchr age female income, iid
 ```
 
 #### Omnibus test
 
-```{python}
-%%stata
+```{stata}
 * Information matrix test
 quietly regress ltotexp suppins phylim actlim totchr age female income
 estat imtest
@@ -1533,8 +1370,7 @@ estat imtest
 
 ### 3.5.5 Tests have power an more than one direction
 
-```{python}
-%%stata
+```{stata}
 * Simulation to show tests have power in more than one direction
 clear all
 set obs 50 
@@ -1546,14 +1382,12 @@ generate xsq = x^2
 regress y x xsq
 ```
 
-```{python}
-%%stata
+```{stata}
 * Test for heteroskedasticity
 estat hettest
 ```
 
-```{python}
-%%stata
+```{stata}
 * Test for misspecified conditional mean
 estat ovtest
 ```
@@ -1562,29 +1396,25 @@ estat ovtest
 
 ### 3.6.1 In-sample prediction
 
-```{python}
-%%stata
+```{stata}
 * Change dependent variable to level of positive medical expenditures
 use musr/mus03data.dta, clear
 keep if totexp > 0   
 regress totexp suppins phylim actlim totchr age female income, vce(robust)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Prediction in model linear in levels
 predict yhatlevels
 summarize totexp yhatlevels
 ```
 
-```{python}
-%%stata
+```{stata}
 * Compare median prediction and median actual value
 tabstat totexp yhatlevels, stat (count p50) col(stat)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Compute standard errors of prediction and forecast with default VCE
 quietly regress totexp suppins phylim actlim totchr age female income
 predict yhatstdp, stdp
@@ -1594,21 +1424,18 @@ summarize yhatstdp yhatstdf
 
 ### 3.6.2 Marginal effects
 
-```{python}
-%%stata
+```{stata}
 * Compute elasticity for a specified regressor
 quietly regress totexp suppins phylim actlim totchr age female income, vce (robust)
 ```
 
-```{python}
-%%stata
+```{stata}
 *mfx, varlist (totcbr) eyex
 ```
 
 ### 3.6.3 Prediction in logs: The retransformation problem
 
-```{python}
-%%stata
+```{stata}
 * Prediction in levels from a logarithmic model
 quietly regress ltotexp suppins phylim actlim totchr age female income
 quietly predict lyhat
@@ -1623,14 +1450,12 @@ summarize totexp yhatwrong yhatnormal yhatduan yhatlevels
 
 ### 3.6.4 Prediction exercise
 
-```{python}
-%%stata
+```{stata}
 * Predicted effect of supplementary insurance: methods 1 and 2
 bysort suppins: summarize totexp yhatlevels yhatduan
 ```
 
-```{python}
-%%stata
+```{stata}
 * Predicted effect of supplementary insurance: method 3 for log-linear model
 quietly regress ltotexp suppins phylim actlim totchr age female income
 preserve
@@ -1649,8 +1474,7 @@ restore
 
 ### 3.7.1 Weights
 
-```{python}
-%%stata
+```{stata}
 * Create artificial sampling weights
 use musr/mus03data.dta, clear
 generate swght = totchr^2 + 0.5
@@ -1659,39 +1483,34 @@ summarize swght
 
 ### 3.7.2 Weighted mean
 
-```{python}
-%%stata
+```{stata}
 * Calculate the weighted mean
 mean totexp [pweight=swght]
 ```
 
 ### 3.7.3 Weighted regression
 
-```{python}
-%%stata
+```{stata}
 * Perform weighted regression 
 regress totexp suppins phylim actlim totchr age female income [pweight=swght]
 ```
 
 ### 3.7.4 Weighted prediction and MEs
 
-```{python}
-%%stata
+```{stata}
 * Weighted prediction
 quietly predict yhatwols
 mean yhatwols [pweight=swght], noheader 
 ```
 
-```{python}
-%%stata
+```{stata}
 * unweighted prediction
 mean yhatwols, noheader      
 ```
 
 ## 3.8 OLS using Mata
 
-```{python}
-%%stata
+```{stata}
 * OLS with White robust standard errors using Mata
 use musr/mus03data.dta, clear
 keep if totexp > 0   // Analysis for positive medical expenditures only 
@@ -1700,8 +1519,7 @@ local y ltotexp
 local xlist suppins phylim actlim totchr age female income cons
 ```
 
-```{python}
-%%stata
+```{stata}
 * Define the dependent variable and regressors
 local y ltotexp
 local xlist suppins phylim actlim totchr age female income
@@ -1730,8 +1548,7 @@ ereturn post b V
 ereturn display
 ```
 
-```{python}
-%%stata
+```{stata}
 // Not included in book
 * Check
 regress ltotexp suppins phylim actlim totchr age female income, ///
@@ -1750,8 +1567,7 @@ regress ltotexp suppins phylim actlim totchr age female income, ///
 
 ### 4.2.1 Uniform random-number generation
 
-```{python}
-%%stata
+```{stata}
 set more off
 version 11
 clear all
@@ -1759,16 +1575,14 @@ set memory 10m
 set scheme s1mono  /* Graphics scheme */
 ```
 
-```{python}
-%%stata
+```{stata}
 * Single draw of a uniform number 
 set seed 10101
 scalar u = runiform()
 display u
 ```
 
-```{python}
-%%stata
+```{stata}
 * 1000 draws of uniform numbers
 quietly set obs 1000
 set seed 10101
@@ -1777,30 +1591,26 @@ list x in 1/5, clean
 summarize x
 ```
 
-```{python}
-%%stata
+```{stata}
 * Output not included in book
 histogram x, start(0) width(0.1)
 ```
 
-```{python}
-%%stata
+```{stata}
 * First three autocorrelations for the uniform draws
 generate t = _n
 tsset t
 pwcorr x L.x L2.x L3.x, star(0.05) 
 ```
 
-```{python}
-%%stata
+```{stata}
 * Output not included in book
 ac x      // Autocorrelations with 95% confidence band
 ```
 
 ### 4.2.2 Draws from normal
 
-```{python}
-%%stata
+```{stata}
 * normal and uniform
 clear
 quietly set obs 1000
@@ -1813,8 +1623,7 @@ tabstat uniform stnormal norm5and2, stat(mean sd skew kurt min max) col(stat)
 
 ### 4.2.3 Draws from t, chi-squared, F, gamma, and beta
 
-```{python}
-%%stata
+```{stata}
 * t, chi-squared, and F with constant degrees of freedom
 clear
 quietly set obs 2000
@@ -1831,8 +1640,7 @@ summarize xt xc xf
 
 #### Independent (but not identically distributed) draws from binomial
 
-```{python}
-%%stata
+```{stata}
 * Discrete rv's: binomial
 set seed 10101
 generate p1 = runiform()              // here p1~uniform(0,1) 
@@ -1843,8 +1651,7 @@ summarize p1 trials xbin
 
 #### Independent (but not identically distributed) draws from Poisson
 
-```{python}
-%%stata
+```{stata}
 * Discrete rv's: independent poisson and negbin draws
 set seed 10101 
 generate xb= 4 + 2*runiform()
@@ -1858,8 +1665,7 @@ summarize xg xb xp xp1 xp2
 
 #### Histograms and density plots
 
-```{python}
-%%stata
+```{stata}
 * Example of histogram and kernel density plus graph combine
 quietly twoway (histogram xc, width(1)) (kdensity xc, lwidth(thick)), ///
    title("Draws from chisquared(10)") 
@@ -1872,8 +1678,7 @@ graph combine musr/mus04cdistr.gph musr/mus04poissdistr.gph, ///
 graph export musr/mus04fig1.eps, replace
 ```
 
-```{python}
-%%stata
+```{stata}
 * Simulation using postfile
 set seed 10101
 postfile sim_mem xmean using musr/simresults, replace
@@ -1888,8 +1693,7 @@ forvalues i = 1/10000 {
 postclose sim_mem
 ```
 
-```{python}
-%%stata
+```{stata}
 * See the results stored in simresults
 use musr/simresults, clear
 summarize
@@ -1897,8 +1701,7 @@ summarize
 
 ## 4.3 Distribution of the sample mean
 
-```{python}
-%%stata
+```{stata}
 clear all
 * Draw 1 sample of size 30 from uniform distribution 
 quietly set obs 30
@@ -1906,8 +1709,7 @@ set seed 10101
 generate x = runiform()
 ```
 
-```{python}
-%%stata
+```{stata}
 * Summarize x and produce a histogram
 summarize x
 quietly histogram x, width(0.1) xtitle("x from one sample")
@@ -1917,8 +1719,7 @@ quietly graph export musr/mus04fig1clt.eps, replace
 
 ### 4.3.1 Stata program
 
-```{python}
-%%stata
+```{stata}
 * Program to draw 1 sample of size 30 from uniform and return sample mean
 program onesample, rclass
     drop _all
@@ -1929,8 +1730,7 @@ program onesample, rclass
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 * Run program onesample once as a check
 set seed 10101
 onesample
@@ -1939,14 +1739,12 @@ return list
 
 ### 4.3.2 The simulate command
 
-```{python}
-%%stata
+```{stata}
 * Run program onesample 10,000 times to get 10,000 sample means 
 simulate xbar = r(meanforonesample), seed(10101) reps(10000) nodots: onesample
 ```
 
-```{python}
-%%stata
+```{stata}
 * Summarize the 10,000 sample means and draw histogram
 summarize xbar
 quietly histogram xbar, normal xtitle("xbar from many samples")
@@ -1957,8 +1755,7 @@ quietly graph export musr/mus04fig1clt2.eps, replace
 
 ### 4.3.5 Alternative central limit theorem simulation
 
-```{python}
-%%stata
+```{stata}
 * Simulation using postfile
 set seed 10101
 postfile sim_mem xmean using musr/simresults, replace
@@ -1973,8 +1770,7 @@ forvalues i = 1/10000 {
 postclose sim_mem
 ```
 
-```{python}
-%%stata
+```{stata}
 * See the results stored in simresults
 use musr/simresults , clear
 summarize
@@ -1984,8 +1780,7 @@ summarize
 
 ### 4.4.1 Inverse-probability transformation
 
-```{python}
-%%stata
+```{stata}
 clear all
 * Inverse probability transformation example: standard normal
 quietly set obs 2000
@@ -1993,14 +1788,12 @@ set seed 10101
 generate xstn = invnormal(runiform())
 ```
 
-```{python}
-%%stata
+```{stata}
 * Inverse probability transformation example: unit exponential
 generate xue = -ln(1-runiform())
 ```
 
-```{python}
-%%stata
+```{stata}
 * Inverse probability transformation example: Bernoulli (p = 0.6)
 generate xbernoulli = runiform() > 0.6   // Bernoulli(0.6)
 summarize xstn xue xbernoulli
@@ -2012,8 +1805,7 @@ summarize xstn xue xbernoulli
 
 ### 4.4.4 Draws from truncated normal
 
-```{python}
-%%stata
+```{stata}
 * Draws from truncated normal x ~ N(mu,sigma^2) in [a,b]
 quietly set obs 2000
 set seed 10101
@@ -2031,8 +1823,7 @@ summarize xtrunc
 
 #### Direct draws from multivariate normal
 
-```{python}
-%%stata
+```{stata}
 * Bivariate normal example: 
 * means 10, 20; variances 4, 9; and correlation 0.5
 clear
@@ -2050,8 +1841,7 @@ correlate y1 y2
 
 ### 4.4.6 Draws using Markov chain Monte Carlo method
 
-```{python}
-%%stata
+```{stata}
 * MCMC example: Gibbs for bivariate normal mu's=0 v's=1 corr=rho=0.9
 set seed 10101    
 clear all
@@ -2060,8 +1850,7 @@ generate double y1 =.
 generate double y2 =.
 ```
 
-```{python}
-%%stata
+```{stata}
 mata:
   s0 = 10000             // Burn-in for the Gibbs sampler (to be discarded)
   s1 = 1000              // Actual draws used from the Gibbs sampler
@@ -2080,8 +1869,7 @@ mata:
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 mata:
   y2 = y[|2,2 \ s1,2|]
   y2lag1 = y[|1,2 \ (s1-1),2|]
@@ -2096,8 +1884,7 @@ end
 
 ### 4.5.2 Monte Carlo integration
 
-```{python}
-%%stata
+```{stata}
 * Integral evaluation by Monte Carlo simulation with S=100 
 clear all
 quietly set obs 100
@@ -2111,8 +1898,7 @@ display "After 100 draws the MC estimate of E[exp{-exp(x)}] is " Egy
 
 ### 4.5.3 Monte Carlo integration using different S
 
-```{python}
-%%stata
+```{stata}
 * Program mcintegration to compute E{g(y)} numsims times
 program mcintegration, rclass
    version 11 
@@ -2129,8 +1915,7 @@ program mcintegration, rclass
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 * Run program mcintegration S = 10, 100, ...., 100000 times
 mcintegration 10 
 mcintegration 100
@@ -2139,8 +1924,7 @@ mcintegration 10000
 mcintegration 100000
 ```
 
-```{python}
-%%stata
+```{stata}
 * Following code was not included in the book
 * It compares use of simulate and postfile for a simple example   
 
@@ -2158,29 +1942,25 @@ return scalar median = r(c_1)
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 * Run program once
 set seed 10101
 simulateexample
 display "Median is " r(median)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Run program 1000 times
 set seed 10101
 simulate mutilde = r(median), reps(1000) nodots: simulateexample 
 ```
 
-```{python}
-%%stata
+```{stata}
 * See the results of the program.  
 summarize 
 ```
 
-```{python}
-%%stata
+```{stata}
 * Simulation using postfile  
 set seed 10101
 tempname simfile
@@ -2204,15 +1984,13 @@ summarize
 
 ### 4.6.1 Simulation example: OLS with $\chi^2$ errors
 
-```{python}
-%%stata
+```{stata}
 * Define global macros for sample size and number of simulations
 global numobs 150             // sample size N
 global numsims "1000"         // number of simulations 
 ```
 
-```{python}
-%%stata
+```{stata}
 * Program for finite-sample properties of OLS
 program chi2data, rclass
     version 11  
@@ -2229,8 +2007,7 @@ program chi2data, rclass
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 * Show that test gives same result as doing test manually
 set seed 10101
 quietly chi2data
@@ -2239,16 +2016,14 @@ quietly test x=2
 return list
 ```
 
-```{python}
-%%stata
+```{stata}
 * Simulation for finite-sample properties of OLS
 simulate b2f=r(b2) se2f=r(se2) t2f=r(t2) reject2f=r(r2) p2f=r(p2),  ///
 reps($numsims) saving(musr/chi2datares, replace) nolegend nodots: chi2data
 summarize b2f se2f reject2f
 ```
 
-```{python}
-%%stata
+```{stata}
 * Summarize results
 mean b2f se2f reject2f
 ```
@@ -2261,8 +2036,7 @@ mean b2f se2f reject2f
 
 #### t statistic
 
-```{python}
-%%stata
+```{stata}
 * t-statistic distribution
 kdensity t2f,  n(1000) gen(t2_x t2_d) nograph
 generate double t2_d2 = tden(148, t2_x)
@@ -2280,8 +2054,7 @@ graph export musr/mus04ttest.eps, replace
 
 #### Test power
 
-```{python}
-%%stata
+```{stata}
 * Program for finite-sample properties of OLS: power
 program chi2datab, rclass
     version 11  
@@ -2297,8 +2070,7 @@ program chi2datab, rclass
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 * Power simulation for finite-sample properties of OLS
 simulate b2f=r(b2) se2f=r(se2) reject2f=r(r2),  ///
 reps($numsims) saving(musr/chi2databres, replace) nolegend nodots: chi2datab
@@ -2309,8 +2081,7 @@ mean b2f se2f reject2f
 
 ### 4.6.4 Estimator inconsistency
 
-```{python}
-%%stata
+```{stata}
 * Inconsistency of OLS in errors-in-variables model (measurement error)
 clear
 quietly set obs 10000
@@ -2325,8 +2096,7 @@ regress y x, noconstant
 
 ### 4.6.5 Simulation with endogenous regressors
 
-```{python}
-%%stata
+```{stata}
 * Endogenous regressor
 clear all
 set seed 10101
@@ -2347,14 +2117,12 @@ program endogreg, rclass
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 simulate b2r=r(b2) se2r=r(se2) t2r=r(t2) reject2r=r(r2) p2r=r(p2), reps($numsims) nolegend nodots: endogreg
 mean b2r se2r reject2r
 ```
 
-```{python}
-%%stata
+```{stata}
 * Program for finite-sample properties of OLS: random regressors
 clear
 set seed 10101
@@ -2373,8 +2141,7 @@ program randomreg, rclass
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 * Simulation for finite-sample properties of OLS: random regressors
 simulate b2r=r(b2) se2r=r(se2) t2r=r(t2) reject2r=r(r2) p2r=r(p2),  ///
      reps($numsims) nolegend nodots: randomreg
@@ -2382,8 +2149,7 @@ summarize
 mean b2r se2r t2r reject2r p2r, noheader
 ```
 
-```{python}
-%%stata
+```{stata}
 * Postfile and post example: random regressors again
 clear all
 set seed 10101
@@ -2414,8 +2180,7 @@ summarize
 mean b2 se2 t2 reject2 p2, noheader
 ```
 
-```{python}
-%%stata
+```{stata}
 * Endogenous regressor
 clear all
 set seed 10101
@@ -2435,8 +2200,7 @@ program endogreg, rclass
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 simulate b2r=r(b2) se2r=r(se2) t2r=r(t2) reject2r=r(r2) p2r=r(p2),  ///
      reps($numsims) nolegend nodots: endogreg
 mean b2r se2r reject2r
@@ -2464,8 +2228,7 @@ mean b2r se2r reject2r
 
 ### 5.3.1 Simulated dataset
 
-```{python}
-%%stata
+```{stata}
 * This uses generated data
 * Model is  y = 1 + 1*x2 + 1*x3 + u
 * where     u = sqrt(exp(-1+0.2*x2))*e
@@ -2475,8 +2238,7 @@ mean b2r se2r reject2r
 * Errors are conditionally heteroskedastic with V[u|x]=exp(-1+1*x2)
 ```
 
-```{python}
-%%stata
+```{stata}
 clear all
 * Generated data for heteroskedasticity example
 set seed 10101
@@ -2492,22 +2254,19 @@ export delimited using "musr/5_3_1.csv", replace
 
 ### 5.3.2 OLS estimation
 
-```{python}
-%%stata
+```{stata}
 * OLS regression with default standard errors
 regress y x2 x3
 ```
 
-```{python}
-%%stata
+```{stata}
 * OLS regression with heteroskedasticity-robust standard errors
 regress y x2 x3, vce(robust) 
 ```
 
 ### 5.3.3 Detecting heteroskedasticity
 
-```{python}
-%%stata
+```{stata}
 * Heteroskedasticity diagnostic scatterplot
 quietly regress y x2 x3
 predict double uhat, resid
@@ -2521,20 +2280,17 @@ quietly twoway (scatter absu x3) (lowess absu x3, bw(0.4) lw(thick)), ///
 graph combine gls1 gls2
 ```
 
-```{python}
-%%stata
+```{stata}
 graph export musr/mus05gls_fig1.eps, replace
 drop uhat
 ```
 
-```{python}
-%%stata
+```{stata}
 * Test heteroskedasticity depending on x2, x3, and x2 and x3
 estat hettest x2 x3, mtest
 ```
 
-```{python}
-%%stata
+```{stata}
 * Not included in book
 * Separate tests of heteroskedasticity using iid version of hettest
 estat hettest x2, iid
@@ -2544,8 +2300,7 @@ estat hettest x2 x3, iid
 
 ### 5.3.4 FGLS estimation
 
-```{python}
-%%stata
+```{stata}
 clear all
 * Generated data for heteroskedasticity example
 set seed 10101
@@ -2566,28 +2321,24 @@ generate double one = 1
 capture nl (uhatsq = exp({xb: x2 one})), nolog   
 ```
 
-```{python}
-%%stata
+```{stata}
 *get sigmahat^2
 predict double varu, yhat               
 ```
 
-```{python}
-%%stata
+```{stata}
 * FGLS: Second step get estimate of skedasticity function
 regress y x2 x3 [aweight=1/varu] 
 ```
 
 ### 5.3.5 WLS estimation
 
-```{python}
-%%stata
+```{stata}
 * WLS estimator is FGLS with robust estimate of VCE
 regress y x2 x3 [aweight=1/varu], vce(robust)
 ```
 
-```{python}
-%%stata
+```{stata}
 * FGLS: First step get estimate of skedasticity function
 quietly regress y x2 x3 if _n < 451
 quietly predict double yhat1
@@ -2606,22 +2357,19 @@ summarize y yhat1 yhat2 perr1 perr2 if _n > 450
 
 ### 5.4.3 Application to two categories of expenditures
 
-```{python}
-%%stata
+```{stata}
 * Summary statistics for seemingly unrelated regressions example
 clear all
 use musr/mus05surdata.dta
 summarize ldrugexp ltotothr age age2 educyr actlim totchr medicaid private
 ```
 
-```{python}
-%%stata
+```{stata}
 * Not included in book
 summarize ldrugexp if ldrugexp!=. & ltotothr!=.
 ```
 
-```{python}
-%%stata
+```{stata}
 * SUR estimation of a seemingly unrelated regressions model
 sureg (ldrugexp age age2 actlim totchr medicaid private) ///
   (ltotothr age age2 educyr actlim totchr private), corr
@@ -2629,8 +2377,7 @@ sureg (ldrugexp age age2 actlim totchr medicaid private) ///
 
 ### 5.4.4 Robust standard errors
 
-```{python}
-%%stata
+```{stata}
 * Bootstrap to get heteroskedasticity-robust SEs for SUR estimator 
 bootstrap, reps(400) seed(10101) nodots: sureg        ///
   (ldrugexp age age2 actlim totchr medicaid private)  ///
@@ -2639,36 +2386,31 @@ bootstrap, reps(400) seed(10101) nodots: sureg        ///
 
 ### 5.4.5 Testing cross-equation constraints
 
-```{python}
-%%stata
+```{stata}
 * Test of variables in both equations
 quietly sureg (ldrugexp age age2 actlim totchr medicaid private) ///
    (ltotothr age age2 educyr actlim totchr private)
 test age age2
 ```
 
-```{python}
-%%stata
+```{stata}
 * Test of variables in just the first equation
 test [ldrugexp]age [ldrugexp]age2
 ```
 
-```{python}
-%%stata
+```{stata}
 * Test of a restriction across the two equations
 test [ldrugexp]private = [ltotothr]private
 ```
 
 ### 5.4.6 Imposing cross-equation constraints
 
-```{python}
-%%stata
+```{stata}
 * Specify a restriction across the two equations
 constraint 1 [ldrugexp]private = [ltotothr]private
 ```
 
-```{python}
-%%stata
+```{stata}
 * Estimate subject to the cross-equation constraint
 sureg (ldrugexp age age2 actlim totchr medicaid private)        ///
   (ltotothr age age2 educyr actlim totchr private), constraints(1)
@@ -2678,8 +2420,7 @@ sureg (ldrugexp age age2 actlim totchr medicaid private)        ///
 
 ### 5.5.1 Survey design
 
-```{python}
-%%stata
+```{stata}
 * Data from http://www.stata-press.com/data/r10/nhanes2.dta
 
 * Survey data example: NHANES II data
@@ -2690,49 +2431,42 @@ describe sampl finalwgt strata psu
 summarize sampl finalwgt strata psu
 ```
 
-```{python}
-%%stata
+```{stata}
 * Declare survey design
 svyset psu [pweight=finalwgt], strata(strata)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Describe the survey design
 svydescribe
 ```
 
 ### 5.5.2 Survey mean estimation
 
-```{python}
-%%stata
+```{stata}
 * Estimate the population mean using svy:
 svy: mean hgb
 ```
 
-```{python}
-%%stata
+```{stata}
 * Estimate the population mean using no weights and no cluster
 mean hgb
 ```
 
 ### 5.5.3 Survey linear regression
 
-```{python}
-%%stata
+```{stata}
 * Regression using svy:
 svy: regress hgb age female
 ```
 
-```{python}
-%%stata
+```{stata}
 * Regression using weights and cluster on PSU
 generate uniqpsu = 2*strata + psu  // make unique identifier for each psu
 regress hgb age female [pweight=finalwgt], vce(cluster uniqpsu)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Regression using no weights and no cluster
 regress hgb age female
 ```
@@ -2763,8 +2497,7 @@ regress hgb age female
 
 ### 6.3.2 Medical expenditures with one endogenous regressor
 
-```{python}
-%%stata
+```{stata}
 clear all
 * Read data, define global x2list, and summarize data
 use musr/mus06data.dta
@@ -2774,30 +2507,26 @@ summarize ldrugexp hi_empunion $x2list
 
 ### 6.3.3 Available instruments
 
-```{python}
-%%stata
+```{stata}
 * Following not included in book
 summarize
 ```
 
-```{python}
-%%stata
+```{stata}
 * Summarize available instruments 
 summarize ssiratio lowincome multlc firmsz if linc!=.
 ```
 
 ### 6.3.4 IV estimation of an exactly identified model
 
-```{python}
-%%stata
+```{stata}
 * IV estimation of a just-identified model with single endog regressor
 ivregress 2sls ldrugexp (hi_empunion = ssiratio) $x2list, vce(robust) first
 ```
 
 ### 6.3.5 IV estimation of an overidentified model
 
-```{python}
-%%stata
+```{stata}
 * Compare 5 estimators and variance estimates for overidentified models
 global ivmodel "ldrugexp (hi_empunion = ssiratio multlc) $x2list"
 quietly ivregress 2sls $ivmodel, vce(robust)
@@ -2815,21 +2544,18 @@ estimates table TwoSLS GMM_het GMM_igmm GMM_clu TwoSLS_def, b(%9.5f) se
 
 ### 6.3.6 Testing for regressor endogeneity
 
-```{python}
-%%stata
+```{stata}
 * Obtain OLS estimates to compare with preceding IV estimates
 regress ldrugexp hi_empunion $x2list, vce(robust) 
 ```
 
-```{python}
-%%stata
+```{stata}
 * Robust Durbin-Wu-Hausman test of endogeneity implemented by estat endogenous
 ivregress 2sls ldrugexp (hi_empunion = ssiratio) $x2list, vce(robust)
 estat endogenous
 ```
 
-```{python}
-%%stata
+```{stata}
 * Robust Durbin-Wu-Hausman test of endogeneity implemented manually
 quietly regress hi_empunion ssiratio $x2list
 quietly predict v1hat, resid
@@ -2839,16 +2565,14 @@ test v1hat
 
 ### 6.3.7 Tests of overidentifying restrictions
 
-```{python}
-%%stata
+```{stata}
 * Test of overidentifying restrictions following ivregress gmm
 quietly ivregress gmm ldrugexp (hi_empunion = ssiratio multlc) ///
   $x2list, wmatrix(robust) 
 estat overid
 ```
 
-```{python}
-%%stata
+```{stata}
 * Test of overidentifying restrictions following ivregress gmm
 ivregress gmm ldrugexp (hi_empunion = ssiratio lowincome multlc firmsz) ///
   $x2list, wmatrix(robust) 
@@ -2857,8 +2581,7 @@ estat overid
 
 ### 6.3.8 IV estimation with a binary endogenous regressor
 
-```{python}
-%%stata
+```{stata}
 * Regression with a dummy variable regressor
 treatreg ldrugexp $x2list, treat(hi_empunion = ssiratio $x2list)
 ```
@@ -2871,8 +2594,7 @@ treatreg ldrugexp $x2list, treat(hi_empunion = ssiratio $x2list)
 
 #### Diagnostics for weak instruments
 
-```{python}
-%%stata
+```{stata}
 * Correlations of endogenous regressor with instruments
 correlate hi_empunion ssiratio lowincome multlc firmsz if linc!=.
 ```
@@ -2883,8 +2605,7 @@ correlate hi_empunion ssiratio lowincome multlc firmsz if linc!=.
 
 ### 6.4.4 Just-identified model
 
-```{python}
-%%stata
+```{stata}
 * Weak instrument tests - just-identified model
 quietly ivregress 2sls ldrugexp (hi_empunion = ssiratio) $x2list, vce(robust)
 estat firststage, forcenonrobust all  
@@ -2892,8 +2613,7 @@ estat firststage, forcenonrobust all
 
 ### 6.4.5 Overidentified model
 
-```{python}
-%%stata
+```{stata}
 * Weak instrument tests - two or more overidentifying restrictions
 quietly ivregress gmm ldrugexp (hi_empunion = ssiratio lowincome multlc firmsz) ///
    $x2list, vce(robust)
@@ -2904,8 +2624,7 @@ estat firststage, forcenonrobust
 
 ### 6.4.7 Sensitivity to choice of instruments
 
-```{python}
-%%stata
+```{stata}
 * Compare 4 just-identified model estimates with different instruments
 quietly regress ldrugexp hi_empunion $x2list, vce(robust)
 estimates store OLS0
@@ -2935,14 +2654,12 @@ display "Minimum eigenvalues are:     " me1 _s(2) me2 _s(2) me3 _s(2) me4
 
 pag 198
 
-```{python}
-%%stata
+```{stata}
 * Conditional test and confidence intervals when weak instruments 
 *condivreg ldrugexp (hi_empunion = ssiratio) $x2list, lm ar 2sls test(0)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Use ivregress with weak instrument diagnostics
 ivregress 2sls ldrugexp (hi_empunion = ssiratio) $x2list
 estat firststage
@@ -2955,8 +2672,7 @@ estat firststage
 
 ### 6.5.4 Comparison of 2SLS, LIML, JIVE, and GMM
 
-```{python}
-%%stata
+```{stata}
 *ssc install st0108
 *ssc install ivreg2
 *ssc install ranktest
@@ -2977,8 +2693,7 @@ estimates table TWOSLS LIML JIVE GMM_het IVREG2, b(%7.4f) se
 
 ## 6.6 3SLS systems estimation
 
-```{python}
-%%stata
+```{stata}
 * 3SLS estimation requires errors to be homoskedastic
 reg3 (ldrugexp hi_empunion totchr age female blhisp linc) ///
   (hi_empunion ldrugexp totchr female blhisp ssiratio)
@@ -3004,8 +2719,7 @@ reg3 (ldrugexp hi_empunion totchr age female blhisp linc) ///
 
 ### 7.3.1 Data summary
 
-```{python}
-%%stata
+```{stata}
 clear all
 set scheme s1mono  /* Graphics scheme */
 
@@ -3017,8 +2731,7 @@ drop if ltotexp == .
 summarize ltotexp suppins totchr age female white, separator(0)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Quantile plot for ltotexp (qplot replacement)
 * Create percentiles and plot
 preserve
@@ -3033,8 +2746,7 @@ restore
 
 ### 7.3.2 QR estimates
 
-```{python}
-%%stata
+```{stata}
 * Basic quantile regression for q = 0.5
 qreg ltotexp suppins totchr age female white
 ```
@@ -3043,8 +2755,7 @@ qreg ltotexp suppins totchr age female white
 
 ### 7.3.4 Retransformation
 
-```{python}
-%%stata
+```{stata}
 * Obtain multiplier to convert QR coeffs in logs to AME in levels. 
 quietly predict xb
 generate expxb = exp(xb)
@@ -3054,8 +2765,7 @@ display "Multiplier of QR in logs coeffs to get AME in levels = " r(mean)
 
 ### 7.3.5 Comparison of estimates at different quantiles
 
-```{python}
-%%stata
+```{stata}
 * Compare (1) OLS; (2-4) coeffs across quantiles; (5) bootstrap SEs
 quietly regress ltotexp suppins totchr age female white   
 estimates store OLS
@@ -3073,8 +2783,7 @@ estimates table OLS QR_25 QR_50 QR_75 BSQR_50, b(%7.3f) se
 
 ### 7.3.6 Heteroskedasticlty test
 
-```{python}
-%%stata
+```{stata}
 * Test for heteroskedasticity in linear model using estat hettest
 quietly regress ltotexp suppins totchr age female white
 estat hettest suppins totchr age female white, iid
@@ -3082,23 +2791,20 @@ estat hettest suppins totchr age female white, iid
 
 ### 7.3.7 Hypothesis tests
 
-```{python}
-%%stata
+```{stata}
 * Simultaneous QR regression with several values of q
 set seed 10101
 sqreg ltotexp suppins totchr age female white, q(.25 .50 .75) reps(400)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Test of coefficient equality across QR with different q
 test [q25=q50=q75]: suppins
 ```
 
 ### 7.3.8 Graphical display of coefficients over quantiles
 
-```{python}
-%%stata
+```{stata}
 * Plots of each regressor's coefficients as quantile q varies
 *ssc install grqreg
 quietly bsqreg ltotexp suppins totchr age female white, quantile(.50) reps(400)
@@ -3112,8 +2818,7 @@ quietly graph export musr/mus07fig3_qrcoeff.eps, replace
 
 ### 7.4.1 Simulated dataset
 
-```{python}
-%%stata
+```{stata}
 clear all
 * Generated dataset with heteroskedastic errors
 set seed 10101
@@ -3128,22 +2833,19 @@ summarize e x2 x3 u y
 export delimited y x2 x3 e u using "musr/7_4_1.csv", replace
 ```
 
-```{python}
-%%stata
+```{stata}
 * Quantile regression for q = .25, .50 and .75
 sqreg y x2 x3, quantile(.25 .50 .75)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Predicted coefficient of x2 for q = .25, .50 and .75
 quietly summarize e, detail
 display "Predicted coefficient of x2 for q = .25, .50, and .75" ///
  _newline 1+.5*r(p25) _newline 1+.5*r(p50) _newline 1+.5*r(p75)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Generate scatterplots and qplot (replaced with custom quantile plot)
 quietly kdensity u, scale(1.25) lwidth(medthick) saving(musr/density, replace)
 * Create quantile plot for y
@@ -3161,14 +2863,12 @@ graph combine musr/density.gph musr/quanty.gph musr/yversusx2.gph musr/yversusx3
 quietly graph export musr/mus07hetexample.eps, replace
 ```
 
-```{python}
-%%stata
+```{stata}
 * Quantile regression for q = .25, .50 and .75
 sqreg y x2 x3, quantile(.25 .50 .75)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Predicted coefficient of x2 for q = .25, .50 and .75
 quietly summarize e, detail
 display "Predicted coefficient of x2 for q = .25, .50, and .75" ///
@@ -3177,8 +2877,7 @@ display "Predicted coefficient of x2 for q = .25, .50, and .75" ///
 
 ### 7.4.2 QR estimates
 
-```{python}
-%%stata
+```{stata}
 * OLS and quantile regression for q = .25, .5, .75
 quietly regress y x2 x3
 estimates store OLS
@@ -3193,8 +2892,7 @@ estimates store QR_75
 estimates table OLS OLS_Rob QR_25 QR_50 QR_75, b(%7.3f) se 
 ```
 
-```{python}
-%%stata
+```{stata}
 * Test equality of coeff of x2 for q=.25 and q=.75
 set seed 10101
 quietly sqreg y x2 x3, q(.25 .75) reps(400)
@@ -3210,15 +2908,13 @@ test [q25]x3 = [q75]x3
 
 ### 7.5.3 Summary of doctor visits data
 
-```{python}
-%%stata
+```{stata}
 * Read in doctor visits count data and summarize
 use musr/mus07qrcnt.dta, clear
 summarize docvis private totchr age female white, separator(0)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Generate jittered values and compare quantile plots
 set seed 10101
 generate docvisu = docvis + runiform()
@@ -3246,8 +2942,7 @@ graph combine musr/docvisqplot.gph musr/docvisuqplot.gph
 graph export musr/mus07dvqplot2.eps, replace
 ```
 
-```{python}
-%%stata
+```{stata}
 * Marginal effects from conventional negative binomial model
 quietly nbreg docvis i.private totchr age i.female i.white, vce(robust)
 margins, dydx(*) atmean noatlegend
@@ -3255,8 +2950,7 @@ margins, dydx(*) atmean noatlegend
 
 ### 7.5.4 Results from QCR
 
-```{python}
-%%stata
+```{stata}
 * Quantile count regression
 * Install qcount if not already installed
 capture which qcount
@@ -3267,15 +2961,13 @@ set seed 10101
 qcount docvis private totchr age female white, q(0.50) rep(500)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Marginal effects after quantile regression for median
 set linesize 81
 qcount_mfx
 ```
 
-```{python}
-%%stata
+```{stata}
 * Quantile count regression for q = 0.75
 set seed 10101
 quietly qcount docvis private totchr age female white, q(0.75) rep(500)
@@ -3286,8 +2978,7 @@ qcount_mfx
 
 ## 7.7 Exercises
 
-```{python}
-%%stata
+```{stata}
 * Save coefficients and generate graph for a range of quantiles
 use musr/mus03data.dta, clear
 drop if ltotexp == . 
@@ -3355,72 +3046,62 @@ graph save musr/bsqrcoef1.gph, replace
 
 ### 8.3.1 Data description and summary statistics
 
-```{python}
-%%stata
+```{stata}
 * Read in dataset and describe
 use musr/mus08psidextract.dta, clear
 describe
 ```
 
-```{python}
-%%stata
+```{stata}
 * Summary of dataset
 summarize
 ```
 
 ### 8.3.2 Panel-data organization
 
-```{python}
-%%stata
+```{stata}
 * Organization of dataset
 list id t exp wks occ in 1/3, clean
 ```
 
-```{python}
-%%stata
+```{stata}
 * Declare individual identifier and time identifier
 xtset id t
 ```
 
 ### 8.3.3 Panel-data description
 
-```{python}
-%%stata
+```{stata}
 * Panel description of dataset
 xtdescribe
 ```
 
 ### 8.3.4 Within and between variation
 
-```{python}
-%%stata
+```{stata}
 * Panel summary statistics: within and between variation
 xtsum id t lwage ed exp exp2 wks south tdum1
 ```
 
-```{python}
-%%stata
+```{stata}
 * Panel tabulation for a variable
 xttab south
 ```
 
-```{python}
-%%stata
+```{stata}
 * Transition probabilities for a variable
 xttrans south, freq
 ```
 
 ### 8.3.5 Time-series plots for each individual
 
-```{python}
-%%stata
+```{stata}
 // Following simpler command not included in book
 * Simple time-series plot for each of 20 individuals
 quietly xtline lwage if id<=20, overlay
 ```
 
-```{python}
-%%stata
+```{stata}
 * Simple time-series plot for each of 20 individuals
 quietly xtline lwage if id<=20, overlay legend(off) saving(musr/lwage, replace)
 quietly xtline wks if id<=20, overlay legend(off) saving(musr/wks, replace)
@@ -3430,13 +3111,11 @@ quietly graph export musr/mus08timeseriesplot.eps, replace
 
 ### 8.3.6 Overall scatterplot
 
-```{python}
-%%stata
+```{stata}
 graph twoway (scatter lwage exp) (qfit lwage exp) (lowess lwage exp)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Scatterplot, quadratic fit and nonparametric regression (lowess)
 graph twoway (scatter lwage exp, msize(small) msymbol(o))              ///
   (qfit lwage exp, clstyle(p3) lwidth(medthick))                       ///
@@ -3452,8 +3131,7 @@ graph export musr/mus08scatterplot.eps, replace
 
 ### 8.3.7 Within scatterplot
 
-```{python}
-%%stata
+```{stata}
 * Scatterplot for within variation
 preserve
 xtdata, fe
@@ -3465,30 +3143,26 @@ graph export musr/mus08withinplot.eps, replace
 
 ### 8.3.8 Pooled OLS regression with cluster-robust standard errors
 
-```{python}
-%%stata
+```{stata}
 * Pooled OLS with cluster-robust standard errors
 use musr/mus08psidextract.dta, clear
 regress lwage exp exp2 wks ed, vce(cluster id)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Pooled OLS with incorrect default standard errors
 regress lwage exp exp2 wks ed
 ```
 
 ### 8.3.9 Time-series autocorrelations for panel data
 
-```{python}
-%%stata
+```{stata}
 * First-order autocorrelation in a variable
 sort id t  
 correlate lwage L.lwage
 ```
 
-```{python}
-%%stata
+```{stata}
 * Autocorrelations of residual 
 quietly regress lwage exp exp2 wks ed, vce(cluster id)
 predict uhat, residuals
@@ -3498,8 +3172,7 @@ forvalues j = 1/6 {
      }
 ```
 
-```{python}
-%%stata
+```{stata}
 * First-order autocorrelation differs in different year pairs
 forvalues s = 2/7 {
      quietly corr uhat L1.uhat if t == `s'
@@ -3519,14 +3192,12 @@ forvalues s = 2/7 {
 
 ### 8.4.4 Application of the xtreg, pa command
 
-```{python}
-%%stata
+```{stata}
 * Population-averaged or pooled FGLS estimator with AR(2) error
 xtreg lwage exp exp2 wks ed, pa corr(ar 2) vce(robust) nolog
 ```
 
-```{python}
-%%stata
+```{stata}
 * Estimated error correlation matrix after xtreg, pa
 matrix list e(R)
 ```
@@ -3539,22 +3210,19 @@ matrix list e(R)
 
 ### 8.5.3 Application of the xtreg, fe command
 
-```{python}
-%%stata
+```{stata}
 * Within or FE estimator with cluster-robust standard errors
 xtreg lwage exp exp2 wks ed, fe vce(cluster id)
 ```
 
 ### 8.5.4 least-squares dummy-variables regression
 
-```{python}
-%%stata
+```{stata}
 * LSDV model fit using areg with cluster-robust standard errors
 areg lwage exp exp2 wks ed, absorb(id) vce(cluster id)
 ```
 
-```{python}
-%%stata
+```{stata}
 * LSDV model fit using factor variables with cluster-robust standard errors
 set matsize 800
 quietly regress lwage exp exp2 wks ed i.id, vce(cluster id)
@@ -3567,14 +3235,12 @@ estimates table, keep(exp exp2 wks ed _cons) b se b(%12.7f)
 
 ### 8.6.2 Application of the xtreg, be command
 
-```{python}
-%%stata
+```{stata}
 * Between estimator with default standard errors
 xtreg lwage exp exp2 wks ed, be
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following gives heteroskedasrtic-robust se's for between estimator
 xtreg lwage exp exp2 wks ed, be vce(boot, reps(400) seed(10101) nodots)
 ```
@@ -3587,8 +3253,7 @@ xtreg lwage exp exp2 wks ed, be vce(boot, reps(400) seed(10101) nodots)
 
 ### 8.7.3 Application of the xtreg, re command
 
-```{python}
-%%stata
+```{stata}
 * Random-effects estimator with cluster-robust standard errors
 xtreg lwage exp exp2 wks ed, re vce(cluster id) theta
 ```
@@ -3601,8 +3266,7 @@ xtreg lwage exp exp2 wks ed, re vce(cluster id) theta
 
 ### 8.8.3 Estimator comparison
 
-```{python}
-%%stata
+```{stata}
 use musr/mus08psidextract.dta, clear
 
 * Compare OLS, BE, FE, RE estimators, and methods to compute standard errors
@@ -3629,16 +3293,14 @@ estimates table OLS_rob BE FE FE_rob RE RE_rob,  ///
 
 #### The hausman command
 
-```{python}
-%%stata
+```{stata}
 * Hausman test assuming RE estimator is fully efficient under null hypothesis
 hausman FE RE, sigmamore
 ```
 
 #### Robust Hausman test
 
-```{python}
-%%stata
+```{stata}
 * Robust Hausman test using method of Wooldridge (2002)
 quietly xtreg lwage $xlist, re
 scalar theta = e(theta)
@@ -3655,8 +3317,7 @@ test mdexp mdexp2 mdwks
 
 ### 8.8.6 Prediction
 
-```{python}
-%%stata
+```{stata}
 * Prediction after OLS and RE estimation
 quietly regress lwage exp exp2 wks ed, vce(cluster id)
 predict xbols, xb
@@ -3671,8 +3332,7 @@ correlate lwage xbols xbre xbure
 
 ### 8.9.1 First-difference estimator
 
-```{python}
-%%stata
+```{stata}
 sort id t
 * First-differences estimator with cluster-robust standard errors
 regress D.(lwage exp exp2 wks ed), vce(cluster id) noconstant
@@ -3684,15 +3344,13 @@ regress D.(lwage exp exp2 wks ed), vce(cluster id) noconstant
 
 ### 8.10.1 long-panel dataset
 
-```{python}
-%%stata
+```{stata}
 * Description of cigarette dataset
 use musr/mus08cigar.dta, clear
 describe
 ```
 
-```{python}
-%%stata
+```{stata}
 * Summary of cigarette dataset
 summarize, separator(6)
 ```
@@ -3703,15 +3361,13 @@ summarize, separator(6)
 
 ### 8.10.4 Application of the xtgls, xtpcse, and xtscc commands
 
-```{python}
-%%stata
+```{stata}
 * Pooled GLS with error correlated across states and state-specific AR(1) 
 xtset state year 
 xtgls lnc lnp lny lnpmin year, panels(correlated) corr(psar1)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Comparison of various pooled OLS and GLS estimators
 *ssc install xtscc
 quietly xtpcse lnc lnp lny lnpmin year, corr(ind) independent nmk
@@ -3731,14 +3387,12 @@ estimates table OLS_iid OLS_cor OLS_DK AR1_cor FGLSAR1 FGLSCAR, b(%7.3f) se
 
 ### 8.10.5 Separate regressions
 
-```{python}
-%%stata
+```{stata}
 * Run separate regressions for each state
 statsby, by(state) clear: regress lnc lnp lny lnpmin year
 ```
 
-```{python}
-%%stata
+```{stata}
 * Report regression coefficients for each state
 format _b* %9.2f
 list, clean
@@ -3746,8 +3400,7 @@ list, clean
 
 ### 8.10.6 FE and RE models
 
-```{python}
-%%stata
+```{stata}
 * Comparison of various RE and FE estimators
 use musr/mus08cigar.dta, clear
 quietly xtscc lnc lnp lny lnpmin, lag(4)
@@ -3771,8 +3424,7 @@ estimates table OLS_DK FE_REG RE_REG FE_REGAR RE_REGAR FE_DK, b(%7.3f) se
 
 ### 8.11.1 Wide-form data
 
-```{python}
-%%stata
+```{stata}
 * Wide form data (observation is a state) 
 use musr/mus08cigarwide.dta, clear
 list, clean
@@ -3780,22 +3432,19 @@ list, clean
 
 ### 8.11.2 Convert wide form to long form
 
-```{python}
-%%stata
+```{stata}
 * Convert from wide form to long form (observation is a state-year pair) 
 reshape long lnp lnc, i(state) j(year)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Long-form data (observation is a state) 
 list in 1/6, sepby(state)
 ```
 
 ### 8.11.3 Convert long form to wide form
 
-```{python}
-%%stata
+```{stata}
 * Reconvert from long form to wide form (observation is a state) 
 reshape wide lnp lnc, i(state) j(year)
 list, clean
@@ -3803,16 +3452,14 @@ list, clean
 
 ### 8.11.4 An alternative wide-form data
 
-```{python}
-%%stata
+```{stata}
 * Create alternative wide-form data (observation is a year)
 quietly reshape long lnp lnc, i(state) j(year) 
 reshape wide lnp lnc, i(year) j(state)
 list year lnp1 lnp2 lnc1 lnc2, clean
 ```
 
-```{python}
-%%stata
+```{stata}
 * Convert from wide form (observation is year) to long form (year-state)
 reshape long lnp lnc, i(year) j(state)
 list in 1/6, clean
@@ -3834,8 +3481,7 @@ list in 1/6, clean
 
 ### 9.2.3 Application of the xtivreg command
 
-```{python}
-%%stata
+```{stata}
 * Panel IV example: FE with wks instrumented by external instrument ms
 use musr/mus08psidextract.dta, clear
 xtivreg lwage exp exp2 (wks = ms), fe 
@@ -3843,8 +3489,7 @@ xtivreg lwage exp exp2 (wks = ms), fe
 
 ### 9.2.4 Panel IV extensions
 
-```{python}
-%%stata
+```{stata}
 // Panel bootstrap SEs
 xtivreg lwage exp exp2 (wks = ms), fe vce(boot, reps(400) seed(10101))
 ```
@@ -3857,23 +3502,20 @@ xtivreg lwage exp exp2 (wks = ms), fe vce(boot, reps(400) seed(10101))
 
 ### 9.3.3 Application of the xthtaylor command
 
-```{python}
-%%stata
+```{stata}
 * Hausman-Taylor example of Baltagi and Khanti-Akom (1990)
 use musr/mus08psidextract.dta, clear
 xthtaylor lwage occ south smsa ind exp exp2 wks ms union fem blk ed,  ///
   endog(exp exp2 wks ms union ed)
 ```
 
-```{python}
-%%stata
+```{stata}
 // Hausman-Taylor with panel bootstrap SEs or with jackknife
 xthtaylor lwage occ south smsa ind exp exp2 wks ms union fem blk ed, ///
 endog(exp exp2 wks ms union ed) vce(boot, reps(400) nodots seed(10101))
 ```
 
-```{python}
-%%stata
+```{stata}
 xthtaylor lwage occ south smsa ind exp exp2 wks ms union fem blk ed, ///
 endog(exp exp2 wks ms union ed) vce(jackknife)
 ```
@@ -3888,29 +3530,25 @@ endog(exp exp2 wks ms union ed) vce(jackknife)
 
 ### 9.4.4 Arellano-Bond estimator: Pure time series
 
-```{python}
-%%stata
+```{stata}
 * 2SLS or one-step GMM for a pure time-series AR(2) panel model
 use musr/mus08psidextract.dta, clear
 xtabond lwage, lags(2) vce(robust)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Optimal or two-step GMM for a pure time-series AR(2) panel model
 xtabond lwage, lags(2) twostep vce(robust)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Reduce the number of instruments for a pure time-series AR(2) panel model
 xtabond lwage, lags(2) vce(robust) maxldep(1)
 ```
 
 ### 9.4.5 Arellano-Bond estimator: Additional regressors
 
-```{python}
-%%stata
+```{stata}
 * Optimal or two-step GMM for a dynamic panel model
 xtabond lwage occ south smsa ind, lags(2) maxldep(3)     ///
   pre(wks,lag(1,2)) endogenous(ms,lag(0,2))              ///
@@ -3919,14 +3557,12 @@ xtabond lwage occ south smsa ind, lags(2) maxldep(3)     ///
 
 ### 9.4.6 Specification tests
 
-```{python}
-%%stata
+```{stata}
 * Test whether error is serially correlated
 estat abond
 ```
 
-```{python}
-%%stata
+```{stata}
 * Test of overidentifying restrictions (first estimate with no vce(robust))
 quietly xtabond lwage occ south smsa ind, lags(2) maxldep(3) ///
   pre(wks,lag(1,2)) endogenous(ms,lag(0,2))              ///
@@ -3936,24 +3572,21 @@ estat sargan
 
 ### 9.4.7 The xtdpdsys command
 
-```{python}
-%%stata
+```{stata}
 * Arellano/Bover or Blundell/Bond for a dynamic panel model
 xtdpdsys lwage occ south smsa ind, lags(2) maxldep(3)    ///
   pre(wks,lag(1,2)) endogenous(ms,lag(0,2))              ///
   endogenous(union,lag(0,2)) twostep vce(robust) artests(3)
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following not included in book
 estat abond
 ```
 
 ### 9.4.8 The xtdpd command
 
-```{python}
-%%stata
+```{stata}
 * Use of xtdpd to exactly reproduce the previous xtdpdsys command
 xtdpd L(0/2).lwage L(0/1).wks occ south smsa ind ms union, ///
   div(occ south smsa ind) dgmmiv(lwage, lagrange(2 4))          ///
@@ -3961,8 +3594,7 @@ xtdpd L(0/2).lwage L(0/1).wks occ south smsa ind ms union, ///
   lgmmiv(lwage wks ms union) twostep vce(robust) artests(3)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Previous command if model error is MA(1)
 xtdpd L(0/2).lwage L(0/1).wks occ south smsa ind ms union, ///
   div(occ south smsa ind) dgmmiv(lwage, lagrange(3 4))          ///
@@ -3978,8 +3610,7 @@ xtdpd L(0/2).lwage L(0/1).wks occ south smsa ind ms union, ///
 
 ### 9.5.3 Random-intercept model
 
-```{python}
-%%stata
+```{stata}
 * Random intercept model estimated using xtmixed
 use musr/mus08psidextract.dta, clear
 xtmixed lwage exp exp2 wks ed || id:, mle
@@ -3987,8 +3618,7 @@ xtmixed lwage exp exp2 wks ed || id:, mle
 
 ### 9.5.4 Cluster-robust standard errors
 
-```{python}
-%%stata
+```{stata}
 * Cluster robust standard errors after xtmixed using bootstrap
 xtset id
 bootstrap, reps(400) seed(10101) cluster(id) nodots: ///
@@ -3997,16 +3627,14 @@ bootstrap, reps(400) seed(10101) cluster(id) nodots: ///
 
 ### 9.5.5 Random-slopes model
 
-```{python}
-%%stata
+```{stata}
 * Random-slopes model estimated using xtmixed
 xtmixed lwage exp exp2 wks ed || id: exp wks, covar(unstructured) mle
 ```
 
 ### 9.5.6 Random-coefficients model
 
-```{python}
-%%stata
+```{stata}
 * Random-coefficients model estimated using xtrc
 * Note: xtrc may fail with collinearity - use mixed as alternative
 *quietly set matsize 600
@@ -4019,8 +3647,7 @@ if _rc != 0 {
 }
 ```
 
-```{python}
-%%stata
+```{stata}
 * List the estimated variance matrix
 * Check if e(Sigma) exists (from xtrc) or use estat recovariance (from mixed)
 capture matrix list e(Sigma)
@@ -4032,21 +3659,18 @@ if _rc != 0 {
 
 ### 9.5.7 Two-way random-effects model
 
-```{python}
-%%stata
+```{stata}
 * Two-way random-effects model estimated using xtmixed
 xtmixed lwage exp exp2 wks ed || _all: R.t || id: , mle
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following not included in book
 *ssc install gllamm
 gllamm lwage exp exp2 wks ed, i(id) nip(10) adapt
 ```
 
-```{python}
-%%stata
+```{stata}
 xtmixed lwage exp exp2 wks ed || id:, mle
 ```
 
@@ -4054,8 +3678,7 @@ xtmixed lwage exp exp2 wks ed || id:, mle
 
 ### 9.6.1 Clustered dataset
 
-```{python}
-%%stata
+```{stata}
 * Read in Vietnam clustered data and summarize
 use musr/mus09vietnam_ex2.dta, clear
 summarize pharvis lnhhexp illness commune
@@ -4063,8 +3686,7 @@ summarize pharvis lnhhexp illness commune
 
 ### 9.6.2 Clustered data using nonpanel commands
 
-```{python}
-%%stata
+```{stata}
 * OLS estimation with cluster-robust standard errors
 quietly regress pharvis lnhhexp illness
 estimates store OLS_iid
@@ -4079,8 +3701,7 @@ estimates table OLS_iid OLS_het OLS_hh OLS_vill, b(%10.4f) se stats(r2 N)
 
 ### 9.6.3 Clustered data using panel commands
 
-```{python}
-%%stata
+```{stata}
 * Generate integer-valued household and person identifiers and xtset
 quietly egen hh = group(lnhhexp)
 sort hh
@@ -4092,8 +3713,7 @@ drop if missing(hh)
 xtdescribe
 ```
 
-```{python}
-%%stata
+```{stata}
 * Within-cluster correlation of pharvis
 quietly xtreg pharvis, mle
 display "Intra-class correlation for household: " e(rho)
@@ -4101,8 +3721,7 @@ quietly correlate pharvis L1.pharvis
 display "Correlation for adjoining household:   " r(rho)
 ```
 
-```{python}
-%%stata
+```{stata}
 * OLS, RE, and FE estimation with clustering on household and on village
 quietly regress pharvis lnhhexp illness, vce(cluster hh)
 estimates store OLS_hh
@@ -4122,8 +3741,7 @@ estimates table OLS_hh RE_hh FE_hh OLS_vill RE_vill FE_vill, b(%7.4f) se
 
 ### 9.6.4 Hierarchical linear models
 
-```{python}
-%%stata
+```{stata}
 * Hierarchical linear model with household and village variance components
 xtmixed pharvis lnhhexp illness || commune: || hh:, mle difficult
 ```
@@ -4140,16 +3758,14 @@ xtmixed pharvis lnhhexp illness || commune: || hh:, mle difficult
 
 ### 10.2.1 Data description
 
-```{python}
-%%stata
+```{stata}
 * Read in dataset, select one year of data, and describe key variables
 use musr/mus10data.dta, clear
 keep if year02==1
 describe docvis private chronic female income
 ```
 
-```{python}
-%%stata
+```{stata}
 * Summary of key variables
 summarize docvis private chronic female income
 ```
@@ -4162,8 +3778,7 @@ summarize docvis private chronic female income
 
 ### 10.3.2 The poisson command
 
-```{python}
-%%stata
+```{stata}
 * Poisson regression (command poisson)
 poisson docvis private chronic female income, vce(robust)
 ```
@@ -4174,8 +3789,7 @@ poisson docvis private chronic female income, vce(robust)
 
 ### 10.3.5 The nl command
 
-```{python}
-%%stata
+```{stata}
 capture nl (docvis = exp({private}private + {chronic}*chronic     ///
             + {female}*female + {income}*income + {intercept}))
 if _rc != 0 {
@@ -4183,8 +3797,7 @@ if _rc != 0 {
 }
 ```
 
-```{python}
-%%stata
+```{stata}
 * Nonlinear least-squares regression (command nl)
 capture drop one
 generate one = 1
@@ -4198,15 +3811,13 @@ if _rc != 0 {
 
 ### 10.3.7 The glm command
 
-```{python}
-%%stata
+```{stata}
 * Generalized linear models regression for poisson (command glm)
 glm docvis private chronic female income,  ///
   family(poisson) link(log) vce(robust) nolog
 ```
 
-```{python}
-%%stata
+```{stata}
 * Command gmm for GMM estimation (nonlinear IV) for Poisson model
 gmm (docvis - exp({xb:private chronic female income}+{b0})),   ///
  instruments(firmsize chronic female income) onestep nolog
@@ -4222,8 +3833,7 @@ gmm (docvis - exp({xb:private chronic female income}+{b0})),   ///
 
 ### 10.4.3 Application of the vee() option
 
-```{python}
-%%stata
+```{stata}
 * Different VCE estimates after Poisson regression
 quietly poisson docvis private chronic female income
 estimates store VCE_oim
@@ -4257,8 +3867,7 @@ estimates table VCE_oim VCE_opg VCE_rob VCE_clu VCE_boot, b(%8.4f) se
 
 ### 10.5.2 Application of predict and predictnl
 
-```{python}
-%%stata
+```{stata}
 * Predicted mean number of doctor visits using predict and predictnl 
 quietly poisson docvis private chronic female income, vce(robust)
 predict muhat if e(sample), n
@@ -4269,8 +3878,7 @@ summarize docvis muhat muhat2 semuhat2
 
 ### 10.5.3 Out-of-sample; prediction
 
-```{python}
-%%stata
+```{stata}
 predict resid, score
 generate resid2 = docvis - muhat
 summarize resid resid2 
@@ -4278,8 +3886,7 @@ summarize resid resid2
 
 ### 10.5.4 Prediction at a specified value of one of the regressors
 
-```{python}
-%%stata
+```{stata}
 * Out-of-sample prediction for year01 data using year02 estimates
 use musr/mus10data.dta, clear
 quietly poisson docvis private chronic female income if year02==1, vce(robust)
@@ -4290,8 +3897,7 @@ summarize docvis muhatyear01
 
 ### 10.5.5 Prediction at a specified value of all the regressors
 
-```{python}
-%%stata
+```{stata}
 * Prediction at a particular value of one of the regressors
 use musr/mus10data.dta, clear
 keep if year02 == 1
@@ -4303,41 +3909,35 @@ summarize muhatpeq1
 restore
 ```
 
-```{python}
-%%stata
+```{stata}
 * Prediction at a specified value of all the regressors
 nlcom exp(_b[_cons]+_b[private]*1+_b[chronic]*0+_b[female]*1+_b[income]*10)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Predict at a specified value of all the regressors
 lincom _cons + private*1 + chronic*0 + female*1 + income*10, eform
 ```
 
 ### 10.5.6 Prediction of other quantities
 
-```{python}
-%%stata
+```{stata}
 * Sample average of predicted number of events
 poisson docvis private chronic female income, vce(robust)
 margins
 ```
 
-```{python}
-%%stata
+```{stata}
 * Sample average prediction at a particular value of one of the regressors
 margins, at(private=1)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Prediction at a specified value of all regressors
 margins, at(private=1 chronic=0 female=1 income=10)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Sample average prediction at different values of indicator variable private
 poisson docvis i.private chronic female income, vce(robust)
 margins private
@@ -4357,8 +3957,7 @@ margins private
 
 ### 10.6.6 MEM: Marginal effect at mean
 
-```{python}
-%%stata
+```{stata}
 * Marginal effects at mean (MEM) using margins command and finite differences
 quietly poisson docvis i.private i.chronic i.female income, vce(robust)
 margins, dydx(*) atmean
@@ -4366,8 +3965,7 @@ margins, dydx(*) atmean
 
 #### Comparison of calculus and finite-difference methods
 
-```{python}
-%%stata
+```{stata}
 * Marginal effects at mean (MEM) using margins command and only calculus method
 poisson docvis private chronic female income, vce(robust)
 margins, dydx(*) atmean
@@ -4375,8 +3973,7 @@ margins, dydx(*) atmean
 
 ### 10.6.7 MER: Marginal effect at representative value
 
-```{python}
-%%stata
+```{stata}
 * Marginal effects at representative value (MER) using margins command
 poisson docvis i.private i.chronic i.female income, vce(robust)
 margins, dydx(*) at(private=1 chronic=0 female=1 income=10) noatlegend
@@ -4387,8 +3984,7 @@ margins, dydx(*)
 
 ### 10.6.8 AME: Average marginal effect
 
-```{python}
-%%stata
+```{stata}
 * Usual ME evaluated at mean of regressors
 quietly poisson docvis private chronic female income, vce(robust)
 margins, dydx(income) atmean noatlegend
@@ -4396,48 +3992,40 @@ margins, dydx(income) atmean noatlegend
 
 ### 10.6.9 Elasticities and semielasticities
 
-```{python}
-%%stata
+```{stata}
 * Elasticity evaluated at mean of regressors
 margins, eyex(income) atmean noatlegend
 ```
 
-```{python}
-%%stata
+```{stata}
 * Semielasticity evaluated at mean of regressors
 margins, eydx(income) atmean noatlegend
 ```
 
-```{python}
-%%stata
+```{stata}
 * Other semielasticity evaluated at mean of regressors
 margins, dyex(income) atmean noatlegend
 ```
 
-```{python}
-%%stata
+```{stata}
 mfx, dydx varlist(income)
 ```
 
-```{python}
-%%stata
+```{stata}
 mfx, eyex varlist(income)
 ```
 
-```{python}
-%%stata
+```{stata}
 mfx, eydx varlist(income)
 ```
 
-```{python}
-%%stata
+```{stata}
 mfx, dyex varlist( income)
 ```
 
 ### 10.6.10 AME computed manually
 
-```{python}
-%%stata
+```{stata}
 * AME computed manually for a single regressor
 use musr/mus10data.dta, clear
 keep if year02 == 1
@@ -4451,8 +4039,7 @@ summarize memanual
 restore
 ```
 
-```{python}
-%%stata
+```{stata}
 * AME computed manually for all regressors
 global xlist private chronic female income
 preserve
@@ -4473,8 +4060,7 @@ restore
 
 ### 1 0.6.11 Polynomial regressors
 
-```{python}
-%%stata
+```{stata}
 * AME for a polynomial regressor: manual computation
 generate inc2 = income^2
 generate inc3 = income^3
@@ -4488,27 +4074,23 @@ summarize me_income
 
 ### 10.6.13 Complex interactions and nonlinearities
 
-```{python}
-%%stata
+```{stata}
 * AME for a polynomial regressor: computation using factor variables
 quietly poisson docvis private chronic female c.income c.income#c.income c.income#c.income#c.income, vce(robust)
 margins, dydx(income)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Specify model with interacted regressors using factor variables
 poisson docvis private chronic i.female c.income i.female#c.income, vce(robust) nolog
 ```
 
-```{python}
-%%stata
+```{stata}
 * AME with interacted regressors given model specified using factor variables
 margins, dydx(female income)
 ```
 
-```{python}
-%%stata
+```{stata}
 * AME computed manually for a complex model
 preserve
 predict mu0, n
@@ -4527,8 +4109,7 @@ restore
 
 ### 10.7.1 Goodness-of-fit measures
 
-```{python}
-%%stata
+```{stata}
 * Compute pseudo-R-squared after Poisson regression
 quietly poisson docvis private chronic female income, vce(robust)
 display "Pseudo-R^2 = " 1 - e(ll)/e(ll_0)
@@ -4536,16 +4117,14 @@ display "Pseudo-R^2 = " 1 - e(ll)/e(ll_0)
 
 ### 10.7.2 Information criteria for model comparison
 
-```{python}
-%%stata
+```{stata}
 * Report information criteria
 estat ic
 ```
 
 ### 10.7.3 Residuals
 
-```{python}
-%%stata
+```{stata}
 * Various residuals after command glm
 quietly glm docvis private chronic female income, family(poisson)
 predict mu, mu
@@ -4558,8 +4137,7 @@ summarize uraw upearson udeviance uanscombe
 
 ### 10.7.4 Model-specification tests
 
-```{python}
-%%stata
+```{stata}
 // Following not presented in book
 correlate uraw upearson udeviance uanscombe
 ```
@@ -4582,8 +4160,7 @@ correlate uraw upearson udeviance uanscombe
 
 #### Core Mata code for Poisson NR iterations
 
-```{python}
-%%stata
+```{stata}
 /*
 * Core Mata code for Poisson MLE NR iterations 
 mata
@@ -4603,8 +4180,7 @@ end
 
 #### Complete Stata and Mata code for Poisson NR iterations
 
-```{python}
-%%stata
+```{stata}
 clear all
 * Set up data and local macros for dependent variable and regressors
 use musr/mus10data.dta
@@ -4614,8 +4190,7 @@ local y docvis
 local xlist private chronic female income cons
 ```
 
-```{python}
-%%stata
+```{stata}
 * Complete Mata code for Poisson MLE NR iterations
 mata:
   st_view(y=., ., "`y'")            // read in stata data to y and X
@@ -4644,8 +4219,7 @@ mata:
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 * Present results, nicely formatted using Stata command ereturn
 matrix colnames b = `xlist'
 matrix colnames V = `xlist'
@@ -4654,8 +4228,7 @@ ereturn post b V
 ereturn display 
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following not included in book is for comparison with above
 poisson docvis private chronic female income, log trace gradient iterate(100) tol(1e-4) ltol(0) robust
 ```
@@ -4672,8 +4245,7 @@ poisson docvis private chronic female income, log trace gradient iterate(100) to
 
 ### 11.3.5 Multiple maximums
 
-```{python}
-%%stata
+```{stata}
 * Objective function with multiple optima
 graph twoway function                                        ///
   y=100-0.0000001*(x-10)*(x-30)*(x-50)*(x-50)*(x-70)*(x-80), ///
@@ -4694,8 +4266,7 @@ graph export musr/mus11fig1.eps, replace
 
 ### 11.4.3 Poisson example: Single-index model
 
-```{python}
-%%stata
+```{stata}
 * Poisson ML program lfpois to be called by command ml method lf
 program lfpois
   version 11
@@ -4708,29 +4279,25 @@ program lfpois
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 * Command ml model including defining y and x, plus ml check
 ml model lf lfpois (docvis = private chronic female income), vce(robust)
 ml check
 ```
 
-```{python}
-%%stata
+```{stata}
 * Search for better starting values
 ml search
 ```
 
-```{python}
-%%stata
+```{stata}
 * Compute the estimator
 ml maximize 
 ```
 
 ### 11.4.4 Negative binomial example: Two-index model
 
-```{python}
-%%stata
+```{stata}
 * Negbin ML program lfnb to be called by command ml method lf
 program lfnb
   version 11
@@ -4744,8 +4311,7 @@ program lfnb
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 * Command lf implemented for negative binomial MLE
 ml model lf lfnb (docvis = private chronic female income) ()
 ml maximize, nolog
@@ -4753,8 +4319,7 @@ ml maximize, nolog
 
 ### 11.4.5 NLS example: Nonlikelihood model
 
-```{python}
-%%stata
+```{stata}
 * NLS program lfnls to be called by command ml method lf
 program lfnls
   version 11
@@ -4764,8 +4329,7 @@ program lfnls
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 * Command lf implemented for NLS estimator 
 ml model lf lfnls (docvis = private chronic female income), vce(robust)
 ml maximize
@@ -4775,8 +4339,7 @@ ml maximize
 
 ### 11.5.1 Program debugging using ml check and ml trace
 
-```{python}
-%%stata
+```{stata}
 * Example with high collinearity interpreted as perfect collinearity
 generate extra = income + 0.001*runiform()
 ml model lf lfpois (docvis = private chronic female income extra), vce(robust)
@@ -4785,8 +4348,7 @@ ml maximize
 
 ### 11.5.2 Getting the program to run
 
-```{python}
-%%stata
+```{stata}
 *quietly replace `lnf' = `mu' + `y'*ln(`mu') - `lnyfact'
 *mlmaximize
 ```
@@ -4795,16 +4357,14 @@ ml maximize
 
 ### 11.5.4 Multicollinearity and near collinearity
 
-```{python}
-%%stata
+```{stata}
 * Example with high collinearity not interpreted as perfect collinearity
 generate extra2 = income + 0.01*runiform()
 ml model lf lfpois (docvis = private chronic female income extra2), vce(robust)
 ml maximize, nolog
 ```
 
-```{python}
-%%stata
+```{stata}
 * Detect multicollinearity using _rmcoll
 _rmcoll income extra 
 _rmcoll income extra2
@@ -4814,8 +4374,7 @@ _rmcoll income extra2
 
 ### 11.5.6 Checking parameter estimation
 
-```{python}
-%%stata
+```{stata}
 * Generate dataset from Poisson DGP for large N
 clear
 set obs 10000               
@@ -4826,8 +4385,7 @@ generate y = rpoisson(mu)
 summarize mu x y  
 ```
 
-```{python}
-%%stata
+```{stata}
 * Consistency check: Run program lfpois and compare beta to DGP value
 ml model lf lfpois (y = x)  
 ml maximize, nolog
@@ -4835,8 +4393,7 @@ ml maximize, nolog
 
 ### 11.5.7 Checking standard-error estimation
 
-```{python}
-%%stata
+```{stata}
 * Program to generate dataset, obtain estimate, and return beta and SEs
 program secheck, rclass
   version 11 
@@ -4854,8 +4411,7 @@ program secheck, rclass
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 * Standard errors check: run program secheck
 set seed 10101    
 simulate "secheck" bcons=r(b1) se_bcons=r(se1) bx=r(b2) se_bx=r(se2), reps(2000) 
@@ -4868,8 +4424,7 @@ summarize
 
 ### 11.6.2 The dO method
 
-```{python}
-%%stata
+```{stata}
 * Set up data and local macros for dependent variable and regressors
 use musr/mus10data.dta, clear
 quietly keep if year02 == 1
@@ -4878,8 +4433,7 @@ local y docvis
 local xlist private chronic female income cons
 ```
 
-```{python}
-%%stata
+```{stata}
 * Method d0: Program d0pois to be called by command ml method d0
 program d0pois
   version 11
@@ -4891,15 +4445,13 @@ program d0pois
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 * Method d0: implement Poisson MLE 
 ml model d0 d0pois (docvis = private chronic female income)
 ml maximize
 ```
 
-```{python}
-%%stata
+```{stata}
 * Method d1: Program d1pois to be called by command ml method d1
 program d1pois
   version 11
@@ -4917,8 +4469,7 @@ end
 
 ### 11.6.4 The dl method with the robust estimate of the VCE
 
-```{python}
-%%stata
+```{stata}
 * Method d1 : With robust SEs program dipoisrob
 program d1poisrob
   version 10.1
@@ -4936,8 +4487,7 @@ program d1poisrob
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 * Method d1: implement Poisson MLE
 ml model d1 d1pois (docvis = private chronic female income)  // Define y and x
 ml maximize
@@ -4945,8 +4495,7 @@ ml maximize
 
 ### 11.6.5 The d2 method
 
-```{python}
-%%stata
+```{stata}
 * Method lf1: Program lf1poisrob is variation of program d1pois for robust se's
 program lf1poisrob
   version 11
@@ -4960,15 +4509,13 @@ program lf1poisrob
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 * Method lf1: implement Poisson MLE with robust standard errors
 ml model lf1 lf1poisrob (docvis = private chronic female income), vce(robust)
 ml maximize, nolog
 ```
 
-```{python}
-%%stata
+```{stata}
 * Method d2: Program d2pois to be called by command ml method d2
 program d2pois
   version 11
@@ -4988,8 +4535,7 @@ program d2pois
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 * Method d2: Poisson MLE with first and second derivatives provided
 ml model d2 d2pois (docvis = private chronic female income)
 ml maximize
@@ -5005,8 +4551,7 @@ ml maximize
 
 #### Evaluator program for Poisson MLE
 
-```{python}
-%%stata
+```{stata}
 local y docvis
 local xlist private chronic female income cons
 
@@ -5028,8 +4573,7 @@ end
 
 #### The optimize() function for Poisson MLE 
 
-```{python}
-%%stata
+```{stata}
 mata: mata drop poissonmle()
 * Mata code to obtain Poisson MLE using command optimize
 mata 
@@ -5066,8 +4610,7 @@ end
 
 ### 11.8.3 GMM using the Mata optimize() function
 
-```{python}
-%%stata
+```{stata}
 mata: mata set matastrict off
 
 local y docvis
@@ -5088,8 +4631,7 @@ mata
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 * Mata code to obtain GMM estimator for Poisson using command optimize
 mata 
   void pgmm(todo, b, y, X, Z, Qb, g, H)
@@ -5148,8 +4690,7 @@ end
 
 ### 12.2.3 Plotting densities
 
-```{python}
-%%stata
+```{stata}
 * Create many draws from chi(5) and 5*F(5,30) distributions
 set seed 10101
 quietly set obs 10000 
@@ -5161,8 +4702,7 @@ generate five_x_f5_30 = 5*f5_30
 summarize chi5 five_x_f5_30
 ```
 
-```{python}
-%%stata
+```{stata}
 * Plot the densities for these two distributions using kdensity
 label var chi5 "chi(5)"
 label var five_x_f5_30 "5*F(5,30)"
@@ -5183,8 +4723,7 @@ quietly graph export musr/mus12fandchi5.eps, replace
 
 ### 12.2.4 Computing p-values and critical values
 
-```{python}
-%%stata
+```{stata}
 * p-values for t(30), F(1,30), Z, and chi(1) at y = 2
 scalar y = 2
 scalar p_t30 = 2*ttail(30,y)
@@ -5195,8 +4734,7 @@ display "p-values" "  t(30) =" %7.4f p_t30 "  F(1,30)=" %7.4f  ///
        p_f1and30 "  z =" %7.4f p_z "  chi(1)=" %7.4f p_chi1
 ```
 
-```{python}
-%%stata
+```{stata}
 * Critical values for t(30), F(1,30), Z, and chi(1) at level 0.05
 scalar alpha = 0.05
 scalar c_t30 = invttail(30,alpha/2)
@@ -5215,8 +4753,7 @@ display "critical values" "  t(30) =" %7.3f c_t30 "  F(1,30)=" %7.3f  ///
 
 ### 12.3.2 The test command
 
-```{python}
-%%stata
+```{stata}
 * Estimate Poisson model of chapter 10
 use musr/mus10data.dta, clear
 quietly keep if year02==1
@@ -5225,16 +4762,14 @@ poisson docvis private chronic female income, vce(robust) nolog
 
 #### Test single coefficient
 
-```{python}
-%%stata
+```{stata}
 * Test a single coefficient equal 0
 test female
 ```
 
 #### Test several hypotheses
 
-```{python}
-%%stata
+```{stata}
 // Variations not included in book
 test female
 test female = 0
@@ -5242,35 +4777,30 @@ test [docvis]female = 0
 test _b[female] = 0
 ```
 
-```{python}
-%%stata
+```{stata}
 * Test two hypotheses jointly using test
 test (female) (private + chronic = 1)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Test each hypothesis in isolation as well as jointly
 test (female) (private + chronic = 1), mtest
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following not included in book
 test ([docvis]female = 0) ([docvis]private + [docvis]chronic = 1)
 test (_b[female] = 0) (_b[private] + _b[chronic] = 1)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Wald test of overall significance
 test private chronic female income
 ```
 
 #### Test calculated from retrieved coefficients and VCE
 
-```{python}
-%%stata
+```{stata}
 * Manually compute overall test of significance using the formula for W
 quietly poisson docvis private chronic female income, vce(robust)
 matrix b = e(b)'   
@@ -5289,14 +4819,12 @@ display "Wald test statistic: " Wald "  with p-value: " chi2tail(h,Wald)
 
 ### 12.3.5 The testnl command
 
-```{python}
-%%stata
+```{stata}
 * Test a nonlinear hypothesis using testnl 
 testnl _b[female]/_b[private] = 1
 ```
 
-```{python}
-%%stata
+```{stata}
 * Wald test is not invariant
 test female = private
 ```
@@ -5305,8 +4833,7 @@ test female = private
 
 ### 12.3.7 The lincom command
 
-```{python}
-%%stata
+```{stata}
 * Confidence interval for linear combinations using lincom
 use musr/mus10data.dta, clear
 quietly keep if year02==1
@@ -5316,28 +4843,24 @@ lincom private + chronic - 1
 
 ### 12.3.8 The nlcom command (delta method)
 
-```{python}
-%%stata
+```{stata}
 * Confidence interval for nonlinear function of parameters using nlcom
 nlcom _b[female] / _b[private] - 1
 ```
 
 ### 12.3.9 Asymmetric confidence intervals
 
-```{python}
-%%stata
+```{stata}
 * CI for exp(b) using lincom option eform
 lincom private, eform
 ```
 
-```{python}
-%%stata
+```{stata}
 * CI for exp(b) using lincom followed by exponentiate
 lincom private
 ```
 
-```{python}
-%%stata
+```{stata}
 * CI for exp(b) using nlcom
 nlcom exp(_b[private])
 ```
@@ -5346,22 +4869,19 @@ nlcom exp(_b[private])
 
 ### 12.4.1 Likelihood-ratio tests
 
-```{python}
-%%stata
+```{stata}
 * LR tests output if estimate by ML with default estimate of VCE
 nbreg docvis private chronic female income,  nolog
 ```
 
 ### 12.4.2 The lrtest command
 
-```{python}
-%%stata
+```{stata}
 // Following not included in book
 *testnl exp([lnalpha]_cons)=0
 ```
 
-```{python}
-%%stata
+```{stata}
 * LR test using command lrtest
 quietly nbreg docvis private chronic female income
 estimates store unrestrict
@@ -5370,21 +4890,18 @@ estimates store restrict
 lrtest unrestrict restrict
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following not included in book
 lrtest restrict unrestrict
 ```
 
-```{python}
-%%stata
+```{stata}
 * Wald test of the same hypothesis
 quietly nbreg docvis private chronic female income
 test chronic private
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following not included in book as can instead use option force
 * LR test done manually
 quietly nbreg docvis private chronic female income
@@ -5395,8 +4912,7 @@ scalar lr = -2*(llrestrict - llunrestrict)
 display "LR = " lr " with p = " chi2tail(1,lr)
 ```
 
-```{python}
-%%stata
+```{stata}
 * LR test using option force
 quietly nbreg docvis private chronic female income
 estimates store nb
@@ -5414,8 +4930,7 @@ display "Corrected p-value for LR-test = " r(p)/2
 
 ### 12.5.3 LM test by auxiliary regression
 
-```{python}
-%%stata
+```{stata}
 * Perform LM test that b_private=0, b_chronic=0 using auxiliary regression
 use musr/mus10data.dta, clear
 quietly keep if year02==1
@@ -5441,8 +4956,7 @@ display "LM = N x uncentered Rsq = " lm " and p = " chi2tail(2,lm)
 
 ### 12.6.2 Test size
 
-```{python}
-%%stata
+```{stata}
 // Following not included in book
 * Generate one sample from DGP with b2 = 0 and estimate by OLS
 clear
@@ -5455,8 +4969,7 @@ summarize x y
 regress y x, noheader
 ```
 
-```{python}
-%%stata
+```{stata}
 * Do 1000 simulations where each gets p-value of test of b2=2
 set seed 10101
 postfile sim pvalues using pvalues, replace
@@ -5473,30 +4986,26 @@ forvalues i = 1/1000 {
 postclose sim
 ```
 
-```{python}
-%%stata
+```{stata}
 * Summarize the p-value from each of the 1000 tests
 use pvalues, clear 
 summarize pvalues
 ```
 
-```{python}
-%%stata
+```{stata}
 * Determine size of test at level 0.05
 count if pvalues < .05
 display "Test size from 1000 simulations = " r(N)/1000
 ```
 
-```{python}
-%%stata
+```{stata}
 * 95% simulation interval using exact binomial at level 0.05 with S=1000
 *cii 1000 50
 ```
 
 ### 12.6.3 Test power
 
-```{python}
-%%stata
+```{stata}
 * Program to compute power of test given specified H0 and Ha values of b2
 program power, rclass
    version 10.1
@@ -5524,22 +5033,19 @@ program power, rclass
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 * Size = power of test of b2H0=2 when b2Ha=2, S=1000, N=150, alpha=0.05
 power 1000 150 2.00 2.00 0.05
 display r(power) " is the test power"
 ```
 
-```{python}
-%%stata
+```{stata}
 * Power of test of b2H0=2 when b2Ha=2.2, S=1000, N=150, alpha=0.05
 power 1000 150 2.00 2.20 0.05
 display r(power) " is the test power"
 ```
 
-```{python}
-%%stata
+```{stata}
 * Power of test of H0:b2=2 against Ha:b2=1.6,1.625, ..., 2.4
 postfile simofsims b2Ha power using musr/simresults, replace
 forvalues i = 0/33 {
@@ -5553,8 +5059,7 @@ use musr/simresults, clear
 summarize
 ```
 
-```{python}
-%%stata
+```{stata}
 * Plot the power curve
 twoway (connected power b2Ha), scale(1.2) plotregion(style(none))
 quietly graph export musr/mus12power.eps, replace
@@ -5562,8 +5067,7 @@ quietly graph export musr/mus12power.eps, replace
 
 ### 12.6.4 Asymptotic test power
 
-```{python}
-%%stata
+```{stata}
 * Power of chi(1) test when noncentrality parameter lambda = 5.67
 display 1-nchi2(1,5.67,3.84)
 ```
@@ -5608,8 +5112,7 @@ display 1-nchi2(1,5.67,3.84)
 
 ### 13.3.3 Bootstrap standard-errors example
 
-```{python}
-%%stata
+```{stata}
 * Sample is only the first 50 observations of chapter 10 data
 use musr/mus10data.dta
 quietly keep if year02 == 1
@@ -5618,16 +5121,14 @@ quietly keep docvis chronic age
 quietly save musr/bootdata, replace
 ```
 
-```{python}
-%%stata
+```{stata}
 * Option vce(bootstrap) to compute bootstrap standard errors
 poisson docvis chronic, vce(boot, reps(400) seed(10101) nodots)
 ```
 
 ### 13.3.4 How many bootstraps?
 
-```{python}
-%%stata
+```{stata}
 * Bootstrap standard errors for different reps and seeds
 quietly poisson docvis chronic, vce(boot, reps(50) seed(10101))
 estimates store boot50
@@ -5642,8 +5143,7 @@ estimates table boot50 boot50diff boot2000 robust, b(%8.5f) se(%8.5f)
 
 ### 13.3.5 Clustered bootstraps
 
-```{python}
-%%stata
+```{stata}
 * Option vce(boot, cluster) to compute cluster-bootstrap standard errors
 poisson docvis chronic, vce(boot, cluster(age) reps(400) seed(10101) nodots)
 
@@ -5656,8 +5156,7 @@ poisson docvis chronic, vce(cluster age)
 
 ### 13.3.8 Bootstrap confidence-intervals example
 
-```{python}
-%%stata
+```{stata}
 * Bootstrap confidence intervals: normal-based, percentile, BC, and BCa
 quietly poisson docvis chronic, vce(boot, reps(999) seed(10101) bca)
 estat bootstrap, all
@@ -5665,8 +5164,7 @@ estat bootstrap, all
 
 ### 13.3.9 Bootstrap estimate of bias
 
-```{python}
-%%stata
+```{stata}
 * List the average of the bootstraps
 matrix list e(b_bs)
 ```
@@ -5677,24 +5175,21 @@ matrix list e(b_bs)
 
 ### 13.4.2 Bootstrap parameter estimate from a Stata estimation command
 
-```{python}
-%%stata
+```{stata}
 * Bootstrap command applied to Stata estimation command
 bootstrap, reps(400) seed(10101) nodots noheader: poisson docvis chronic
 ```
 
 ### 13.4.3 Bootstrap standard error from a Stata estimation command
 
-```{python}
-%%stata
+```{stata}
 * Bootstrap standard-error estimate of the standard error of a coeff estimate
 bootstrap _b _se, reps(400) seed(10101) nodots: poisson docvis chronic
 ```
 
 ### 13.4.4 Bootstrap standard error from a user-written estimation command
 
-```{python}
-%%stata
+```{stata}
 * Program to return b and robust estimate V of the VCE
 program poissrobust, eclass
   version 11
@@ -5706,8 +5201,7 @@ program poissrobust, eclass
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following output not given in the book 
 * Check preceding program by running once
 poissrobust
@@ -5716,14 +5210,12 @@ ereturn display
 
 ### 13.4.5 Bootstrap two-step estimator
 
-```{python}
-%%stata
+```{stata}
 * Bootstrap standard-error estimate of robust standard errors
 bootstrap _b _se, reps(400) seed(10101) nodots nowarn: poissrobust
 ```
 
-```{python}
-%%stata
+```{stata}
 * Set up the selection model two-step estimator data of chapter 16
 use musr/mus16data.dta, clear
 generate y = ambexp
@@ -5732,8 +5224,7 @@ generate lny = ln(y)
 global xlist age female educ blhisp totchr ins 
 ```
 
-```{python}
-%%stata
+```{stata}
 * Program to return b for Heckman 2-step estimator of selection model 
 program hecktwostep, eclass
   version 11
@@ -5749,8 +5240,7 @@ program hecktwostep, eclass
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following not included in book
 * Check preceding program by running once
 hecktwostep
@@ -5759,21 +5249,18 @@ ereturn display
 
 ### 13.4.6 Bootstrap Hausman test
 
-```{python}
-%%stata
+```{stata}
 * Bootstrap for Heckman two-step estimator using chapter 16 example
 bootstrap _b, reps(400) seed(10101) nodots nowarn: hecktwostep
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following not included in book
 * Check results
 heckman lny $xlist, select(dy = $xlist) twostep
 ```
 
-```{python}
-%%stata
+```{stata}
 * Program to return (b1-b2) for hausman test of endogeneity
 program hausmantest, eclass
   version 11
@@ -5787,8 +5274,7 @@ program hausmantest, eclass
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following not included in book
 * Check preceding program by running once
 use musr/mus06data.dta, clear
@@ -5796,21 +5282,18 @@ hausmantest
 ereturn display
 ```
 
-```{python}
-%%stata
+```{stata}
 * Bootstrap estimates for Hausman test using chapter 6 example
 use musr/mus06data.dta, clear
 bootstrap _b, reps(400) seed(10101) nodots nowarn: hausmantest
 ```
 
-```{python}
-%%stata
+```{stata}
 * Perform Hausman test on the potentially endogenous regressor
 test hi_empunion
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following not included in book
 * Perform Hausman test on all regressors
 test hi_empunion totchr age female blhisp linc
@@ -5818,8 +5301,7 @@ test hi_empunion totchr age female blhisp linc
 
 ### 13.4.7 Bootstrap standard error of the coefficient of variation
 
-```{python}
-%%stata
+```{stata}
 * Bootstrap estimate of the standard error of the coefficient of variation
 use musr/bootdata, clear
 bootstrap coeffvar=(r(sd)/r(mean)), reps(400) seed(10101) nodots   ///
@@ -5832,8 +5314,7 @@ bootstrap coeffvar=(r(sd)/r(mean)), reps(400) seed(10101) nodots   ///
 
 ### 13.5.2 Percentile-t Wald test
 
-```{python}
-%%stata
+```{stata}
 * Percentile-t for a single coefficient: Bootstrap the t statistic
 use musr/bootdata, clear
 quietly poisson docvis chronic, vce(robust)
@@ -5844,8 +5325,7 @@ bootstrap tstar=((_b[chronic]-`theta')/_se[chronic]), seed(10101)        ///
   vce(robust)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Percentile-t p-value for symmetric two-sided Wald test of H0: theta = 0
 use musr/percentilet, clear
 quietly count if abs(`theta'/`setheta') < abs(tstar)
@@ -5854,8 +5334,7 @@ display "p-value = " r(N)/_N
 
 ### 13.5.3 Percentiie-t Waid confidence interval
 
-```{python}
-%%stata
+```{stata}
 * Percentile-t critical values and confidence interval
 _pctile tstar, p(2.5,97.5) 
 scalar lb = `theta' + r(r1)*`setheta'
@@ -5864,8 +5343,7 @@ display "2.5 and 97.5 percentiles of t* distn: " r(r1) ", " r(r2) _n ///
     "95 percent percentile-t confidence interval is  (" lb ","  ub ")"
 ```
 
-```{python}
-%%stata
+```{stata}
 use musr/bootdata, clear
 nbreg docvis chronic
 ```
@@ -5876,8 +5354,7 @@ nbreg docvis chronic
 
 ### 13.6.2 The bsample command with simulate
 
-```{python}
-%%stata
+```{stata}
 * Program to do one bootstrap replication
 program onebootrep, rclass
   version 11  
@@ -5889,8 +5366,7 @@ program onebootrep, rclass
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 * Now do 999 bootstrap replications
 use musr/bootdata, clear
 quietly poisson docvis chronic, vce(robust) 
@@ -5900,8 +5376,7 @@ simulate tstar=r(tstar), seed(10101) reps(999) nodots  ///
   saving(musr/percentilet2, replace): onebootrep
 ```
 
-```{python}
-%%stata
+```{stata}
 * Analyze the results to get the p-value
 use musr/percentilet2, clear
 quietly count if abs($theta/$setheta) < abs(tstar)
@@ -5910,8 +5385,7 @@ display "p-value = " r(N)/_N
 
 ### 13.6.3 Bootstrap Monte Carlo exercise
 
-```{python}
-%%stata
+```{stata}
 * Program to do one bootstrap of B replications
 program mybootstrap, rclass
   use musr/bootdata, clear
@@ -5926,8 +5400,7 @@ program mybootstrap, rclass
 end 
 ```
 
-```{python}
-%%stata
+```{stata}
 * Check the program by running once
 set seed 10101 
 mybootstrap
@@ -5938,8 +5411,7 @@ display r(pvalue)
 
 ### 13.7.1 Bootstrap pairs
 
-```{python}
-%%stata
+```{stata}
 * Program to resample using bootstrap pairs
 program bootpairs
   version 11 
@@ -5950,21 +5422,18 @@ program bootpairs
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 * Check the program by running once
 bootpairs
 ```
 
-```{python}
-%%stata
+```{stata}
 * Bootstrap pairs for the parameters
 simulate _b, seed(10101) reps(400) nodots: bootpairs
 summarize
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following not included in book
 * Compare to bootstrap command
 use musr/bootdata, clear
@@ -5973,8 +5442,7 @@ bootstrap, reps(100) seed(10101): poisson docvis chronic
 
 ### 13.7.2 Parametric bootstrap
 
-```{python}
-%%stata
+```{stata}
 * Estimate the model with original actual data and save estimates
 use musr/bootdata
 nbreg docvis chronic
@@ -5982,8 +5450,7 @@ predict muhat
 global alpha = e(alpha)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Program for parametric bootstrap generating from negative binomial
 program bootparametric, eclass
   version 11
@@ -5994,16 +5461,14 @@ program bootparametric, eclass
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following not included in book 
 * Check the program by running once
 set seed 10101
 bootparametric
 ```
 
-```{python}
-%%stata
+```{stata}
 * Parametric bootstrap for the parameters
 simulate _b, seed(10101) reps(400) nodots: bootparametric
 summarize
@@ -6011,8 +5476,7 @@ summarize
 
 ### 13.7.3 Residual bootstrap
 
-```{python}
-%%stata
+```{stata}
 * Program for residual bootstrap for OLS with iid errors
 use musr/bootdata, clear
 quietly regress docvis chronic
@@ -6032,15 +5496,13 @@ program bootresidual
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following not included in book 
 * Check the program by running once
 bootresidual
 ```
 
-```{python}
-%%stata
+```{stata}
 * Residual bootstrap for the parameters
 simulate _b, seed(10101) reps(400) nodots: bootresidual
 summarize
@@ -6048,8 +5510,7 @@ summarize
 
 ### 13.7.4 Wild bootstrap
 
-```{python}
-%%stata
+```{stata}
 * Wild bootstrap for OLS with iid errors
 use musr/bootdata, clear
 program bootwild
@@ -6066,15 +5527,13 @@ program bootwild
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following not included in book
 * Check the program by running once
 bootwild
 ```
 
-```{python}
-%%stata
+```{stata}
 * Wild bootstrap for the parameters
 simulate _b, seed(10101) reps(400) nodots: bootwild
 summarize
@@ -6088,15 +5547,13 @@ summarize
 
 ### 13.8.2 The vce(jackknife) option and the jackknife command
 
-```{python}
-%%stata
+```{stata}
 * Jackknife estimate of standard errors
 use musr/bootdata, replace
 poisson docvis chronic, vce(jackknife, mse nodots) 
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following not included in book
 jacknife, mse nodots: poisson docvis chronic
 ```
@@ -6131,8 +5588,7 @@ jacknife, mse nodots: poisson docvis chronic
 
 ### 14.4.1 Data description
 
-```{python}
-%%stata
+```{stata}
 clear
 * Load data
 use musr/mus14data.dta
@@ -6147,16 +5603,14 @@ summarize ins retire $xlist $extralist
 
 ### 14.4.2 logit regression
 
-```{python}
-%%stata
+```{stata}
 * Logit regression
 logit ins retire $xlist
 ```
 
 ### 14.4.3 Comparison of binary models and parameter estimates
 
-```{python}
-%%stata
+```{stata}
 * Estimation of several models
 quietly logit ins retire $xlist
 estimates store blogit
@@ -6172,8 +5626,7 @@ quietly regress ins retire $xlist, vce(robust)
 estimates store bolsr
 ```
 
-```{python}
-%%stata
+```{stata}
 * Table for comparing models 
 estimates table blogit blogitr bprobit bprobitr bols bolsr, /*
    */ t stats(N ll) b(%7.3f) stfmt(%8.2f)
@@ -6183,8 +5636,7 @@ estimates table blogit blogitr bprobit bprobitr bols bolsr, /*
 
 ### 14.5.1 Wald tests
 
-```{python}
-%%stata
+```{stata}
 * Wald test for zero interactions
 generate age2 = age*age
 generate agefem = age*female
@@ -6197,8 +5649,7 @@ test $intlist
 
 ### 14.5.2 likelihood-ratio tests
 
-```{python}
-%%stata
+```{stata}
 * Likelihood-ratio test
 quietly logit ins retire $xlist $intlist
 estimates store B 
@@ -6210,14 +5661,12 @@ lrtest B
 
 #### Lagrange multiplier test of generalized logit
 
-```{python}
-%%stata
+```{stata}
 * Heteroskedastic probit model
 hetprob ins retire $xlist, het(chronic) nolog // Heteroskedastic Probit 
 ```
 
-```{python}
-%%stata
+```{stata}
 * Stukel score or LM test for asymmetric h-family logit
 quietly logit ins retire $xlist
 predict xbhat, xb
@@ -6228,8 +5677,7 @@ test xbhatsq
 
 #### Heteroskedastic probit regression
 
-```{python}
-%%stata
+```{stata}
 * Heteroskedastic probit model
 hetprob ins retire $xlist, het(chronic) nolog // Heteroskedastic Probit
 ```
@@ -6242,15 +5690,13 @@ hetprob ins retire $xlist, het(chronic) nolog // Heteroskedastic Probit
 
 ### 14.6.2 Comparing predicted probabilities with sample frequencies
 
-```{python}
-%%stata
+```{stata}
 * Hosmer-Lemeshow gof test with 4 groups
 quietly logit ins retire $xlist
 estat gof, group(4)  // Hosmer-Lemeshow gof test
 ```
 
-```{python}
-%%stata
+```{stata}
 quietly logit ins retire $xlist
 * Hosmer-Lemeshow gof test with 10 groups
 estat gof, group(10)  // Hosmer-Lemeshow gof test
@@ -6258,8 +5704,7 @@ estat gof, group(10)  // Hosmer-Lemeshow gof test
 
 ### 14.6.3 Comparing predicted outcomes with actual outcomes
 
-```{python}
-%%stata
+```{stata}
 * Comparing fitted probability and dichotomous outcome
 quietly logit ins retire $xlist
 estat classification
@@ -6267,8 +5712,7 @@ estat classification
 
 ### 14.6.4 The predict command for fitted probabilities
 
-```{python}
-%%stata
+```{stata}
 * Calculate and summarize fitted probabilities
 quietly logit ins hhincome
 predict plogit, pr
@@ -6279,8 +5723,7 @@ predict pols, xb
 summarize ins plogit pprobit pols
 ```
 
-```{python}
-%%stata
+```{stata}
 * Following gives Figure mus14fig1.eps
 sort hhincome
 graph twoway (scatter ins hhincome, msize(vsmall) jitter(3)) /*
@@ -6299,8 +5742,7 @@ graph export musr/mus14fig1.eps, replace
 
 ### 14.6.5 The prvalue command for fitted probabilities
 
-```{python}
-%%stata
+```{stata}
 * Fitted probabilities for selected baseline using margins (prvalue no longer available)
 quietly logit ins retire $xlist
 * Calculate predicted probabilities at specific values
@@ -6309,8 +5751,7 @@ margins, at(age=65 retire=0 hstatusg=1 hhincome=50 educyear=17 married=1 hisp=0)
 margins, dydx(hhincome) atmeans
 ```
 
-```{python}
-%%stata
+```{stata}
 * Comparing fitted probability and dichotomous outcome
 quietly logit ins retire $xlist
 estat classification
@@ -6320,8 +5761,7 @@ estat classification
 
 ### 14.7.1 Marginal effect at a representative value (MER)
 
-```{python}
-%%stata
+```{stata}
 * Marginal effects (MER) after logit
 quietly logit ins i.retire age i.hstatusg hhincome educyear i.married i.hisp
 margins, dydx(*) at (retire=1 age=75 hstatusg=1 hhincome=35 educyear=12   ///
@@ -6330,8 +5770,7 @@ margins, dydx(*) at (retire=1 age=75 hstatusg=1 hhincome=35 educyear=12   ///
 
 ### 14.7.2 Marginal effect at the mean (MEM)
 
-```{python}
-%%stata
+```{stata}
 * Marginal effects (MEM) after logit
 quietly logit ins retire $xlist
 mfx // (MEM)
@@ -6339,15 +5778,13 @@ mfx // (MEM)
 
 ### 14.7.3 Average marginal effect (AME)
 
-```{python}
-%%stata
+```{stata}
 * Marginal effects (MEM) after logit
 quietly logit ins i.retire age i.hstatusg hhincome educyear i.married i.hisp
 margins, dydx(*) atmean noatlegend  // (MEM)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Marginal effects (AME) after logit
 quietly logit ins i.retire age i.hstatusg hhincome educyear i.married i.hisp
 margins, dydx(*) noatlegend        // (AME)
@@ -6355,8 +5792,7 @@ margins, dydx(*) noatlegend        // (AME)
 
 ### 14.7.4 The prchange command
 
-```{python}
-%%stata
+```{stata}
 * Computing change in probability after logit (prchange is deprecated, use margins)
 quietly logit ins retire $xlist 
 margins, dydx(hhincome) atmeans
@@ -6369,8 +5805,7 @@ estat classification
 
 ### 14.8.1 Example
 
-```{python}
-%%stata
+```{stata}
 use musr/mus14data.dta, clear
 
 * Endogenous probit using inconsistent probit MLE
@@ -6387,8 +5822,7 @@ probit ins linc $xlist2, vce(robust) nolog
 
 #### Maximum likelihood estimates
 
-```{python}
-%%stata
+```{stata}
 * Endogenous probit using ivprobit ML estimator
 global ivlist2 retire sretire
 ivprobit ins $xlist2 (linc = $ivlist2), vce(robust) nolog
@@ -6396,23 +5830,20 @@ ivprobit ins $xlist2 (linc = $ivlist2), vce(robust) nolog
 
 #### Two-step sequential estimates
 
-```{python}
-%%stata
+```{stata}
 * Endogenous probit using ivprobit 2-step estimator
 ivprobit ins $xlist2 (linc = $ivlist2), twostep first
 ```
 
 ### 14.8.4 IVs approach
 
-```{python}
-%%stata
+```{stata}
 * Endogenous probit using ivregress to get 2SLS estimator
 ivregress 2sls ins $xlist2 (linc = $ivlist2), vce(robust) noheader
 estat overid
 ```
 
-```{python}
-%%stata
+```{stata}
 * 2SLS estimation
 quietly ivregress 2sls ins $xlist (retire= female sretire seprhi adl), robust 
 estimates store TSLS_IV4
@@ -6424,8 +5855,7 @@ estimates store TSLS_IV4
 
 ### 14.9.2 Grouped-data application
 
-```{python}
-%%stata
+```{stata}
 * Using musr/mus14data.dta to generate grouped data 
 sort age
 collapse av_ret=retire av_hhinc=hhincome av_educyear=educyear	      ///
@@ -6435,14 +5865,12 @@ generate logins = log(av_ins/(1-av_ins))
 save musr/mus14gdata.dta, replace
 ```
 
-```{python}
-%%stata
+```{stata}
 *Summarize grouped data
 summarize logins  $xlistg
 ```
 
-```{python}
-%%stata
+```{stata}
 * Regressions with grouped data
 regress logins av_ret av_hstatusg av_hhinc av_educyear av_mar av_hisp, vce(robust)
 ```
@@ -6471,8 +5899,7 @@ regress logins av_ret av_hstatusg av_hhinc av_educyear av_mar av_hisp, vce(robus
 
 ### 15.3.1 Data description
 
-```{python}
-%%stata
+```{stata}
 * File mus15data is from 
 * J. A. Herriges and C. L. Kling, 
 * "Nonlinear Income Effects in Random Utility Models", 
@@ -6491,43 +5918,37 @@ regress logins av_ret av_hstatusg av_hhinc av_educyear av_mar av_hisp, vce(robus
 * If panel data used then clustering is on id (person id)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Read in dataset and describe dependent variable and regressors
 use musr/mus15data.dta, clear
 describe
 ```
 
-```{python}
-%%stata
+```{stata}
 * Summarize dependent variable and regressors
 summarize, separator(0) 
 ```
 
-```{python}
-%%stata
+```{stata}
 * Tabulate the dependent variable
 tabulate mode
 ```
 
 ### 15.3.2 Case-specific regressors
 
-```{python}
-%%stata
+```{stata}
 * Table of income by fishing mode
 table mode, statistic(count income) statistic(mean income) statistic(sd income)
 ```
 
 ### 15.3.3 Alternative-specific regressors
 
-```{python}
-%%stata
+```{stata}
 * Table of fishing price by fishing mode
 table mode, statistic(mean pbeach) statistic(mean ppier) statistic(mean pprivate) statistic(mean pcharter) nformat(%6.0f)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Table of fishing catch rate by fishing mode
 table mode, statistic(mean qbeach) statistic(mean qpier) statistic(mean qprivate) statistic(mean qcharter) nformat(%6.2f)
 ```
@@ -6538,36 +5959,31 @@ table mode, statistic(mean qbeach) statistic(mean qpier) statistic(mean qprivate
 
 ### 15.4.2 Application of the mlogit command
 
-```{python}
-%%stata
+```{stata}
 * Multinomial logit with base outcome alternative 1
 mlogit mode income, baseoutcome(1) nolog
 ```
 
-```{python}
-%%stata
+```{stata}
 * Wald test of the joint significance of income
 test income
 ```
 
 ### 15.4.3 Coefficient interpretation
 
-```{python}
-%%stata
+```{stata}
 * Relative-risk option reports exp(b) rather than b
 mlogit mode income, rr baseoutcome(1) nolog
 ```
 
 ### 15.4.4 Predicted probabilities
 
-```{python}
-%%stata
+```{stata}
 // Following used below
 estimates store MNL
 ```
 
-```{python}
-%%stata
+```{stata}
 * Predict probabilities of choice of each mode and compare to actual freqs
 predict pmlogit1 pmlogit2 pmlogit3 pmlogit4, pr
 summarize pmlogit* dbeach dpier dprivate dcharter, separator(4)
@@ -6575,20 +5991,17 @@ summarize pmlogit* dbeach dpier dprivate dcharter, separator(4)
 
 ### 15.4.5 MEs
 
-```{python}
-%%stata
+```{stata}
 * Sample average predicted probability of the third outcome
 margins, predict(outcome(3)) noatlegend
 ```
 
-```{python}
-%%stata
+```{stata}
 * Marginal effect at mean of income change for outcome 3
 margins, dydx(*) predict(outcome(3)) atmean noatlegend
 ```
 
-```{python}
-%%stata
+```{stata}
 * Average marginal effect of income change for outcome 3
 margins, dydx(*) predict(outcome(3)) noatlegend
 ```
@@ -6597,22 +6010,19 @@ margins, dydx(*) predict(outcome(3)) noatlegend
 
 ### 15.5.1 Creating long-form data from wide-form data
 
-```{python}
-%%stata
+```{stata}
 * Data are in wide form
 list mode price pbeach ppier pprivate pcharter in 1, clean
 ```
 
-```{python}
-%%stata
+```{stata}
 * Convert data from wide form to long form
 generate id = _n
 reshape long d p q, i(id) j(fishmode beach pier private charter) string
 save musr/mus15datalong.dta, replace
 ```
 
-```{python}
-%%stata
+```{stata}
 * List data for the first case after reshape
 list in 1/4, clean noobs
 ```
@@ -6623,14 +6033,12 @@ list in 1/4, clean noobs
 
 ### 15.5.4 App􀄍ication of the asclogit command
 
-```{python}
-%%stata
+```{stata}
 * Conditional logit with alternative-specific and case-specific regressors
 asclogit d p q, case(id) alternatives(fishmode) casevars(income) basealternative(beach) nolog 
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following used below
 estimates store CL
 ```
@@ -6641,8 +6049,7 @@ estimates store CL
 
 ### 15.5.7 Predicted probabilities
 
-```{python}
-%%stata
+```{stata}
 * Predicted probabilities of choice of each mode and compare to actual freqs
 *capture drop pasclogit
 predict pasclogit, pr
@@ -6651,20 +6058,17 @@ table fishmode, statistic(mean d) statistic(mean pasclogit) statistic(sd pasclog
 
 ### 15.5.8 MEs
 
-```{python}
-%%stata
+```{stata}
 // Following not included in book
 estat alternatives
 ```
 
-```{python}
-%%stata
+```{stata}
 * Marginal effect at mean of change in price
 estat mfx, varlist(p)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Alternative-specific example: AME of beach price change computed manually
 preserve
 quietly summarize p
@@ -6682,8 +6086,7 @@ restore
 
 ### 15.6.2 NL model
 
-```{python}
-%%stata
+```{stata}
 * Define the Tree for Nested logit
 *       with nesting structure 
 *             /     \
@@ -6698,34 +6101,29 @@ restore
 
 ### 15.6.4 Model estimates
 
-```{python}
-%%stata
+```{stata}
 * Define the tree for nested logit
 nlogitgen type = fishmode(shore: pier | beach, boat: private | charter)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Check the tree
 nlogittree fishmode type, choice(d)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Nested logit model estimate
 nlogit d p q || type:, base(shore) || fishmode: income, case(id) notree nolog
 ```
 
 ### 15.6.5 Predicted probabilities
 
-```{python}
-%%stata
+```{stata}
 // Following used below
 estimates store NL
 ```
 
-```{python}
-%%stata
+```{stata}
 * Predict level 1 and level 2 probabilities from NL model
 predict plevel1 plevel2, pr
 tabulate fishmode, summarize(plevel2)
@@ -6733,15 +6131,13 @@ tabulate fishmode, summarize(plevel2)
 
 ### 15.6.6 MEs
 
-```{python}
-%%stata
+```{stata}
 // Following not included in book
 list d plevel1 plevel2 in 1/4, clean
 estat alternatives
 ```
 
-```{python}
-%%stata
+```{stata}
 * AME of beach price change computed manually
 preserve
 quietly summarize p
@@ -6755,8 +6151,7 @@ restore
 
 ### 15.6.7 Comparison of logit models
 
-```{python}
-%%stata
+```{stata}
 * Summary statistics for the logit models
 estimates table MNL CL NL, keep(p q) stats(N ll aic bic) equation(1) b(%7.3f) stfmt(%7.0f)
 ```
@@ -6767,8 +6162,7 @@ estimates table MNL CL NL, keep(p q) stats(N ll aic bic) equation(1) b(%7.3f) st
 
 ### 15.7.2 The mprobit command
 
-```{python}
-%%stata
+```{stata}
 
 // Following not included in book
 * Multinomial Probit with independent errors and case-invariant regressors
@@ -6782,30 +6176,26 @@ mprobit mode income, baseoutcome(1)
 
 ### 15.7.5 Application of the asmpmbit command
 
-```{python}
-%%stata
+```{stata}
 * Multinomial Probit with exchangable errors did not give SEs for variance parameters
 use musr/mus15datalong.dta, clear
 *asmprobit d p q, case(id) alternatives(fishmode) casevars(income) correlation(exchangeable) shownrtolerance basealternative(charter)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Multinomial probit wuth unstructured errors when charter is dropped  
 use musr/mus15datalong.dta, clear
 drop if fishmode=="charter" | mode == 4
 asmprobit d p q, case(id) alternatives(fishmode) casevars(income) correlation(unstructured) structural vce(robust)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Show correlations and covariance
 estat correlation
 estat covariance 
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following not included in book
 * Predicted probabilities and marginal effect of changes in prices 
 capture drop pasmlogit
@@ -6815,8 +6205,7 @@ estat alternatives
 estat mfx, varlist(p)
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following not included in book
 * Same estimator without option structural
 use musr/mus15datalong.dta, clear
@@ -6826,8 +6215,7 @@ estat correlation
 estat covariance
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following not included in book
 * Compare to conditional logit
 use musr/mus15datalong.dta, clear
@@ -6845,8 +6233,7 @@ asclogit d p q, case(id) alternatives(fishmode) casevars(income) basealternative
 
 ### 15.8.3 Data preparation for mixlogit
 
-```{python}
-%%stata
+```{stata}
 * Data set up to include case-invariant regressors
 use musr/mus15datalong.dta, clear
 generate dbeach = fishmode=="pier"
@@ -6859,8 +6246,7 @@ generate ycharter = dcharter*income
 
 ### 15.8.4 Application of the mixlogit command
 
-```{python}
-%%stata
+```{stata}
 *ssc install mixlogit
 * Mixed logit or random parameters logit estimation
 drop if fishmode=="charter" | mode == 4
@@ -6870,8 +6256,7 @@ if _rc != 0 {
 }
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following not included in book
 * Lognormally distributed did not work
 * generate negp = -p
@@ -6881,8 +6266,7 @@ if _rc != 0 {
 * display "Coefficient of p mean and st.dev: " mean_p "  " sd_p
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following not included in book
 * Conditional logit using clogit as comparison
 clogit d p q dbeach dprivate dcharter ybeach yprivate ycharter, group(id)
@@ -6892,8 +6276,7 @@ clogit d p q dbeach dprivate dcharter ybeach yprivate ycharter, group(id)
 
 ### 15.9.1 Data summary
 
-```{python}
-%%stata
+```{stata}
 * Create multinomial ordered outcome variables takes values y = 1, 2, 3
 use musr/mus18data.dta, clear
 quietly keep if year==2
@@ -6908,8 +6291,7 @@ label values hlthstat hsvalue
 tabulate hlthstat
 ```
 
-```{python}
-%%stata
+```{stata}
 * Summarize dependent and explanatory variables
 summarize hlthstat age linc ndisease
 ```
@@ -6918,16 +6300,14 @@ summarize hlthstat age linc ndisease
 
 ### 15.9.3 Application of the ologit command
 
-```{python}
-%%stata
+```{stata}
 * Ordered logit estimates
 ologit hlthstat age linc ndisease, nolog
 ```
 
 ### 15.9.4 Predicted probabilities
 
-```{python}
-%%stata
+```{stata}
 * Calculate predicted probability that y=1, 2, or 3 for each person
 predict p1ologit p2ologit p3ologit, pr
 summarize hlthpf hlthg hlthe p1ologit p2ologit p3ologit, separator(0)
@@ -6935,8 +6315,7 @@ summarize hlthpf hlthg hlthe p1ologit p2ologit p3ologit, separator(0)
 
 ### 15.9.5 MEs
 
-```{python}
-%%stata
+```{stata}
 * Marginal effect at mean for 3rd outcome (health status excellent)
 margins, dydx(*) predict(outcome(3)) atmean noatlegend
 ```
@@ -6947,21 +6326,18 @@ margins, dydx(*) predict(outcome(3)) atmean noatlegend
 
 ### 15.10.1 Bivariate probit
 
-```{python}
-%%stata
+```{stata}
 * Two binary dependent variables: hlthe and dmdu
 tabulate hlthe dmdu
 correlate hlthe dmdu
 ```
 
-```{python}
-%%stata
+```{stata}
 * Bivariate probit estimates
 biprobit hlthe dmdu age linc ndisease, nolog
 ```
 
-```{python}
-%%stata
+```{stata}
 * Predicted probabilities
 predict biprob1, pmarg1
 predict biprob2, pmarg2
@@ -6972,8 +6348,7 @@ predict biprob00, p00
 summarize hlthe dmdu biprob1 biprob2 biprob11 biprob10 biprob01 biprob00
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following not included in book
 * Bivariate probit with different sets of regressors
 biprobit (hlthe = age linc) (dmdu = age linc ndisease), nolog
@@ -6981,15 +6356,13 @@ biprobit (hlthe = age linc) (dmdu = age linc ndisease), nolog
 
 ### 15.10.2 Nonlinear SUR
 
-```{python}
-%%stata
+```{stata}
 * Nonlinear seemingly unrelated regressions estimator
 nlsur (hlthe = normal({a1}*age+{a2}*linc+{a3}*ndisease+{a4})) ///
   (dmdu = normal({b1}*age+{b2}*linc+{b3}*ndisease+{b4})), vce(robust) nolog
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following not included in book
 * Separate probits
 probit hlthe age linc ndisease
@@ -7020,8 +6393,7 @@ probit dmdu age linc ndisease
 
 ### 16.3.1 Data summary
 
-```{python}
-%%stata
+```{stata}
 ********** DATA DESCRIPTION **********
 
 * Subset of data in P. Deb, M. Munkin and P.K. Trivedi (2006)
@@ -7046,29 +6418,25 @@ probit dmdu age linc ndisease
 *       blhisp   either black or hispanic
 ```
 
-```{python}
-%%stata
+```{stata}
 * Raw data summary
 use musr/mus16data.dta, clear
 summarize ambexp age female educ blhisp totchr ins 
 ```
 
-```{python}
-%%stata
+```{stata}
 * Detailed summary to show skewness and kurtosis
 summarize ambexp, detail
 ```
 
-```{python}
-%%stata
+```{stata}
 * Summary for positives only
 summarize ambexp if ambexp >0, detail
 ```
 
 ### 16.3.2 Tobit analysis
 
-```{python}
-%%stata
+```{stata}
 * Tobit analysis for ambexp using all expenditures
 global xlist age female educ blhisp totchr ins   //Define regressor list $xlist
 tobit ambexp $xlist, ll(0) 
@@ -7076,8 +6444,7 @@ tobit ambexp $xlist, ll(0)
 
 ### 16.3.3 Prediction after tobit
 
-```{python}
-%%stata
+```{stata}
 * Tobit prediction and summary
 predict yhatlin 
 summarize yhatlin
@@ -7087,8 +6454,7 @@ summarize yhatlin
 
 #### left-truncated, left-censored, and right-truncated examples
 
-```{python}
-%%stata
+```{stata}
 ** Tobit postestimation
 
 * (1) ME on censored expected value E(y|x,y>0)
@@ -7096,22 +6462,19 @@ quietly tobit ambexp age i.female educ i.blhisp totchr i.ins, ll(0)
 margins, dydx(*) predict(e(0,.)) atmean noatlegend
 ```
 
-```{python}
-%%stata
+```{stata}
 * (2) ME without censoring on E(y|x)
 margins, dydx(*) predict(ystar(0,.)) atmean noatlegend
 ```
 
-```{python}
-%%stata
+```{stata}
 * (3) ME when E(y|0<y<535)
 margins, dydx(*) predict(e(0,535)) atmean noatlegend
 ```
 
 #### Left-censored case computed directly
 
-```{python}
-%%stata
+```{stata}
 * Direct computation of marginal effects for E(y|x)
 predict xb1, xb // xb1 is estimate of x'b
 matrix btobit = e(b)
@@ -7124,8 +6487,7 @@ matrix deriv = PHI*bcoeff
 matrix list deriv 
 ```
 
-```{python}
-%%stata
+```{stata}
 * The following gives nicer looking results
 ereturn post deriv 
 ereturn display
@@ -7133,8 +6495,7 @@ ereturn display
 
 #### Marginal impact on probabilities
 
-```{python}
-%%stata
+```{stata}
 * Compute margins on Pr(5000<ambexp<10000)  
 quietly tobit ambexp age i.female educ i.blhisp totchr i.ins, ll(0) vce(robust)
 margins, dydx(*) predict(pr(5000,10000)) atmean noatlegend
@@ -7148,8 +6509,7 @@ margins, dydx(*) predict(pr(5000,10000)) atmean noatlegend
 
 ### 16.4.1 Data example
 
-```{python}
-%%stata
+```{stata}
 * ASIDE: IN BELOW ....
 * We observe  y = 0       if dy=0   and  y = y  if dy=1
 * Let gamma be the smallest of the positive y's
@@ -7165,8 +6525,7 @@ summarize lambexp, detail
 
 ### 16.4.2 Setting the censoring point for data in logs
 
-```{python}
-%%stata
+```{stata}
 * "Tricking" Stata to handle log transformation
 generate y = ambexp
 generate dy = ambexp > 0
@@ -7183,8 +6542,7 @@ label variable lny "lnambexp"
 label variable dy "dambexp"
 ```
 
-```{python}
-%%stata
+```{stata}
 // Not included in book  
 summarize y lny dy $xlist
 summarize y lny dy, detail
@@ -7192,22 +6550,19 @@ summarize y lny dy, detail
 
 ### 16.4.3 Results
 
-```{python}
-%%stata
+```{stata}
 * Now do tobit on lny and calculate threshold and lambda
 tobit lny $xlist, ll
 ```
 
-```{python}
-%%stata
+```{stata}
 * OLS, not tobit
 regress lny $xlist, noheader
 ```
 
 ### 16.4.4 Two-limit tobit
 
-```{python}
-%%stata
+```{stata}
 * Now do two-limit tobit 
 scalar upper = log(10000)
 display upper
@@ -7220,8 +6575,7 @@ tobit lny $xlist, ll ul(9.2103404)
 
 #### Generalized residuals and scores
 
-```{python}
-%%stata
+```{stata}
 * Mills' ratio
 quietly tobit lny $xlist, ll
 predict xb, xb                            // xb is estimate of x'b
@@ -7231,8 +6585,7 @@ generate threshold = (gamma-xb)/sigma     // gamma: lower censoring point
 generate lambda = normalden(threshold)/normal(threshold)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Generalized residuals
 * gres1 and gres2 should have mean zero by the first-order conditions
 * gres3 and gres4 have mean zero if model correctly specified
@@ -7244,8 +6597,7 @@ quietly replace gres1 = -lambda if dy == 0
 summarize gres1
 ```
 
-```{python}
-%%stata
+```{stata}
 * Second- to fourth-sample moments
 quietly generate double gres2 = uifdyeq1^2 - 1 
 quietly replace gres2 = -threshold*lambda if dy == 0
@@ -7257,8 +6609,7 @@ quietly replace gres4 = -(3*threshold + threshold^3)*lambda if dy == 0
 
 #### Test of normality
 
-```{python}
-%%stata
+```{stata}
 * Generate the scores to use in the LM test
 * These are actual scores up to a multiple constant over i
 * So get same LM test as would if added the multiple
@@ -7271,8 +6622,7 @@ foreach var in $xlist {
 global scores score* gres1 gres2
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following not included in book
 * The score wrt sigma can be shown to be gres2
 * So the scores are the score`var', gres1 (for the intercept) and gres2
@@ -7282,8 +6632,7 @@ global scores score* gres1 gres2
 summarize $scores gres3 gres4 threshold lambda
 ```
 
-```{python}
-%%stata
+```{stata}
 * Test of normality in tobit regression
 * NR^2 from the uncentered regression has chi-squared distribution
 generate one = 1
@@ -7293,8 +6642,7 @@ display "N R^2 = " e(N)*e(r2) " with p-value = " chi2tail(2,e(N)*e(r2))
 
 #### Test of homoskedasticity
 
-```{python}
-%%stata
+```{stata}
 * Test of homoskedasticity in tobit regression
 foreach var in $xlist {
    generate score2`var' = gres2*`var'
@@ -7305,8 +6653,7 @@ quietly regress one gres3 gres4 $scores2, noconstant
 display "N R^2 = " e(N)*e(r2) " with p-value = " chi2tail(2,e(N)*e(r2))
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following not included in book
 * tobcm command is deprecated - use margins to compute marginal effects after tobit
 * For our example lny is left-censored at 0- but 0 is a noncensored observation
@@ -7323,8 +6670,7 @@ margins, dydx(*) predict(ystar(0,.)) atmeans
 
 ### 16.5.2 Part 1 specification
 
-```{python}
-%%stata
+```{stata}
 * Part 1 of the two-part model
 probit dy $xlist, nolog
 scalar llprobit = e(ll)
@@ -7332,23 +6678,20 @@ scalar llprobit = e(ll)
 
 ### 16.5.3 Part 2 of the two-part model
 
-```{python}
-%%stata
+```{stata}
 * Part 2 of the two-part model
 regress lny $xlist if dy==1
 scalar lllognormal = e(ll)
 predict rlambexp, residuals
 ```
 
-```{python}
-%%stata
+```{stata}
 * Create two-part model log likelihood 
 scalar lltwopart = llprobit + lllognormal  //two-part model log likelihood
 display "lltwopart = " lltwopart
 ```
 
-```{python}
-%%stata
+```{stata}
 * hettest and sktest commands
 quietly regress lny $xlist if dy==1
 hettest
@@ -7363,30 +6706,26 @@ sktest rlambexp
 
 ### 16.6.3 Estimation without exclusion restrictions
 
-```{python}
-%%stata
+```{stata}
 * Heckman MLE without exclusion restrictions
 heckman lny $xlist, select(dy = $xlist) nolog
 ```
 
 ### 16.6.4 Two-step estimation
 
-```{python}
-%%stata
+```{stata}
 * Heckman 2-step without exclusion restrictions
 heckman lny $xlist, select(dy = $xlist) twostep
 ```
 
 ### 16.6.5 Estimation with exclusion restrictions
 
-```{python}
-%%stata
+```{stata}
 * Heckman MLE with exclusion restriction
 heckman lny $xlist, select(dy = $xlist income) nolog
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following not included in book
 * Heckman 2-step with exclusion restrictions
 heckman lny $xlist, select(dy = $xlist income) twostep
@@ -7396,8 +6735,7 @@ heckman lny $xlist, select(dy = $xlist income) twostep
 
 ### 16.7.1 Predictions from tobit
 
-```{python}
-%%stata
+```{stata}
 // The following yields results that differ from book - book is in error
 * Prediction from tobit on lny
 generate yhat = exp(xb+0.5*sigma^2)*(1-normal((gamma-xb-sigma^2)/sigma))
@@ -7408,8 +6746,7 @@ summarize y yhat ytrunchat if dy==1
 
 ### 16.7.2 Predictions from two-part model
 
-```{python}
-%%stata
+```{stata}
 * Two-part model predictions
 quietly probit dy $xlist
 predict dyhat, pr
@@ -7418,8 +6755,7 @@ predict xbpos, xb
 generate  yhatpos = exp(xbpos+0.5*e(rmse)^2)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Unconditional prediction from two-part model
 generate yhat2step = dyhat*yhatpos
 summarize yhat2step y
@@ -7428,8 +6764,7 @@ summarize yhatpos y if dy==1
 
 ### 16.7.3 Predictions from selection model
 
-```{python}
-%%stata
+```{stata}
 * Heckman model predictions
 quietly heckman lny $xlist, select(dy = $xlist) 
 predict probpos, psel 
@@ -7444,8 +6779,7 @@ summarize yhatheck y probpos dy
 summarize yhatposheck probpos dy y if dy==1
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following not included in book 
 * THE FOLLOWING SHOWS THAT THE POOR PREDICTIONS ARE DUE TO HIGH SIGMA
 * THE ABOVE MODEL HAD SIGMA = 2.78
@@ -7470,8 +6804,7 @@ summarize yhat* if dy==1
 
 ### 17.2.1 Generated Poisson data
 
-```{python}
-%%stata
+```{stata}
 * Poisson (mu=1) generated data
 quietly set obs 10000
 set seed 10101              // set the seed !
@@ -7480,16 +6813,14 @@ summarize xpois
 tabulate xpois
 ```
 
-```{python}
-%%stata
+```{stata}
 histogram xpois, discrete xtitle("Poisson")
 graph save musr/mus17xp, replace
 ```
 
 ### 17.2.2 Overdispersion and negative binomial data
 
-```{python}
-%%stata
+```{stata}
 * Negative binomial (mu=1 var=2) generated data
 set seed 10101                   // set the seed !
 generate xg = rgamma(1,1)
@@ -7498,8 +6829,7 @@ summarize xnegbin
 tabulate xnegbin
 ```
 
-```{python}
-%%stata
+```{stata}
 histogram xnegbin, discrete xtitle("Negative binomial")
 graph save musr/mus17negbin, replace
 ```
@@ -7512,8 +6842,7 @@ graph save musr/mus17negbin, replace
 
 ### 17.3.1 Data summary
 
-```{python}
-%%stata
+```{stata}
 drop _all 
 
 * Summary statistics for doctor visits data
@@ -7526,8 +6855,7 @@ global xlist private medicaid age age2 educyr actlim totchr
 summarize docvis $xlist
 ```
 
-```{python}
-%%stata
+```{stata}
 * Tabulate docvis after recoding values > 10 to ranges 11-40 or 41-143
 generate dvrange = docvis
 recode dvrange (11/40 = 40) (41/143 = 143)
@@ -7538,14 +6866,12 @@ tabulate dvrange
 
 #### Poisson model results
 
-```{python}
-%%stata
+```{stata}
 * Poisson with default ML standard errors
 poisson docvis $xlist, nolog
 ```
 
-```{python}
-%%stata
+```{stata}
 * Squared correlation between y and yhat
 drop yphat
 predict yphat, n
@@ -7555,16 +6881,14 @@ display "Squared correlation between y and yhat = " r(rho)^2
 
 #### Robust estimate of VCE for Poisson MLE
 
-```{python}
-%%stata
+```{stata}
 * Poisson with robust standard errors
 poisson docvis $xlist, vce(robust) nolog  // Poisson robust SEs
 ```
 
 #### Test of overdispersion
 
-```{python}
-%%stata
+```{stata}
 * Overdispersion test against V(y|x) = E(y|x) + a*{E(y|x)^2}
 quietly poisson docvis $xlist, vce(robust)
 predict muhat, n
@@ -7574,15 +6898,13 @@ regress ystar muhat, noconstant noheader
 
 #### Coefficient interpretation and marginal effects
 
-```{python}
-%%stata
+```{stata}
 * Average marginal effect for Poisson
 quietly poisson docvis i.private i.medicaid age age2 educyr i.actlim totchr, vce(robust)
 margins, dydx(*)
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following not included in book
 * Poisson as glm
 glm docvis $xlist, family(poisson) link(log) robust  // glm
@@ -7592,14 +6914,12 @@ glm docvis $xlist, family(poisson) link(log) robust  // glm
 
 #### NB2 model results
 
-```{python}
-%%stata
+```{stata}
 * Standard negative binomial (NB2) with default SEs
 nbreg docvis $xlist, nolog
 ```
 
-```{python}
-%%stata
+```{stata}
 * Squared correlation between y and yhat
 predict ynbhat, n
 quietly correlate docvis ynbhat
@@ -7610,8 +6930,7 @@ display "Squared correlation between y and yhat = " r(rho)^2
 
 #### The countfit command
 
-```{python}
-%%stata
+```{stata}
 * Poisson: Sample vs avg predicted probabilities of y = 0, 1, ..., 5 
 * countfit is deprecated - use manual calculation of predicted probabilities
 quietly poisson docvis $xlist
@@ -7627,8 +6946,7 @@ forvalues i = 0/5 {
 drop phat prob*
 ```
 
-```{python}
-%%stata
+```{stata}
 * NB2: Sample vs average predicted probabilities of y = 0, 1, ..., 5 
 * countfit is deprecated - use manual calculation for negative binomial
 quietly nbreg docvis $xlist
@@ -7647,8 +6965,7 @@ drop phat prob*
 
 #### The prvalue command
 
-```{python}
-%%stata
+```{stata}
 * NB2: Predicted NB2 probabilities at x = x* of y = 0, 1, ..., 5 
 * prvalue is deprecated - manually calculate predicted probabilities
 quietly nbreg docvis $xlist
@@ -7668,8 +6985,7 @@ drop xb
 
 #### Generalized NB model
 
-```{python}
-%%stata
+```{stata}
 * Generalized negative binomial with alpha parameterized
 capture noisily gnbreg docvis $xlist, lnalpha(female bh) nolog
 if _rc != 0 {
@@ -7679,8 +6995,7 @@ if _rc != 0 {
 
 ### 17.3.4 Nonlinear least-squares estimation
 
-```{python}
-%%stata
+```{stata}
 * Nonlinear least squares
 capture noisily nl (docvis = exp({xb: $xlist one})), vce(robust) nolog
 if _rc != 0 {
@@ -7690,8 +7005,7 @@ if _rc != 0 {
 
 ### 17.3.5 Hurdle model
 
-```{python}
-%%stata
+```{stata}
 * Hurdle: Pr(y=0)=pi and Pr(y=k)=(1-pi) x Poisson(2) truncated at 0
 quietly set obs 10000
 set seed 10101             // set the seed !
@@ -7709,8 +7023,7 @@ replace xhurdle = 0 if runiform() < pi
 summarize xhurdle
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following not included in book
 histogram xhurdle, discrete xtitle("Hurdle Poisson")
 graph save musr/mus17hurdle, replace 
@@ -7720,48 +7033,41 @@ graph save musr/mus17hurdle, replace
 
 #### Application of the hurdle model
 
-```{python}
-%%stata
+```{stata}
 * Hurdle logit-nb model manually
 logit docvis $xlist, nolog
 ```
 
-```{python}
-%%stata
+```{stata}
 * Second step uses positives only
 summarize docvis if docvis > 0
 ```
 
-```{python}
-%%stata
+```{stata}
 * Zero-truncated negative binomial 
 ztnb docvis $xlist if docvis>0, nolog 
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following not included in book
 * hnblogit command is not available - hurdle model already estimated above manually
 * Using logit for hurdle and nbreg for positive counts
 display "Note: hnblogit command not available, use manual hurdle estimation shown above"
 ```
 
-```{python}
-%%stata
+```{stata}
 * margins for marginal effects of first part
 quietly logit docvis i.private i.medicaid age age2 educyr i.actlim totchr, vce(robust)
 margins, dydx(*) atmean noatlegend
 ```
 
-```{python}
-%%stata
+```{stata}
 * margins for marginal effects of second part
 quietly ztnb docvis i.private i.medicaid age age2 educyr i.actlim totchr if docvis>0, vce(robust)
 margins, dydx(*) atmean noatlegend
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following repeats earlier code as xpois and xnegbin have since been dropped
 * Poisson (mu=1) and NB(1,1) generated data
 quietly set obs 10000
@@ -7773,8 +7079,7 @@ generate xnegbin = rpoisson(xg) // NB draws
 
 #### Simulated FMM sample with comparisons
 
-```{python}
-%%stata
+```{stata}
 * Mixture: Poisson(.5) with prob .9 and Poisson(5.5) with prob .1
 set seed 10101        // set the seed !
 generate xp1= rpoisson(.5)
@@ -7785,29 +7090,25 @@ quietly replace xpmix = xp2 if runiform() > 0.9
 summarize xpmix
 ```
 
-```{python}
-%%stata
+```{stata}
 * Tabulate the mixture data
 tabulate xpmix
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following not included in book
 histogram xpmix, discrete xtitle("Finite mixture Poisson")
 graph save musr/mus17pmix, replace
 ```
 
-```{python}
-%%stata
+```{stata}
 * Compare the four distributions, all with mean 1
 graph combine musr/mus17xp.gph musr/mus17negbin.gph musr/mus17pmix.gph ///
 musr/mus17hurdle.gph, title("Four different distributions with mean = 1") ///
 ycommon xcommon
 ```
 
-```{python}
-%%stata
+```{stata}
 graph export musr/mus17countdist.eps, replace
 ```
 
@@ -7817,23 +7118,20 @@ graph export musr/mus17countdist.eps, replace
 
 #### Application: Poisson finite-mixture model
 
-```{python}
-%%stata
+```{stata}
 * Compare the four distributions, all with mean 1
 summarize xpois xnegbin xpmix xhurdle
 ```
 
 #### Interpretation
 
-```{python}
-%%stata
+```{stata}
 * Finite-mixture model using fmm command with constant probabilities
 use musr/mus17data.dta, clear
 fmm 2, vce(robust): poisson docvis $xlist
 ```
 
-```{python}
-%%stata
+```{stata}
 * Predict y for two components
 quietly fmm 2, vce(robust): poisson docvis $xlist
 estat lcmean
@@ -7843,16 +7141,14 @@ summarize yfit*
 
 #### Comparing marginal effects
 
-```{python}
-%%stata
+```{stata}
 * Marginal effects for component 1
 margins, dydx(*) predict(mu class(1)) atmean noatlegend
 * Marginal effects for component 2 
 margins, dydx(*) predict(mu class(2)) atmean noatlegend
 ```
 
-```{python}
-%%stata
+```{stata}
 set scheme s1mono  /* Graphics scheme */
 * Create histograms of fitted values  
 quietly histogram yfit1, name(_comp_1, replace)
@@ -7860,21 +7156,18 @@ quietly histogram yfit2, name(_comp_2, replace)
 quietly graph combine _comp_1 _comp_2
 ```
 
-```{python}
-%%stata
+```{stata}
 quietly graph export musr/fitted_comp.eps, replace
 ```
 
 #### Application: NB finite-mixture model
 
-```{python}
-%%stata
+```{stata}
 * 2-component mixture of NB1 
 fmm 2, vce(robust): nbreg docvis $xlist, dispersion(mean)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Fitted values for 2-component NB1 mixture
 capture drop yfit1 yfit2 
 predict yfit*, mu
@@ -7889,8 +7182,7 @@ summarize yfit*
 
 ### 17.4.1 Zero-inflated data
 
-```{python}
-%%stata
+```{stata}
 drop _all
 
 *set more off
@@ -7906,16 +7198,14 @@ tabulate er
 
 ### 17.4.3 Results for the N B2 model
 
-```{python}
-%%stata
+```{stata}
 * NB2 for er
 nbreg er $xlist1, nolog
 ```
 
 #### The prcounts command
 
-```{python}
-%%stata
+```{stata}
 * Sample average fitted probabilities of y = 0 to max() 
 * prcounts is deprecated - calculate manually using predict
 predict xb, xb
@@ -7929,8 +7219,7 @@ summarize erpr*
 
 ### 17.4.4 Results for ZINB
 
-```{python}
-%%stata
+```{stata}
 * Zero-inflated negative binomial for er
 zinb er $xlist1, inflate($xlist1) forcevuong nolog
 ```
@@ -7941,8 +7230,7 @@ zinb er $xlist1, inflate($xlist1) forcevuong nolog
 
 #### Model comparison using countfit
 
-```{python}
-%%stata
+```{stata}
 * Comparison of NB and ZINB using manual probability calculations
 * countfit is deprecated - estimate both models and compare fit manually
 quietly nbreg er $xlist1
@@ -7963,8 +7251,7 @@ estimates stats NB ZINB
 
 #### Application
 
-```{python}
-%%stata
+```{stata}
 clear all
 * First-stage linear regression
 use musr/mus17data.dta
@@ -7973,14 +7260,12 @@ regress private $xlist2 income ssiratio, vce(robust)
 predict lpuhat, residual
 ```
 
-```{python}
-%%stata
+```{stata}
 * Second-stage Poisson with robust SEs
 poisson docvis private $xlist2 lpuhat, vce(robust) nolog
 ```
 
-```{python}
-%%stata
+```{stata}
 * Program and bootstrap for Poisson two-step estimator
 program endogtwostep, eclass
   version 11
@@ -7997,8 +7282,7 @@ bootstrap _b, reps(400) seed(10101) nodots nowarn: endogtwostep
 
 ### 17.5.2 Nonlinear IV method
 
-```{python}
-%%stata
+```{stata}
 * Nonlinear IV estimator for Poisson: computation using optimize
 generate cons = 1
 local y docvis
@@ -8048,8 +7332,7 @@ mata
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 * Nonlinear IV estimator for Poisson: formatted results
 matrix colnames b = `xlist'
 matrix colnames Vb = `xlist'
@@ -8062,22 +7345,19 @@ ereturn display
 
 ## 17.7 Exercises
 
-```{python}
-%%stata
+```{stata}
 * Command gmm for one-step GMM (nonlinear IV) of overidentified Poisson model
 gmm (docvis - exp({xb:private medicaid age age2 educyr actlim totchr}+{b0})), ///
  instruments(income ssiratio medicaid age age2 educyr actlim totchr) onestep nolog
 ```
 
-```{python}
-%%stata
+```{stata}
 * Command gmm for two-step GMM (nonlinear IV) of overidentified Poisson model
 gmm (docvis - exp({xb:private medicaid age age2 educyr actlim totchr}+{b0})), ///
  instruments(income ssiratio medicaid age age2 educyr actlim totchr) twostep nolog
 ```
 
-```{python}
-%%stata
+```{stata}
 * Test of overidentifying restriction following two-step GMM
 estat overid
 ```
@@ -8106,8 +7386,7 @@ estat overid
 
 ### 18.3.1 Data description and summary statistics
 
-```{python}
-%%stata
+```{stata}
 ********** DATA DESCRIPTION **********
 
 * mus18data.dta    
@@ -8122,23 +7401,20 @@ estat overid
 * If panel data used then clustering is on id (person id)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Describe dependent variables and regressors
 use musr/mus18data.dta, clear
 describe dmdu med mdu lcoins ndisease female age lfam child id year
 ```
 
-```{python}
-%%stata
+```{stata}
 * Summarize dependent variables and regressors
 summarize dmdu med mdu lcoins ndisease female age lfam child id year
 ```
 
 ### 18.3.2 Panel-data organization
 
-```{python}
-%%stata
+```{stata}
 * Panel description of dataset 
 xtset id year
 xtdescribe
@@ -8146,8 +7422,7 @@ xtdescribe
 
 ### 18.3.3 Within and between variation
 
-```{python}
-%%stata
+```{stata}
 * Panel summary of time-varying regressors
 xtsum age lfam child
 ```
@@ -8158,28 +7433,24 @@ xtsum age lfam child
 
 ### 18.4.1 Panel summary of the dependent variable
 
-```{python}
-%%stata
+```{stata}
 * Panel summary of dependent variable
 xtsum dmdu
 ```
 
-```{python}
-%%stata
+```{stata}
 * Year-to-year transitions in whether visit doctor
 xttrans dmdu
 ```
 
-```{python}
-%%stata
+```{stata}
 * Correlations in the dependent variable
 corr dmdu l.dmdu l2.dmdu
 ```
 
 ### 18.4.2 Pooled logit estimator
 
-```{python}
-%%stata
+```{stata}
 * Logit cross-section with panel-robust standard errors
 logit dmdu lcoins ndisease female age lfam child, vce(cluster id) nolog
 ```
@@ -8190,38 +7461,33 @@ logit dmdu lcoins ndisease female age lfam child, vce(cluster id) nolog
 
 ### 18.4.5 PA logit estimator
 
-```{python}
-%%stata
+```{stata}
 * Pooled logit cross-section with exchangeable errors and panel-robust VCE
 xtlogit dmdu lcoins ndisease female age lfam child, pa corr(exch) vce(robust) nolog
 ```
 
 ### 18.4.6 RE logit estimator
 
-```{python}
-%%stata
+```{stata}
 * Logit random-effects estimator
 xtlogit dmdu lcoins ndisease female age lfam child, re nolog
 ```
 
 ### 18.4.7 FE logit estimator
 
-```{python}
-%%stata
+```{stata}
 * Logit fixed-effects estimator
 xtlogit dmdu lcoins ndisease female age lfam child, fe nolog 
 ```
 
 ### 18.4.8 Panel logit estimator comparison
 
-```{python}
-%%stata
+```{stata}
 * Logit mixed-effects estimator (same as xtlogit, re)
 *xtmelogit dmdu lcoins ndisease female age lfam child || id:
 ```
 
-```{python}
-%%stata
+```{stata}
 * Panel logit estimator comparison
 global xlist lcoins ndisease female age lfam child
 quietly logit dmdu $xlist, vce(cluster id)
@@ -8239,8 +7505,7 @@ estimates table POOLED PA RE FE, equations(1) se b(%8.4f) stats(N ll) stfmt(%8.0
 
 ### 18.4.10 Mixed-effects logit estimator
 
-```{python}
-%%stata
+```{stata}
 *xtmelogit dmdu lcoins ndisease female age lfam child || id:
 ```
 
@@ -8248,16 +7513,14 @@ estimates table POOLED PA RE FE, equations(1) se b(%8.4f) stats(N ll) stfmt(%8.0
 
 ### 18.5.1 Panel summary of the dependent variable
 
-```{python}
-%%stata
+```{stata}
 * Panel summary of dependent variable
 xtsum med
 ```
 
 ### 18.5.2 RE tobit model
 
-```{python}
-%%stata
+```{stata}
 * Tobit random-effects estimator
 xttobit med lcoins ndisease female age lfam child, ll(0) nolog
 ```
@@ -8272,44 +7535,38 @@ xttobit med lcoins ndisease female age lfam child, ll(0) nolog
 
 ### 18.6.2 Panel summary of the dependent variable
 
-```{python}
-%%stata
+```{stata}
 * Panel summary of dependent variable
 xtsum mdu
 ```
 
-```{python}
-%%stata
+```{stata}
 * Year-to-year transitions in doctor visits
 generate mdushort = mdu
 replace mdushort = 4 if mdu >= 4
 xttrans mdushort
 ```
 
-```{python}
-%%stata
+```{stata}
 // Not included in book
 corr mdu L.mdu
 ```
 
 ### 18.6.3 Pooled Poisson estimator
 
-```{python}
-%%stata
+```{stata}
 * Pooled Poisson estimator with cluster-robust standard errors
 poisson mdu lcoins ndisease female age lfam child, vce(cluster id)
 ```
 
 ### 18.6.4 PA Poisson esimimator
 
-```{python}
-%%stata
+```{stata}
 * Poisson PA estimator with unstructured error correlation and robust VCE
 xtpoisson mdu lcoins ndisease female age lfam child, pa corr(unstr) vce(robust)
 ```
 
-```{python}
-%%stata
+```{stata}
 // Not included in book
 * Poisson random-effects estimator with default standard errors
 xtpoisson mdu lcoins ndisease female age lfam child, re
@@ -8317,22 +7574,19 @@ xtpoisson mdu lcoins ndisease female age lfam child, re
 
 ### 18.6.5 RE Poisson estimators
 
-```{python}
-%%stata
+```{stata}
 * Poisson random-effects estimator with cluster-robust standard errors
 *xtpoisson mdu lcoins ndisease female age lfam child, re vce(boot, reps(400) seed(10101) nodots)
 ```
 
-```{python}
-%%stata
+```{stata}
 // Not included in book
 * Poisson random-effects estimator with normal intercept and default standard errors
 xtpoisson mdu lcoins ndisease female age lfam child, re normal
 *estimates store poisrenormal
 ```
 
-```{python}
-%%stata
+```{stata}
 // Not included in book
 * Poisson random-effects estimator with normal intercept and normal slope for one parameter
 *mepoisson mdu lcoins ndisease female age lfam child || id: ndisease
@@ -8341,23 +7595,20 @@ xtpoisson mdu lcoins ndisease female age lfam child, re normal
 
 ### 18.6.6 FE Poisson estimator
 
-```{python}
-%%stata
+```{stata}
 * Poisson fixed-effects estimator with default standard errors
 *xtpoisson mdu lcoins ndisease female age lfam child, fe i(id)
 *mepoisson mdu lcoins ndisease female age lfam child, fe i(id) 
 ```
 
-```{python}
-%%stata
+```{stata}
 * Poisson fixed-effects estimator with cluster-robust standard errors
 *xtpoisson mdu lcoins ndisease female age lfam child, fe vce(boot, reps(400) seed(10101) nodots)
 ```
 
 ### 18.6.7 Panel Poisson estimators comparison
 
-```{python}
-%%stata
+```{stata}
 /*
 * Comparison of Poisson panel estimators
 quietly xtpoisson mdu lcoins ndisease female age lfam child, pa corr(unstr) vce(robust)
@@ -8372,47 +7623,40 @@ estimates table PPA_ROB PRE PRE_NORM PFE, equations(1) b(%8.4f) se stats(N ll) s
 */
 ```
 
-```{python}
-%%stata
+```{stata}
 // Not included in book
 * Negative binomial pooled estimator with default standard errors
 nbreg mdu lcoins ndisease female age lfam child
 ```
 
-```{python}
-%%stata
+```{stata}
 * Negative binomial pooled estimator with het robust standard errors
 nbreg mdu lcoins ndisease female age lfam child, vce(robust)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Negative binomial pooled estimator with cluster-robust standard errors
 nbreg mdu lcoins ndisease female age lfam child, cluster(id)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Negative binomial population-averaged estimator with equicorrelated errors
 xtnbreg lcoins ndisease female age lfam child, pa corr(exch) vce(robust)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Negative binomial random-effects estimator with default standard errors
 xtnbreg mdu ndisease female age lfam child, re i(id) 
 ```
 
-```{python}
-%%stata
+```{stata}
 * Negative binomial fixed-effects estimator with default standard errors
 xtnbreg mdu ndisease female age lfam child, fe i(id) 
 ```
 
 ### 18.6.8 Negative binomial estimators
 
-```{python}
-%%stata
+```{stata}
 * Comparison of negative binomial panel estimators
 quietly xtpoisson mdu lcoins ndisease female age lfam child, pa corr(exch) vce(robust)
 estimates store PPA_ROB
@@ -8439,15 +7683,13 @@ estimates table PPA_ROB NBPA_ROB NBRE NBFE, equations(1) b(%8.4f) se stats(N ll)
 
 #### Matrix input by hand
 
-```{python}
-%%stata
+```{stata}
 * Define a matrix explicitly and list the matrix
 matrix define A = (1,2,3 \ 4,5,6)
 matrix list A
 ```
 
-```{python}
-%%stata
+```{stata}
 * Matrix row and column names
 matrix rownames A = one two
 matrix list A
@@ -8455,8 +7697,7 @@ matrix list A
 
 #### Matrix input from Stata estimation results
 
-```{python}
-%%stata
+```{stata}
 clear all
 * Read in data, summarize and run regression
 use musr/mus03data.dta
@@ -8466,8 +7707,7 @@ summarize ltotexp totchr
 regress ltotexp totchr, noheader 
 ```
 
-```{python}
-%%stata
+```{stata}
 * Create a matrix from estimation results
 matrix vbols = e(V)
 matrix list vbols
@@ -8475,8 +7715,7 @@ matrix list vbols
 
 ### A.1.3 Stata matrix subscripts and combining matrices
 
-```{python}
-%%stata
+```{stata}
 // Following not in book
 * Create a matrix from variables
 mkmat ltotexp, matrix(y)
@@ -8484,30 +7723,26 @@ generate intercept = 1
 mkmat totchr intercept, matrix(X)
 ```
 
-```{python}
-%%stata
+```{stata}
 // Following not in book
 * Convert a matrix into variables
 svmat X
 summarize X*
 ```
 
-```{python}
-%%stata
+```{stata}
 * Change value of an entry in matrix
 matrix X[1,1] = X[1,2]
 matrix list X
 ```
 
-```{python}
-%%stata
+```{stata}
 * Select part of matrix (all rows, column 2)
 matrix B = X[1...,2]
 matrix list B
 ```
 
-```{python}
-%%stata
+```{stata}
 * Add columns to an existing matrix
 matrix C = B, B
 matrix list C
@@ -8515,8 +7750,7 @@ matrix list C
 
 ### A.1.4 Matrix operators
 
-```{python}
-%%stata
+```{stata}
 * Matrix operators
 matrix D = C + 3*C
 matrix list D
@@ -8524,22 +7758,19 @@ matrix list D
 
 ### A.1.5 Matrix functions
 
-```{python}
-%%stata
+```{stata}
 * Matrix functions
 matrix r = rowsof(D)
 matrix list r
 ```
 
-```{python}
-%%stata
+```{stata}
 * Can use scalar if 1x1 matrix
 scalar ralt = rowsof(D)
 display ralt
 ```
 
-```{python}
-%%stata
+```{stata}
 * Inverse of nonsymmetric square matrix
 * Create a square matrix from X'X
 matrix XtX = X'*X
@@ -8549,8 +7780,7 @@ matrix list XtXinv
 
 ### A.1.6 Matrix accumulation commands
 
-```{python}
-%%stata
+```{stata}
 * OLS estimator using X and y and matrix operators
 matrix bols = (invsym(X'*X))*(X'*y)
 matrix list bols
@@ -8558,8 +7788,7 @@ matrix list bols
 
 ### A.1.7 OLS using Stata matrix commands
 
-```{python}
-%%stata
+```{stata}
 * OLS estimator using matrix accumulation operators
 matrix accum XTX = totchr              // Form X'X including constant
 matrix vecaccum yTX = ltotexp totchr   // Form y'X including constant
@@ -8567,8 +7796,7 @@ matrix cols = invsym(XTX)*(yTX)'
 matrix list cols
 ```
 
-```{python}
-%%stata
+```{stata}
 * Illustrate Stata matrix commands: OLS with output
 matrix accum XTX = totchr            // Form X'X including constant
 matrix vecaccum yTX = ltotexp totchr // Form y'X including constant
@@ -8582,8 +7810,7 @@ matrix list b
 matrix list V
 ```
 
-```{python}
-%%stata
+```{stata}
 * Stata matrix commands to compute SEs and t statistics given b and V
 matrix se = (vecdiag(cholesky(diag(vecdiag(V)))))'
 matrix seinv = (vecdiag(cholesky(invsym(diag(vecdiag(V))))))'
@@ -8593,8 +7820,7 @@ matrix colnames results = coeff sterror tratio
 matrix list results, format(%7.0g)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Easier is to use ereturn post and display given b and V
 matrix brow = b'
 ereturn post brow V
@@ -8605,24 +7831,21 @@ ereturn display
 
 ### A.2.1 Simple programs (no arguments or access to results)
 
-```{python}
-%%stata
+```{stata}
 * Program with no arguments
 program time
   display c(current_time) c(current_date)
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 * Run the program
 time
 ```
 
 ### A.2.2 Modifying a program
 
-```{python}
-%%stata
+```{stata}
 * Drop program if it already exists, write program and run
 capture program drop time
 program time
@@ -8633,8 +7856,7 @@ time
 
 ### A.2.3 Programs with positional arguments
 
-```{python}
-%%stata
+```{stata}
 * Program with two positional arguments
 program meddiff
   tempvar diff
@@ -8644,8 +7866,7 @@ program meddiff
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 * Run the program with two arguments
 meddiff ltotexp totchr
 ```
@@ -8654,8 +7875,7 @@ meddiff ltotexp totchr
 
 ### A.2.5 Programs with named positional a􀂗guments
 
-```{python}
-%%stata
+```{stata}
 * Program with two named positional arguments
 capture program drop meddiff
 program meddiff
@@ -8670,8 +7890,7 @@ meddiff ltotexp totchr
 
 ### A.2.6 Storing and retrieving program results
 
-```{python}
-%%stata
+```{stata}
 * Program with results stored in r()
 capture program drop meddiff
 program meddiff, rclass
@@ -8683,8 +7902,7 @@ program meddiff, rclass
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 * Running the program does not immediately display the result
 meddiff ltotexp totchr
 return list
@@ -8693,18 +7911,15 @@ display r(medylx)
 
 ### A.2.7 Programs with arguments using standard Stata syntax
 
-```{python}
-%%stata
+```{stata}
 regress ltotexp totchr if ltotexp < . in 1/100, vce (robust)
 ```
 
-```{python}
-%%stata
+```{stata}
 *myols ltotexp totchr if ltotexp < . in 1/100, vce (robust)
 ```
 
-```{python}
-%%stata
+```{stata}
 * Program that uses Stata commands syntax and gettoken to parse arguments
 program myols
   syntax varlist [if] [in] [,vce(string)]
@@ -8719,16 +7934,14 @@ program myols
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 * Execute program myols for an example 
 myols ltotexp totchr if ltotexp < . in 1/100, vce(robust)
 ```
 
 ### A.2.8 Ado-files
 
-```{python}
-%%stata
+```{stata}
 * Example of an ado-file
 capture program drop meddiff
 *! version 1.1.0  05oct2009
@@ -8745,8 +7958,7 @@ program meddiff, rclass
 end
 ```
 
-```{python}
-%%stata
+```{stata}
 * Execute program meddiff for an example  
 meddiff ltotexp totchr
 ```
@@ -8755,8 +7967,7 @@ meddiff ltotexp totchr
 
 ### A.3.1 Some simple tips
 
-```{python}
-%%stata
+```{stata}
 * Display intermediate output to aid debugging
 matrix accum XTX = totchr            // Recall constant is added
 matrix list XTX                      // Should be 2 x 2 
@@ -8768,8 +7979,7 @@ matrix list bOLS                     // Should be 2 x 1
 
 ### A.3.2 Error messages and return code
 
-```{python}
-%%stata
+```{stata}
 * Debug an initial nonprogram version of a program
 tempvar y x diff 
 generate `y' = ltotexp
@@ -8782,8 +7992,7 @@ display "Median of first variable - second variable = " medylx
 
 ### A.3.3 Trace
 
-```{python}
-%%stata
+```{stata}
 set trace on
 set trace off
 ```
@@ -8794,8 +8003,7 @@ set trace off
 
 ### B.1.1 Mata commands in Mata
 
-```{python}
-%%stata
+```{stata}
 * Read in data
 clear all
 use musr/mus03data.dta
@@ -8803,8 +8011,7 @@ keep if _n <= 100
 generate cons = 1
 ```
 
-```{python}
-%%stata
+```{stata}
 * Sample Mata session
 mata
 I = I(2)  
@@ -8814,8 +8021,7 @@ end
 
 ### B.1.2 Mata commands in Stata
 
-```{python}
-%%stata
+```{stata}
 * Mata commands issued from Stata
 mata: I = I(2)
 mata: I
@@ -8823,8 +8029,7 @@ mata: I
 
 ### B.1.3 Stata commands in Mata
 
-```{python}
-%%stata
+```{stata}
 * Stata commands issued from Mata
 mata
 stata("summarize ltotexp")
@@ -8835,8 +8040,7 @@ end
 
 ### B.1.5 Mata help
 
-```{python}
-%%stata
+```{stata}
 * Mata help with output not included in book
 mata
 help mata det
@@ -8851,8 +8055,7 @@ end
 
 #### Matrix input by hand
 
-```{python}
-%%stata
+```{stata}
 mata  
 // Create a matrix
 A = (1,2,3 \ 4,5,6)
@@ -8863,8 +8066,7 @@ end
 
 #### Identity matrices, unit vectors, and matrices of constants
 
-```{python}
-%%stata
+```{stata}
 mata
 // Create a 2x2 identity matrix
 I = I(2)
@@ -8885,8 +8087,7 @@ end
 
 #### Matrix input from Stata data
 
-```{python}
-%%stata
+```{stata}
 mata
 // Associate a Mata matrix with variables stored in Stata
 st_view(y=., ., "ltotexp")
@@ -8900,8 +8101,7 @@ end
 
 #### Matrix input from Stata matrix
 
-```{python}
-%%stata
+```{stata}
 mata
 // Read Stata matrix (created in first line below) into Mata
 stata("matrix define B = I(2)")
@@ -8920,8 +8120,7 @@ end
 
 #### Element-by-element operators
 
-```{python}
-%%stata
+```{stata}
 mata
 // Element by element multiplication of matrix by column vector
 b = 2::3
@@ -8934,8 +8133,7 @@ end
 
 #### Scalar and matrix functions
 
-```{python}
-%%stata
+```{stata}
 mata
 // Matrix function that returns scalar
 r = rows(A)
@@ -8957,8 +8155,7 @@ end
 
 #### Matrix inversion
 
-```{python}
-%%stata
+```{stata}
 mata
 // Matrix inversion: Use of makesymmetric() before cholinv()
 F = 0.5*I(2)
@@ -8969,8 +8166,7 @@ end
 
 ### B.2.4 Mata cross products
 
-```{python}
-%%stata
+```{stata}
 mata
 // Matrix cross product
 beta = (cholinv(cross(X,X)))*(cross(X,y))
@@ -8980,8 +8176,7 @@ end
 
 ### B.2.5 Mata matrix subscripts and combining matrices
 
-```{python}
-%%stata
+```{stata}
 mata
 // Matrix subscripts
 A[1,2] = A[1,1]
@@ -9007,8 +8202,7 @@ end
 
 ### B.2.6 Transferring Mata data and matrices to Stata
 
-```{python}
-%%stata
+```{stata}
 mata
 // Output mata matrix to Stata
 st_matrix("Q", P)
@@ -9018,8 +8212,7 @@ end
 
 #### Creating Stata data from a Mata vector
 
-```{python}
-%%stata
+```{stata}
 mata
 // Output mata matrix to Stata
 yhat = X*beta
@@ -9034,8 +8227,7 @@ end
 
 ### B.3.1 Declarations
 
-```{python}
-%%stata
+```{stata}
 mata
   void poissonmle(real scalar todo, 
     real rowvector b,
@@ -9060,8 +8252,7 @@ end
 
 ### B.3.2 Mata program
 
-```{python}
-%%stata
+```{stata}
 mata:
   void calcsum(varname, resultissum)  
   {
@@ -9076,8 +8267,7 @@ end
 
 ### B.3.3 Mata program with results output to Stata
 
-```{python}
-%%stata
+```{stata}
 mata:
   void function calcsum2(varname)  
   {
@@ -9091,8 +8281,7 @@ end
 
 ### B.3.4 Stata program that calls a Mata program
 
-```{python}
-%%stata
+```{stata}
 program varsum
   version 11
   syntax varname
