@@ -6610,12 +6610,16 @@ quietly replace gres4 = -(3*threshold + threshold^3)*lambda if dy == 0
 #### Test of normality
 
 ```{stata}
+* Re-declare $xlist in case it was cleared between chunk runs.
+global xlist age female educ blhisp totchr ins
+
 * Generate the scores to use in the LM test
 * These are actual scores up to a multiple constant over i
 * So get same LM test as would if added the multiple
 * The scores wrt b are gres1 times the relevant component of x
 
 * Generate the scores to use in the LM test
+capture drop score*
 foreach var in $xlist {
    generate score`var' = gres1*`var'
 }
@@ -6635,6 +6639,7 @@ summarize $scores gres3 gres4 threshold lambda
 ```{stata}
 * Test of normality in tobit regression
 * NR^2 from the uncentered regression has chi-squared distribution
+capture drop one
 generate one = 1
 quietly regress one gres3 gres4 $scores, noconstant
 display "N R^2 = " e(N)*e(r2) " with p-value = " chi2tail(2,e(N)*e(r2))
@@ -6644,6 +6649,10 @@ display "N R^2 = " e(N)*e(r2) " with p-value = " chi2tail(2,e(N)*e(r2))
 
 ```{stata}
 * Test of homoskedasticity in tobit regression
+* Re-declare $xlist in case it was cleared between chunk runs.
+global xlist age female educ blhisp totchr ins
+
+capture drop score2*
 foreach var in $xlist {
    generate score2`var' = gres2*`var'
 }
