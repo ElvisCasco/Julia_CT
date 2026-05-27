@@ -1,1 +1,745 @@
-[Source](https://github.com/FriedmanJP/MacroEconometricModels.jl)
+---
+title: "MacroEconometricModels.jl: VAR and SVAR Models in Julia"
+Authors:
+- GitHub
+format:
+  html:
+    toc: true
+    toc-depth: 5
+    toc-expand: true
+    toc-title: Contents
+    toc-location: left
+execute:
+  enabled: true
+jupyter: julia-1.12
+---
+
+[Macroeconometrics with Julia](https://github.com/FriedmanJP/MacroEconometricModels.jl)
+
+[Stata Panel Data Models](https://paneldatastata-github-io.vercel.app/#stage1)
+
+# VAR and SVAR Models in Julia
+
+```{julia}
+using Pkg
+Pkg.activate(@__DIR__)
+Pkg.instantiate()
+using MacroEconometricModels
+
+# PlotOutput is a wrapped HTML/D3 string — VS Code's Julia plot pane can't
+# render it. show_plot dumps it to a temp .html and opens the browser, so
+# you see the plot while iterating. Quarto render still works because
+# PlotOutput's text/html show method handles the inline embedding itself.
+function show_plot(p)
+    path = tempname() * ".html"
+    write(path, p.html)
+    Sys.iswindows() ? run(`cmd /c start "" "$path"`) :
+    Sys.isapple()   ? run(`open $path`) :
+                      run(`xdg-open $path`)
+    return p
+end
+```
+
+```{julia}
+using MacroEconometricModels, Random
+Random.seed!(42)
+fred = load_example(:fred_md)
+Y = to_matrix(apply_tcode(fred[:, ["INDPRO", "CPIAUCSL", "FEDFUNDS"]]))
+Y = Y[all.(isfinite, eachrow(Y)), :]
+```
+
+## Quick Start
+
+### Recipe 1: Estimate VAR(p)
+
+```{julia}
+model = estimate_var(Y, 4)
+report(model)
+```
+
+### Recipe 2: Lag selection
+
+```{julia}
+## Select lag order minimizing BIC (default)
+p_bic = select_lag_order(Y, 13)
+
+## Select via AIC
+p_aic = select_lag_order(Y, 13; criterion=:aic)
+
+model = estimate_var(Y, p_bic)
+report(model)
+```
+
+### Recipe 3: Cholesky IRF
+
+```{julia}
+model = estimate_var(Y, 4)
+
+## Cholesky IRF with bootstrap confidence intervals
+result = irf(model, 20; method=:cholesky, ci_type=:bootstrap, reps=50)
+```
+
+```{julia}
+show_plot(plot_result(result))
+plot_result(result; save_path="plot1.html")
+```
+
+### Recipe 4: Sign restrictions
+
+```{julia}
+model = estimate_var(Y, 4)
+
+## Contractionary monetary shock: FFR rises, INDPRO and CPI fall on impact
+check = irf -> irf[1, 3, 3] > 0 && irf[1, 1, 3] < 0 && irf[1, 2, 3] < 0
+result = irf(model, 20; method=:sign, check_func=check)
+```
+
+```{julia}
+show_plot(plot_result(result))
+```
+
+### Recipe 5: Arias identification
+
+```{julia}
+## Sign-only: identify_arias v0.4.2 fails to find rotations when a zero
+## restriction targets a Cholesky-triangular-zero cell (e.g. B[1,3]).
+model_short = estimate_var(Y, 2)
+
+restrictions = SVARRestrictions(3;
+    signs = [sign_restriction(3, 3, :positive),          ## FFR rises
+             sign_restriction(2, 3, :negative)]          ## CPI falls
+)
+result = identify_arias(model_short, restrictions, 20; n_draws=500)
+result
+```
+
+### Recipe 6: Uhlig identification
+
+```{julia}
+model_short = estimate_var(Y[end-59:end, :], 2)
+
+## Mountford-Uhlig penalty function: one optimal rotation
+restrictions = SVARRestrictions(3;
+    zeros = [zero_restriction(3, 1; horizon=0)],   ## Fiscal shock has no impact on FFR
+    signs = [sign_restriction(1, 1, :positive),     ## Fiscal shock raises INDPRO
+             sign_restriction(3, 3, :positive)]     ## Monetary shock raises FFR
+)
+result = identify_uhlig(model_short, restrictions, 20)
+result
+```
+
+## Reduced-Form VAR
+
+### The Model
+
+```{julia}
+model = estimate_var(Y, 4; varnames=["INDPRO", "CPI", "FFR"])
+report(model)
+```
+
+## Stability and Lag Selection
+
+### Companion Form and Stability
+
+```{julia}
+model = estimate_var(Y, 4)
+stab = is_stationary(model)
+stab
+```
+
+### Information Criteria
+
+```{julia}
+## BIC-optimal lag order (default)
+p_bic = select_lag_order(Y, 13)
+
+## AIC-optimal lag order
+p_aic = select_lag_order(Y, 13; criterion=:aic)
+
+model = estimate_var(Y, p_bic)
+report(model)
+```
+
+## Structural VAR and Identification
+
+### Cholesky (Recursive)
+
+```{julia}
+model = estimate_var(Y, 4)
+
+## Cholesky IRF with bootstrap 90% CI
+result = irf(model, 20; method=:cholesky, ci_type=:bootstrap, reps=50, conf_level=0.90)
+```
+
+```{julia}
+show_plot(plot_result(result))
+```
+
+### Sign Restrictions
+
+```{julia}
+model = estimate_var(Y, 4)
+
+# Contractionary monetary shock: FFR rises, INDPRO and CPI fall
+check = irf -> irf[1, 3, 3] > 0 && irf[1, 1, 3] < 0 && irf[1, 2, 3] < 0
+
+# Full identified set
+id_set = identify_sign(model, 20, check; max_draws=5000, store_all=true)
+id_set
+
+# Pointwise median and 68% credible bands
+med = irf_median(id_set)
+lower, upper = irf_bounds(id_set; quantiles=[0.16, 0.84])
+```
+
+### Narrative Restrictions
+
+```{julia}
+model = estimate_var(Y, 4)
+
+# Sign restrictions on impact
+sign_check = irf -> irf[1, 3, 3] > 0 && irf[1, 1, 3] < 0
+
+# Narrative: monetary shock was positive at observation 20
+narrative_check = shocks -> shocks[20, 3] > 0
+
+Q, irfs, shocks = identify_narrative(model, 20, sign_check, narrative_check; max_draws=5000)
+```
+
+### Long-Run (Blanchard-Quah)
+
+```{julia}
+model = estimate_var(Y, 4)
+result = irf(model, 40; method=:long_run)
+```
+
+```{julia}
+show_plot(plot_result(result))
+```
+
+### Arias et al. (2018) Zero + Sign Restrictions
+
+```{julia}
+# Monetary policy shock (shock 3):
+# Sign: FFR rises on impact, CPI falls
+# (zero on B[1,3] would target a Cholesky-triangular-zero cell; v0.4.2's
+#  identify_arias can't sample that case — same bug as Recipe 5.)
+model_short = estimate_var(Y, 2)
+
+restrictions = SVARRestrictions(3;
+    signs = [sign_restriction(3, 3, :positive),
+             sign_restriction(2, 3, :negative)]
+)
+
+result = identify_arias(model_short, restrictions, 20; n_draws=1000)
+result
+
+# Weighted IRF percentiles (importance-weight-corrected)
+pct = irf_percentiles(result; quantiles=[0.16, 0.5, 0.84])
+```
+
+### Mountford-Uhlig (2009) Penalty Function
+
+```{julia}
+model_short = estimate_var(Y[end-59:end, :], 2)
+
+# Fiscal vs monetary separation
+restrictions = SVARRestrictions(3;
+    zeros = [zero_restriction(3, 1; horizon=0)],   # Fiscal shock has no impact on FFR
+    signs = [sign_restriction(1, 1, :positive),     # Fiscal shock raises INDPRO
+             sign_restriction(3, 3, :positive)]     # Monetary shock raises FFR
+)
+
+result = identify_uhlig(model_short, restrictions, 20)
+result
+```
+
+## Covariance Estimation
+
+### Newey-West HAC Estimator
+
+### Kernel Functions
+
+### White Heteroscedasticity-Robust Estimator
+
+### Driscoll-Kraay Panel-Robust Estimator
+
+```{julia}
+# Construct VAR design matrices
+Y_eff, X = construct_var_matrices(Y, 2)
+residuals = Y_eff - X * ((X'X) \ (X'Y_eff))
+
+# Newey-West HAC (Bartlett kernel, automatic bandwidth)
+V_nw = newey_west(X, residuals; bandwidth=0, kernel=:bartlett)
+
+# White heteroscedasticity-robust (HC0)
+V_w = white_vcov(X, residuals)
+
+# Automatic bandwidth selection
+bw = optimal_bandwidth_nw(residuals)
+```
+
+## Forecasting
+
+```{julia}
+model = estimate_var(Y, 4; varnames=["INDPRO", "CPI", "FFR"])
+fc = forecast(model, 12; ci_method=:bootstrap, reps=50, conf_level=0.95)
+fc
+```
+
+## Innovation Accounting and Bayesian VAR
+
+## Complete Example
+
+```{julia}
+# Step 1: Select lag order
+p_opt = select_lag_order(Y, 13)
+
+# Step 2: Estimate VAR
+model = estimate_var(Y, p_opt; varnames=["INDPRO", "CPI", "FFR"])
+report(model)
+
+# Step 3: Check stability
+stab = is_stationary(model)
+stab
+
+# Step 4: Cholesky IRF with bootstrap CI
+# Ordering: [INDPRO, CPI, FFR] — monetary policy shock is shock 3
+result = irf(model, 20; method=:cholesky, ci_type=:bootstrap, reps=50)
+```
+
+```{julia}
+show_plot(plot_result(result))
+```
+
+```{julia}
+# Step 5: FEVD
+decomp = fevd(model, 20)
+decomp
+
+# Step 6: Historical decomposition
+hd = historical_decomposition(model, size(model.U, 1))
+verify_decomposition(hd)
+
+# Step 7: Forecast
+fc = forecast(model, 12)
+fc
+```
+
+## Common Pitfalls
+
+## References
+
+# Bayesian VAR
+
+```{julia}
+using MacroEconometricModels, Random
+Random.seed!(42)
+fred = load_example(:fred_md)
+Y = to_matrix(apply_tcode(fred[:, ["INDPRO", "CPIAUCSL", "FEDFUNDS"]]))
+Y = Y[all.(isfinite, eachrow(Y)), :]
+Y = Y[end-59:end, :]
+post = estimate_bvar(Y, 2; n_draws=100, prior=:minnesota, varnames=["INDPRO", "CPI", "FFR"])
+```
+
+## Quick Start
+
+### Recipe 1: Estimate a BVAR with Minnesota prior
+
+```{julia}
+report(post)
+```
+
+### Recipe 2: Optimize hyperparameters via marginal likelihood
+
+```{julia}
+best = optimize_hyperparameters(Y, 2; grid_size=20)
+post_opt = estimate_bvar(Y, 2; n_draws=100, prior=:minnesota, hyper=best,
+                         varnames=["INDPRO", "CPI", "FFR"])
+report(post_opt)
+```
+
+### Recipe 3: Bayesian IRFs with Cholesky identification
+
+```{julia}
+birf = irf(post, 20; method=:cholesky)
+report(birf)
+```
+
+```{julia}
+show_plot(plot_result(birf))
+```
+
+### Recipe 4: Bayesian FEVD and historical decomposition
+
+```{julia}
+bfevd = fevd(post, 20; method=:cholesky)
+bhd = historical_decomposition(post; method=:cholesky)
+report(bfevd)
+```
+
+### Recipe 5: Multi-step forecasting with credible intervals
+
+```{julia}
+fc = forecast(post, 12; conf_level=0.95)
+report(fc)
+```
+
+### Recipe 6: Joint hyperparameter optimization for large systems
+
+```{julia}
+safe_idx = [i for i in 1:nvars(fred)
+            if fred.tcode[i] < 4 || all(x -> isfinite(x) && x > 0, fred.data[:, i])]
+fred_safe = fred[:, varnames(fred)[safe_idx]]
+X = to_matrix(apply_tcode(fred_safe))
+X = X[all.(isfinite, eachrow(X)), 1:min(20, size(X, 2))]
+
+best_full, ml = optimize_hyperparameters_full(X, 4)
+post_large = estimate_bvar(X, 4; n_draws=100, prior=:minnesota, hyper=best_full)
+report(post_large)
+```
+
+## Bayesian Framework
+
+## The Minnesota Prior
+
+### Hyperparameter Interpretation
+
+```{julia}
+# Define hyperparameters explicitly
+hyper = MinnesotaHyperparameters(
+    tau = 0.5,      # Moderate overall tightness
+    decay = 2.0,    # Quadratic lag decay
+    lambda = 1.0,   # Sum-of-coefficients scaling
+    mu = 1.0,       # Co-persistence scaling
+    omega = 1.0     # Covariance scaling
+)
+
+post_hyper = estimate_bvar(Y, 2; n_draws=100, prior=:minnesota, hyper=hyper,
+                           varnames=["INDPRO", "CPI", "FFR"])
+report(post_hyper)
+```
+
+## Hyperparameter Optimization
+
+### Tau-Only Optimization
+
+```{julia}
+# Optimize tau via marginal likelihood
+best_tau = optimize_hyperparameters(Y, 2; grid_size=20, tau_range=(0.01, 10.0))
+
+# Use optimized hyperparameters in estimation
+post_tau = estimate_bvar(Y, 2; n_draws=100, prior=:minnesota, hyper=best_tau,
+                         varnames=["INDPRO", "CPI", "FFR"])
+report(post_tau)
+```
+
+### Joint Optimization (BGR 2010)
+
+```{julia}
+# Three-dimensional grid search
+best_joint, ml_joint = optimize_hyperparameters_full(Y, 2;
+    tau_grid    = range(0.1, 5.0, length=10),
+    lambda_grid = [1.0, 5.0, 10.0],
+    mu_grid     = [1.0, 2.0, 5.0]
+)
+
+post_joint = estimate_bvar(Y, 2; n_draws=100, prior=:minnesota, hyper=best_joint,
+                           varnames=["INDPRO", "CPI", "FFR"])
+report(post_joint)
+```
+
+## Posterior Sampling
+
+### Direct Sampler
+
+### Gibbs Sampler
+
+```{julia}
+# Direct sampler (i.i.d. draws, fast)
+post_direct = estimate_bvar(Y, 2; n_draws=100, sampler=:direct,
+                            prior=:minnesota,
+                            varnames=["INDPRO", "CPI", "FFR"])
+
+# Gibbs sampler (MCMC, for diagnostics)
+post_gibbs = estimate_bvar(Y, 2; n_draws=100, sampler=:gibbs,
+                           burnin=500, thin=2, prior=:minnesota,
+                           varnames=["INDPRO", "CPI", "FFR"])
+report(post_direct)
+```
+
+## Posterior Point Estimates
+
+```{julia}
+# Extract VARModel with posterior mean parameters
+mean_model = posterior_mean_model(post)
+report(mean_model)
+
+# Extract VARModel with posterior median parameters
+median_model = posterior_median_model(post)
+
+# Standard VAR tools work on the point estimate
+stab = is_stationary(mean_model)
+irfs_mean = irf(mean_model, 20; method=:cholesky)
+nothing # hide
+```
+
+## Bayesian Impulse Response Functions
+
+### Cholesky Identification
+
+```{julia}
+birf_chol = irf(post, 20; method=:cholesky)
+report(birf_chol)
+```
+
+```{julia}
+show_plot(plot_result(birf_chol))
+```
+
+### Sign Restrictions
+
+```{julia}
+# Contractionary monetary shock: FFR rises, INDPRO and CPI fall on impact
+function check_monetary(irf_array)
+    return irf_array[1, 3, 3] > 0 &&   # FFR rises
+           irf_array[1, 1, 3] < 0 &&   # INDPRO falls
+           irf_array[1, 2, 3] < 0       # CPI falls
+end
+
+birf_sign = irf(post, 20; method=:sign, check_func=check_monetary, max_draws=5000)
+report(birf_sign)
+```
+
+## Bayesian FEVD
+
+```{julia}
+bfevd_sec = fevd(post, 20; method=:cholesky)
+report(bfevd_sec)
+```
+
+```{julia}
+show_plot(plot_result(bfevd_sec))
+```
+
+## Bayesian Historical Decomposition
+
+```{julia}
+bhd_sec = historical_decomposition(post; method=:cholesky)
+report(bhd_sec)
+```
+
+```{julia}
+show_plot(plot_result(bhd_sec))
+```
+
+## Forecasting
+
+```{julia}
+fc_sec = forecast(post, 12; conf_level=0.90, point_estimate=:median)
+report(fc_sec)
+```
+
+```{julia}
+show_plot(plot_result(fc_sec))
+```
+
+## Large BVAR
+
+```{julia}
+# Select variables with safe transformations
+safe_idx_lg = [i for i in 1:nvars(fred)
+               if fred.tcode[i] < 4 || all(x -> isfinite(x) && x > 0, fred.data[:, i])]
+fred_safe_lg = fred[:, varnames(fred)[safe_idx_lg]]
+X_lg = to_matrix(apply_tcode(fred_safe_lg))
+X_lg = X_lg[all.(isfinite, eachrow(X_lg)), 1:min(20, size(X_lg, 2))]
+
+# Tighter prior for large systems
+hyper_large = MinnesotaHyperparameters(
+    tau = 0.1,      # Strong overall shrinkage
+    decay = 2.0,    # Quadratic lag decay
+    lambda = 1.0,   # Sum-of-coefficients prior
+    mu = 0.5,       # Penalize cross-variable coefficients
+    omega = 1.0     # Covariance scaling
+)
+
+post_lg = estimate_bvar(X_lg, 4; n_draws=100, prior=:minnesota, hyper=hyper_large)
+report(post_lg)
+```
+
+## Complete Example
+
+```{julia}
+# Step 1: Optimize hyperparameters via marginal likelihood
+best_ce = optimize_hyperparameters(Y, 2; grid_size=20)
+report(best_ce)
+
+# Step 2: Estimate BVAR with optimized Minnesota prior
+post_ce = estimate_bvar(Y, 2; n_draws=100, prior=:minnesota, hyper=best_ce,
+                        varnames=["INDPRO", "CPI", "FFR"])
+report(post_ce)
+
+# Step 3: Bayesian IRFs — response to monetary policy shock
+birf_ce = irf(post_ce, 20; method=:cholesky)
+report(birf_ce)
+
+# Step 4: FEVD — variance decomposition with credible bands
+bfevd_ce = fevd(post_ce, 20; method=:cholesky)
+report(bfevd_ce)
+
+# Step 5: Historical decomposition
+bhd_ce = historical_decomposition(post_ce; method=:cholesky)
+report(bhd_ce)
+
+# Step 6: 12-step-ahead forecast
+fc_ce = forecast(post_ce, 12; conf_level=0.95)
+report(fc_ce)
+
+# Step 7: Extract posterior mean VARModel for stationarity check
+mean_model_ce = posterior_mean_model(post_ce)
+stab_ce = is_stationary(mean_model_ce)
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```

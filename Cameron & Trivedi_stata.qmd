@@ -6817,14 +6817,17 @@ summarize yhat* if dy==1
 * Poisson (mu=1) generated data
 quietly set obs 10000
 set seed 10101              // set the seed !
-generate xpois= rpoisson(1) // draw from Poisson(mu=1)    
+generate xpois= rpoisson(1) // draw from Poisson(mu=1)
 summarize xpois
 tabulate xpois
+* Persist Stata's draw so the Julia translation can read the same
+* realised sample (Stata and Julia have different RNG streams).
+export delimited xpois using "musr/xpois.csv", replace
 ```
 
 ```{stata}
-histogram xpois, discrete xtitle("Poisson")
-graph save musr/mus17xp, replace
+*histogram xpois, discrete xtitle("Poisson")
+*graph save musr/mus17xp, replace
 ```
 
 ### 17.2.2 Overdispersion and negative binomial data
@@ -6833,14 +6836,18 @@ graph save musr/mus17xp, replace
 * Negative binomial (mu=1 var=2) generated data
 set seed 10101                   // set the seed !
 generate xg = rgamma(1,1)
-generate xnegbin = rpoisson(xg)  // NB generated as a Poisson-gamma mixture 
+generate xnegbin = rpoisson(xg)  // NB generated as a Poisson-gamma mixture
+* Persist Stata's draw so the Julia translation can read the same
+* realised sample (Stata and Julia have different RNG streams).
+export delimited xnegbin using "musr/xnegbin.csv", replace
+
 summarize xnegbin
 tabulate xnegbin
 ```
 
 ```{stata}
-histogram xnegbin, discrete xtitle("Negative binomial")
-graph save musr/mus17negbin, replace
+*histogram xnegbin, discrete xtitle("Negative binomial")
+*graph save musr/mus17negbin, replace
 ```
 
 ### 17.2.3 Modeling strategies
@@ -6891,32 +6898,52 @@ display "Squared correlation between y and yhat = " r(rho)^2
 #### Robust estimate of VCE for Poisson MLE
 
 ```{stata}
+/*
 * Poisson with robust standard errors
+display "xlist = $xlist"      // confirm it's still the 7 regressors
+correlate $xlist              // any pair with |ρ|≈1?
+count if missing(docvis) | missing(private) | missing(medicaid) ///
+       | missing(age) | missing(age2) | missing(educyr)         ///
+       | missing(actlim) | missing(totchr)
+
+
 poisson docvis $xlist, vce(robust) nolog  // Poisson robust SEs
+*/
+quietly poisson docvis $xlist               // <- no vce(robust)
+predict muhat, n
+quietly generate ystar = ((docvis-muhat)^2 - docvis)/muhat
+regress ystar muhat, noconstant noheader
+
 ```
 
 #### Test of overdispersion
 
 ```{stata}
+/*
 * Overdispersion test against V(y|x) = E(y|x) + a*{E(y|x)^2}
 quietly poisson docvis $xlist, vce(robust)
 predict muhat, n
 quietly generate ystar = ((docvis-muhat)^2 - docvis)/muhat
 regress ystar muhat, noconstant noheader
+*/
 ```
 
 #### Coefficient interpretation and marginal effects
 
 ```{stata}
 * Average marginal effect for Poisson
-quietly poisson docvis i.private i.medicaid age age2 educyr i.actlim totchr, vce(robust)
+quietly poisson docvis i.private i.medicaid age age2 educyr i.actlim totchr
+*, vce(robust)
 margins, dydx(*)
 ```
 
 ```{stata}
+#=
 // Following not included in book
 * Poisson as glm
 glm docvis $xlist, family(poisson) link(log) robust  // glm
+=#
+
 ```
 
 ### 17.3.3 NB2 model
@@ -7022,20 +7049,24 @@ scalar pi=1-(1-exp(-2))/2  // Probability y=0
 generate xhurdle = 0
 scalar minx = 0
 while minx == 0 {
- generate xph = rpoisson(2) 
- quietly replace xhurdle = xph if xhurdle==0 
+ generate xph = rpoisson(2)
+ quietly replace xhurdle = xph if xhurdle==0
  drop xph
  quietly summarize xhurdle
  scalar minx = r(min)
 }
 replace xhurdle = 0 if runiform() < pi
 summarize xhurdle
+* Persist Stata's draw so the Julia translation can read the same
+* realised sample (Stata and Julia have different RNG streams).
+
+export delimited xhurdle using "musr/xhurdle.csv", replace
 ```
 
 ```{stata}
 // Following not included in book
-histogram xhurdle, discrete xtitle("Hurdle Poisson")
-graph save musr/mus17hurdle, replace 
+*histogram xhurdle, discrete xtitle("Hurdle Poisson")
+*graph save musr/mus17hurdle, replace 
 ```
 
 #### Variants of the hurdle model
@@ -7094,9 +7125,12 @@ set seed 10101        // set the seed !
 generate xp1= rpoisson(.5)
 generate xp2= rpoisson(5.5)
 summarize xp1 xp2
-rename xp1 xpmix
+generate xpmix = xp1                     // (was: rename xp1 xpmix) keep xp1 for export
 quietly replace xpmix = xp2 if runiform() > 0.9
 summarize xpmix
+* Persist all three columns so the Julia translation reproduces both
+* `summarize` blocks exactly (xpmix needs the runiform() selection).
+export delimited xp1 xp2 xpmix using "musr/xpmix.csv", replace
 ```
 
 ```{stata}
@@ -7105,20 +7139,24 @@ tabulate xpmix
 ```
 
 ```{stata}
+/*
 // Following not included in book
 histogram xpmix, discrete xtitle("Finite mixture Poisson")
 graph save musr/mus17pmix, replace
+*/
 ```
 
 ```{stata}
+/*
 * Compare the four distributions, all with mean 1
 graph combine musr/mus17xp.gph musr/mus17negbin.gph musr/mus17pmix.gph ///
 musr/mus17hurdle.gph, title("Four different distributions with mean = 1") ///
 ycommon xcommon
+*/
 ```
 
 ```{stata}
-graph export musr/mus17countdist.eps, replace
+*graph export musr/mus17countdist.eps, replace
 ```
 
 #### ML estimation of the FMM
@@ -7137,6 +7175,7 @@ summarize xpois xnegbin xpmix xhurdle
 ```{stata}
 * Finite-mixture model using fmm command with constant probabilities
 use musr/mus17data.dta, clear
+use "C:/EC/BSE/DSDM/Term 2/24DM021_Causal Inference and Machine Learning/References/Cameron & Trivedi/musr/mus17data.dta", clear
 fmm 2, vce(robust): poisson docvis $xlist
 ```
 
@@ -7192,7 +7231,7 @@ summarize yfit*
 ### 17.4.1 Zero-inflated data
 
 ```{stata}
-drop _all
+*drop _all
 
 *set more off
 use musr/mus17data_z.dta 
@@ -7263,7 +7302,7 @@ estimates stats NB ZINB
 ```{stata}
 clear all
 * First-stage linear regression
-use musr/mus17data.dta
+use "C:\EC\BSE\DSDM\Term 2\24DM021_Causal Inference and Machine Learning\References\Cameron & Trivedi\musr\mus17data.dta", clear
 global xlist2 medicaid age age2 educyr actlim totchr
 regress private $xlist2 income ssiratio, vce(robust)
 predict lpuhat, residual
