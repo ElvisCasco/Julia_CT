@@ -73,7 +73,7 @@ The Julia translation covers all 18 chapters of *Microeconometrics Using Stata* 
 
 ## Testing status
 
-The notebook has been executed end-to-end and verified for **Chapters 1–16 and Chapter 18**. Chapter 17 is translated but have not yet been fully re-tested in the latest environment.
+The notebook has been executed end-to-end and verified for all chapters.
 
 All packages and helper functions used anywhere in the notebook are loaded and defined in two upfront sections, so any chapter can be run independently after these are evaluated:
 
