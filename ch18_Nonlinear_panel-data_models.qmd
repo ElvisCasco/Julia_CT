@@ -10,6 +10,9 @@ format:
     toc-expand: true
     toc-title: Contents
     toc-location: left
+    code-fold: true
+    code-tools: true
+    code-summary: "Show code"
 execute:
   enabled: true
 jupyter: julia-1.12
@@ -4847,6 +4850,7 @@ function nbreg_stata(df, formula; vce::Symbol=:oim, level::Float64=0.95,
               n, k, LR, LR_p, LR_α, p_chibar)
 end
 
+import Dates
 time_now2() = println(Dates.now())
 
 function meddiff(a, b)

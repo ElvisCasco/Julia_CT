@@ -10,6 +10,9 @@ format:
     toc-expand: true
     toc-title: Contents
     toc-location: left
+    code-fold: true
+    code-tools: true
+    code-summary: "Show code"
 execute:
   enabled: true
 jupyter: julia-1.12

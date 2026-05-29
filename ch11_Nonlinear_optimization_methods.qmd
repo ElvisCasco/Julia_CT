@@ -10,6 +10,9 @@ format:
     toc-expand: true
     toc-title: Contents
     toc-location: left
+    code-fold: true
+    code-tools: true
+    code-summary: "Show code"
 execute:
   enabled: true
 jupyter: julia-1.12
@@ -683,6 +686,7 @@ end
 # Set up data and design matrix
 df11 = DataFrames.DataFrame(ReadStatTables.readstat("musr/mus10data.dta"))
 df11 = filter(r -> r.year02 == 1, df11)
+df10 = df11   # ch10 defines df10 as the same year02==1 subset
 y11 = Float64.(df11.docvis)
 X11 = hcat(Float64.(df11.private), Float64.(df11.chronic),
            Float64.(df11.female),  Float64.(df11.income),
@@ -690,6 +694,38 @@ X11 = hcat(Float64.(df11.private), Float64.(df11.chronic),
 xnms11 = ["private", "chronic", "female", "income", "_cons"]
 n11, k11 = size(X11)
 @printf("n = %d, k = %d\n", n11, k11)
+```
+
+
+```{julia}
+# Newton-Raphson loop
+function poisson_nr(X, y; tol = 1e-16)
+    n, k = size(X)
+    b = zeros(k); iter = 0; cha = 1.0
+    while cha > tol && iter < 100
+        μ    = exp.(X * b)
+        grad = X' * (y .- μ)
+        hes  = X' * LinearAlgebra.Diagonal(μ) * X
+        bold = copy(b)
+        b    = bold .+ LinearAlgebra.cholesky(LinearAlgebra.Symmetric(hes)) \ grad
+        cha  = sum((bold .- b).^2) / sum(bold.^2 .+ eps())
+        iter += 1
+        @printf("iter = %2d  cha = %12.5g\n", iter, cha)
+    end
+    # Robust sandwich SE
+    μ     = exp.(X * b)
+    hes   = X' * LinearAlgebra.Diagonal(μ) * X
+    vgrad = X' * LinearAlgebra.Diagonal((y .- μ).^2) * X
+    Hinv  = try
+        LinearAlgebra.inv(LinearAlgebra.cholesky(LinearAlgebra.Symmetric(hes)))
+    catch
+        LinearAlgebra.pinv(hes)
+    end
+    V     = Hinv * vgrad * Hinv * (n / (n - k))
+    return b, V, iter
+end
+
+b11, V11, iter11 = poisson_nr(X11, y11)
 ```
 
 
