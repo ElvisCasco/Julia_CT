@@ -6,10 +6,58 @@ Julia translations of the Stata code from *Microeconometrics Using Stata* (Camer
 
 - **`Cameron & Trivedi_stata.qmd`** — original Stata code (1st edition) as a Quarto notebook using `stata_setup`.
 - **`Cameron & Trivedi_stata_vJulia.qmd`** — **Julia translation** of the Stata notebook above. Covers all 18 chapters + appendices.
+- **`ch01_Stata_basics.qmd` … `ch18_Nonlinear_panel-data_models.qmd`** — **per-chapter standalone notebooks** generated from the master Julia qmd. Each is self-contained and renders independently (see [Per-chapter notebooks](#per-chapter-notebooks) below).
+- **`split_chapters.jl`** — script that produces the per-chapter qmds from the master Julia qmd by extracting only the chunk-1 helpers each chapter transitively uses.
+- **`annotate_with_stata.jl`** — script that prepends the corresponding Stata source from `Cameron & Trivedi_stata.qmd` to each Julia chunk in a chapter qmd, as a `#= … =#` reference comment.
 - **`Cameron & Trivedi_stata_2ed_V2.qmd`** — 2nd-edition Stata notebook (work in progress).
 - **`Cameron & Trivedi_stata_2ed_V2_testJulia.qmd`** — Julia test translation for the 2nd edition.
 - **Data folders** (`musr/`, `mus2/`, `mma10252005/`, `nhh2017cameron/`) — sample datasets from the book's companion materials.
 - **`auto.dta`**, **`census.dta`**, etc. — Stata built-in / sample data.
+
+## Per-chapter notebooks
+
+In addition to the single master notebook (`Cameron & Trivedi_stata_vJulia.qmd`, ~38 k lines), the repo ships **eighteen standalone chapter files** — one per textbook chapter:
+
+```
+ch01_Stata_basics.qmd
+ch02_Data_management_and_graphics.qmd
+ch03_Linear_regression_basics.qmd
+…
+ch18_Nonlinear_panel-data_models.qmd
+```
+
+Each chapter file is **self-contained** and renders on its own. Its structure is:
+
+1. **YAML preamble** (same as the master notebook).
+2. **Imports + compat-shims** chunk — every `using` statement and the PrettyTables / Optim v3 compatibility shims.
+3. **Helpers chunk** — only those chunk-1 helpers that this chapter actually references (transitively, via `split_chapters.jl`'s dependency closure).
+4. **Chapter content** — the original example chunks from the master notebook. Each Julia chunk is prepended with the corresponding **Stata source** from `Cameron & Trivedi_stata.qmd` as a `#= … =#` reference block, e.g.
+
+   ````markdown
+   ```{julia}
+   #=
+   sysuse auto.dta
+   summarize
+   =#
+   auto = DataFrame(ReadStatTables.readstat("auto.dta"))
+   summarize_stata(auto)
+   ```
+   ````
+
+This makes each chapter file useful as both a runnable Quarto notebook and a side-by-side Stata-↔-Julia reference.
+
+### Regenerating the chapter files
+
+The per-chapter qmds are derived; the master file is the source of truth. To regenerate after editing `Cameron & Trivedi_stata_vJulia.qmd`:
+
+```bash
+julia --project=@. split_chapters.jl                   # rebuild ch01…ch18
+for f in ch??_*.qmd; do                                # re-attach Stata refs
+  julia --project=@. annotate_with_stata.jl "$f"
+done
+```
+
+(Each `annotate_with_stata.jl` run also writes a `*.qmd.bak` the first time it touches a file, so the un-annotated version stays recoverable.)
 
 ## Running
 
@@ -36,9 +84,14 @@ Pkg.add([
     "SpecialFunctions", "MixedModels", "Combinatorics"
 ])
 ```
-Render with:
+Render the master notebook with:
 ```bash
 quarto render "Cameron & Trivedi_stata_vJulia.qmd"
+```
+
+Or render a single chapter:
+```bash
+quarto render ch04_Simulation.qmd
 ```
 
 ## Scope
@@ -73,14 +126,14 @@ The Julia translation covers all 18 chapters of *Microeconometrics Using Stata* 
 
 ## Testing status
 
-The notebook has been executed end-to-end and verified for all chapters.
+The master notebook has been executed end-to-end and verified for all chapters.
 
-All packages and helper functions used anywhere in the notebook are loaded and defined in two upfront sections, so any chapter can be run independently after these are evaluated:
+All packages and helper functions used anywhere in the master notebook are loaded and defined in two upfront sections, so any chapter can be run independently after these are evaluated:
 
 - **Julia setup** — top-of-notebook cell that calls `using` on every required package (CairoMakie, CategoricalArrays, CSV, Chain, DataFrames, Downloads, FixedEffectModels, GLM, HypothesisTests, PrettyTables, ReadStatTables, RegressionTables, Statistics, StatsBase, LinearAlgebra, KernelDensity, Loess, RDatasets, Random, Printf, Optim, Distributions, SpecialFunctions, MixedModels, Combinatorics).
 - **Chapter 1 — Stata basics** — defines all reusable helper functions used by later chapters (table formatting, summary statistics, regression-output helpers, panel utilities, bootstrap/jackknife wrappers, etc.).
 
-If you want to run only a specific chapter, evaluate the *Julia setup* cell and the helpers in *Chapter 1* first.
+If you want to run only a specific chapter from the master notebook, evaluate the *Julia setup* cell and the helpers in *Chapter 1* first. Alternatively, use the [per-chapter standalone notebooks](#per-chapter-notebooks) — each already includes the setup, only the helpers it needs, and the chapter's content in one self-contained file. Per-chapter render status is spot-checked (e.g. `ch04_Simulation.qmd` and `ch17_Count-data_models.qmd` have been rendered end-to-end); a full sweep of all 18 is in progress.
 
 ## Notes
 
