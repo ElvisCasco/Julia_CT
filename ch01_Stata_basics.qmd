@@ -1,0 +1,1403 @@
+---
+title: "Microeconometrics Using Stata"
+Authors:
+- Colin Cameron
+- Pravin Trivedi
+format:
+  html:
+    toc: true
+    toc-depth: 5
+    toc-expand: true
+    toc-title: Contents
+    toc-location: left
+execute:
+  enabled: true
+jupyter: julia-1.12
+---
+
+[Microeconometrics with R](https://ycroissant.github.io/micsr_book/)
+
+[UCLA](https://stats.oarc.ucla.edu/stata/modules/)
+
+[Github](https://github.com/thousandoaks?tab=repositories)
+
+# Julia setup
+
+```{julia}
+using CairoMakie
+CairoMakie.activate!(type = "png")
+using CategoricalArrays
+using CSV
+using Chain
+using DataFrames
+using Downloads
+using FixedEffectModels
+using Gadfly
+using GLM
+using HypothesisTests
+using Makie
+using PrettyTables
+using ReadStatTables
+using RegressionTables
+using Statistics
+
+using DataFrames, ReadStatTables, CSV, CairoMakie, PrettyTables
+using Statistics, StatsBase, GLM, FixedEffectModels
+using CategoricalArrays, LinearAlgebra
+using RegressionTables
+using KernelDensity, Loess
+using RDatasets, Random, Printf
+using Optim, Distributions, SpecialFunctions, HypothesisTests
+using MixedModels   # panel RE (xtreg, re  effectively)
+using Combinatorics # for FE logit (conditional MLE subset enumeration)
+using ForwardDiff   # explicit gradients for Optim (autodiff kwarg pipeline broken in current Optim)
+
+# PrettyTables v3 compatibility shim. v3 dropped `ft_printf` (now
+# `fmt__printf`) and requires the `formatters` keyword to be a Vector.
+# All call sites in this document use the v2 form
+# `formatters = PrettyTables.ft_printf(fmt, cols)`; re-create
+# `ft_printf` so it returns a single-element Vector wrapping the new
+# `fmt__printf`, accepting either an Int column index or a range.
+if !isdefined(PrettyTables, :ft_printf)
+    @eval PrettyTables begin
+        ft_printf(fmt, cols) =
+            [fmt__printf(fmt, collect(cols isa Integer ? (cols:cols) : cols))]
+        ft_printf(fmt) = [fmt__printf(fmt)]   # apply to all columns (v2 single-arg)
+    end
+end
+
+# PrettyTables v3 also renamed the `header` keyword to `column_labels`
+# (which must be an `AbstractVector` — a flat vector for one header row,
+# or a vector of row-vectors for stacked headers; a Tuple is rejected).
+# `_pt_compat` wraps `pretty_table` so the document's v2-style calls keep
+# working: it maps `header` → `column_labels` (Tuple → Vector), and
+# normalises `formatters` to a flat Vector. All `PrettyTables.pretty_table`
+# call sites in the document route through this wrapper. `_PT_REAL` holds
+# the real function (no trailing `(`, so the route-through rewrite leaves
+# it untouched — no recursion).
+const _PT_REAL = PrettyTables.pretty_table
+function _pt_compat(data; header = nothing, formatters = nothing,
+                    body_hlines = nothing, kwargs...)
+    kw = Dict{Symbol,Any}(kwargs)
+    if header !== nothing
+        kw[:column_labels] = header isa Tuple ? collect(header) : header
+    end
+    if formatters !== nothing
+        kw[:formatters] =
+            formatters isa Function ? [formatters] :
+            formatters isa Tuple ?
+                collect(Iterators.flatten(
+                    x isa Union{AbstractVector,Tuple} ? x : (x,) for x in formatters)) :
+                formatters
+    end
+    # `body_hlines` (v2) has no v3 equivalent — it only drew cosmetic
+    # horizontal rules after given rows. Captured here and dropped so the
+    # table still renders (without the extra separators). `alignment` and
+    # `row_labels` are unchanged in v3 and pass straight through.
+    return _PT_REAL(data; kw...)
+end
+
+# Optim autodiff compat shim. The installed Optim's `autodiff` kwarg
+# rejects the Symbol form `:forward` (it now expects an ADTypes type),
+# and even the ADTypes path trips a DifferentiationInterface bug in
+# this version. The fix: don't use Optim's autodiff plumbing at all —
+# wrap `f` with an explicit ForwardDiff-computed gradient and call the
+# 5-arg `optimize(f, g!, x0, method, opts)` form, which doesn't go
+# through autodiff. `_optimize_compat` routes every Optim.optimize call
+# in the document through this translation; 4-arg calls with
+# `autodiff = :forward` are rewritten to the 5-arg gradient form, all
+# other shapes pass through. `_OPT_REAL` holds the real function (no
+# trailing `(`, so the route-through rewrite leaves it untouched).
+const _OPT_REAL = Optim.optimize
+function _optimize_compat(args...; kwargs...)
+    kw = Dict{Symbol,Any}(kwargs)
+    ad = pop!(kw, :autodiff, nothing)
+    # If `autodiff = :forward` is requested, build the gradient via
+    # ForwardDiff and use the explicit-gradient path. Handles any arg
+    # shape where args[1]=f, args[2]=x0 (method/options follow): 3-arg
+    # `(f, x0, method)`, 4-arg `(f, x0, method, opts)`, etc.
+    if ad isa Symbol && (ad === :forward || ad === :forwarddiff) && length(args) >= 2
+        f, x0 = args[1], args[2]
+        g!(g, x) = ForwardDiff.gradient!(g, f, x)
+        return _OPT_REAL(f, g!, x0, args[3:end]...; kw...)
+    end
+    return ad === nothing ? _OPT_REAL(args...; kw...) :
+                            _OPT_REAL(args...; autodiff = ad, kw...)
+end
+```
+
+```{julia}
+_rawval(x) = hasproperty(x, :value) ? x.value : x  # unwrap ReadStatTables.LabeledValue
+
+function _numeric_vec(col)
+    vals = collect(skipmissing(col))
+    isempty(vals) && return Float64[]
+    T = Base.nonmissingtype(eltype(col))
+    T <: Real && return convert(Vector{Float64}, vals)
+    try
+        return Float64[Float64(_rawval(v)) for v in vals]
+    catch
+        return nothing  # non-numeric (strings, etc.)
+    end
+end
+
+"""
+Expand a Stata-style varlist pattern against DataFrame columns. Supports:
+  * `t*`, `*t`, `*mpg*`, `t?`   — glob wildcards
+  * `price-weight`              — range of columns (inclusive, by column order)
+  * exact names, Symbols, vectors, and the literal "_all"
+"""
+function _expand_varlist(df, vars)
+    cols = string.(DataFrames.names(df))
+    patterns = vars isa Union{Symbol,AbstractString} ? [string(vars)] :
+               vars isa AbstractVector ? [string(v) for v in vars] :
+               [string(v) for v in collect(vars)]
+
+    out = String[]
+    for p in patterns
+        if p == "_all"
+            append!(out, cols)
+        elseif occursin('*', p) || occursin('?', p)
+            rx = Regex("^" * replace(p, "*" => ".*", "?" => ".") * "\$")
+            for c in cols
+                occursin(rx, c) && push!(out, c)
+            end
+        elseif occursin('-', p) && !startswith(p, "-") && !(p in cols)
+            parts = split(p, '-', limit=2)
+            i = findfirst(==(String(parts[1])), cols)
+            j = findfirst(==(String(parts[2])), cols)
+            (i === nothing || j === nothing) && error("Unknown variable in range '$p'")
+            i, j = minmax(i, j)
+            append!(out, cols[i:j])
+        else
+            push!(out, p)
+        end
+    end
+
+    seen = Set{String}(); uniq = String[]
+    for v in out
+        v in seen || (push!(seen, v); push!(uniq, v))
+    end
+    return Symbol.(uniq)
+end
+
+function summarize_stata(df::DataFrames.AbstractDataFrame, vars=nothing; detail::Bool=false)
+    if vars === nothing
+        varlist = Symbol[]
+        for n in DataFrames.names(df)
+            _numeric_vec(df[!, n]) === nothing || push!(varlist, Symbol(n))
+        end
+    else
+        varlist = _expand_varlist(df, vars)
+    end
+
+    rows = []
+    for v in varlist
+        xraw = _numeric_vec(df[!, v])
+        x = xraw === nothing ? Float64[] : xraw
+        n = length(x)
+        if n == 0
+            push!(rows, (; Variable=string(v), Obs=0, Mean=missing,
+                           Std=missing, Min=missing, Max=missing))
+            continue
+        end
+        μ  = Statistics.mean(x)
+        σ  = n > 1 ? Statistics.std(x) : missing
+        base = (; Variable=string(v), Obs=n, Mean=μ, Std=σ,
+                  Min=minimum(x), Max=maximum(x))
+        if detail
+            qs = Statistics.quantile(x, [0.01,0.05,0.10,0.25,0.50,0.75,0.90,0.95,0.99])
+            # Stata uses biased moments for skewness/kurtosis
+            m2 = Statistics.mean((x .- μ).^2)
+            m3 = Statistics.mean((x .- μ).^3)
+            m4 = Statistics.mean((x .- μ).^4)
+            skew = m2 > 0 ? m3 / m2^(3/2) : missing
+            kurt = m2 > 0 ? m4 / m2^2     : missing
+            push!(rows, merge(base,
+                (; p1=qs[1], p5=qs[2], p10=qs[3], p25=qs[4], p50=qs[5],
+                   p75=qs[6], p90=qs[7], p95=qs[8], p99=qs[9],
+                   Variance = ismissing(σ) ? missing : σ^2,
+                   Skewness = skew, Kurtosis = kurt)))
+        else
+            push!(rows, base)
+        end
+    end
+
+    # Stata's `summarize, detail` block — one per requested variable.
+    if detail
+        _g9d(x; w::Int = 9, mx::Int = 7) = begin
+            (ismissing(x) || !isfinite(x)) && return "."
+            sig = mx
+            s = Printf.@sprintf("%.*g", sig, x)
+            while length(s) > w && sig > 1
+                sig -= 1; s = Printf.@sprintf("%.*g", sig, x)
+            end
+            0 < abs(x) < 1 ? replace(s, r"^(-?)0\." => s"\1.") : s
+        end
+        _comma_d(n::Integer) = replace(string(n), r"(\d)(?=(\d{3})+$)" => s"\1,")
+        for r in rows
+            v = r.Variable
+            x = _numeric_vec(df[!, Symbol(v)])
+            x === nothing && (println("$v: not numeric"); continue)
+            n = length(x); ssorted = sort(x)
+            small4 = ssorted[1:min(4, n)]
+            large4 = ssorted[max(1, n - 3):n]    # ascending; Stata also shows ascending here
+            println()
+            println(lpad(v, 36))
+            println("-"^61)
+            println(lpad("Percentiles", 26),  lpad("Smallest", 16))
+            pct = [0.01, 0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95, 0.99]
+            qs  = Statistics.quantile(x, pct)
+            sml = [get(small4, i, missing) for i in 1:4]
+            lrg = [get(large4, i, missing) for i in 1:4]
+            # Row 1: 1% / small[1]
+            Printf.@printf("%3s%12s%16s\n", "1%",
+                           _g9d(qs[1]), _g9d(sml[1]))
+            # Row 2: 5% / small[2]
+            Printf.@printf("%3s%12s%16s\n", "5%",
+                           _g9d(qs[2]), _g9d(sml[2]))
+            # Row 3: 10% / small[3]                Obs <N>
+            Printf.@printf("%3s%12s%16s%14s %s\n", "10%",
+                           _g9d(qs[3]), _g9d(sml[3]),
+                           "Obs", _comma_d(n))
+            # Row 4: 25% / small[4]                Sum of wgt.
+            Printf.@printf("%3s%12s%16s%14s %s\n", "25%",
+                           _g9d(qs[4]), _g9d(sml[4]),
+                           "Sum of wgt.", _comma_d(n))
+            println()
+            # Row 5: 50% / blank          Mean
+            Printf.@printf("%3s%12s%16s%14s %s\n", "50%",
+                           _g9d(qs[5]), "", "Mean", _g9d(r.Mean))
+            Printf.@printf("%3s%12s%16s%14s %s\n",
+                           "", "", "Largest",
+                           "Std. dev.", _g9d(r.Std))
+            # Row 6: 75% / large[1]
+            Printf.@printf("%3s%12s%16s\n", "75%",
+                           _g9d(qs[6]), _g9d(lrg[1]))
+            println()
+            # Row 7: 90% / large[2]                Variance
+            Printf.@printf("%3s%12s%16s%14s %s\n", "90%",
+                           _g9d(qs[7]), _g9d(lrg[2]),
+                           "Variance", _g9d(r.Variance))
+            # Row 8: 95% / large[3]                Skewness
+            Printf.@printf("%3s%12s%16s%14s %s\n", "95%",
+                           _g9d(qs[8]), _g9d(lrg[3]),
+                           "Skewness", _g9d(r.Skewness))
+            # Row 9: 99% / large[4]                Kurtosis
+            Printf.@printf("%3s%12s%16s%14s %s\n", "99%",
+                           _g9d(qs[9]), _g9d(lrg[4]),
+                           "Kurtosis", _g9d(r.Kurtosis))
+        end
+        return
+    end
+
+    # Stata %9.0g: up to 7 sig figs, capped at 9 chars total (so leading "0."
+    # for |x|<1 fits), then leading "0" stripped from |x|<1.
+    _g9(x; w::Int=9, mx::Int=7) = begin
+        (ismissing(x) || !isfinite(x)) && return "."
+        sig = mx
+        s = Printf.@sprintf("%.*g", sig, x)
+        while length(s) > w && sig > 1
+            sig -= 1
+            s = Printf.@sprintf("%.*g", sig, x)
+        end
+        0 < abs(x) < 1 ? replace(s, r"^(-?)0\." => s"\1.") : s
+    end
+    _comma(num::Integer) = begin
+        s = string(abs(num)); parts = String[]; i = length(s)
+        while i >= 1; push!(parts, s[max(1, i-2):i]); i -= 3; end
+        (num < 0 ? "-" : "") * join(reverse(parts), ",")
+    end
+
+    println("    Variable |        Obs        Mean    Std. dev.       Min        Max")
+    println("-"^13, "+", "-"^57)
+    for r in rows
+        Printf.@printf("%12s |  %9s   %9s   %9s  %9s  %9s\n",
+                       r.Variable, _comma(r.Obs),
+                       _g9(r.Mean), _g9(r.Std),
+                       _g9(r.Min),  _g9(r.Max))
+    end
+end
+
+"""
+    ereturn_list(m)
+
+Stata-style `ereturn list` for a regression object `m` (FixedEffectModels /
+GLM / StatsBase-compatible). Prints scalars, macros, and matrices, and
+returns them in a NamedTuple so they can be retrieved programmatically.
+"""
+function ereturn_list(m)
+    _try(f, m) = try f(m) catch; missing end
+
+    scalars = (;
+        N          = _try(StatsBase.nobs, m),
+        df_m       = _try(StatsBase.dof, m),
+        df_r       = _try(StatsBase.dof_residual, m),
+        r2         = _try(StatsBase.r2, m),
+        r2_a       = _try(StatsBase.adjr2, m),
+        rss        = _try(StatsBase.deviance, m),
+        rmse       = (rss = _try(StatsBase.deviance, m); dfr = _try(StatsBase.dof_residual, m);
+                      (ismissing(rss) || ismissing(dfr) || dfr == 0) ? missing : sqrt(rss / dfr)),
+        F          = hasproperty(m, :F) ? m.F : missing,
+        p          = hasproperty(m, :p) ? m.p : missing,
+    )
+    macros = (;
+        depvar  = hasproperty(m, :yname)   ? string(m.yname)   : missing,
+        indeps  = try join(string.(StatsBase.coefnames(m)), " ") catch; missing end,
+        cmd     = string(nameof(typeof(m))),
+    )
+    b = _try(StatsBase.coef, m)
+    V = _try(StatsBase.vcov, m)
+
+    println("scalars:")
+    for (k, v) in pairs(scalars)
+        ismissing(v) && continue
+        println("  e($k) = ", v isa Real ? round(v; sigdigits=8) : v)
+    end
+    println("\nmacros:")
+    for (k, v) in pairs(macros)
+        ismissing(v) && continue
+        println("  e($k) : \"", v, "\"")
+    end
+    println("\nmatrices:")
+    if !ismissing(b)
+        names_ = try StatsBase.coefnames(m) catch; ["x$i" for i in eachindex(b)] end
+        println("  e(b)  : 1 x $(length(b))")
+        _pt_compat(reshape(b, 1, :); header = names_)
+    end
+    if !ismissing(V)
+        println("  e(V)  : $(size(V,1)) x $(size(V,2))")
+        names_ = try StatsBase.coefnames(m) catch; ["x$i" for i in 1:size(V,1)] end
+        _pt_compat(V; header = names_, row_labels = names_)
+    end
+    return (; scalars, macros, b, V)
+end
+```
+
+# 1 Stata basics
+
+
+## 1.1 Interactive use
+
+## 1.2 Documentation
+
+### 1.2.1 Stata manuals
+
+### 1.2.2 Additional Stata resources
+
+### 1.2.3 The help command
+
+### 1.2.4 The search, findit, and hsearch commands
+
+## 1.3 Command syntax and operators
+
+### 1.3.1 Basic command syntax
+
+### 1.3.2 Example: The summarize command
+
+```{julia}
+#=
+sysuse auto.dta
+summarize
+=#
+#=
+sysuse auto.dta
+summarize
+=#
+auto = DataFrame(ReadStatTables.readstat("auto.dta"))
+typeof(auto)
+```
+
+```{julia}
+#=
+summarize mpg price weight , separator(2)
+=#
+#=
+summarize mpg price weight , separator(2)
+=#
+# summarize
+summarize_stata(auto)
+```
+
+```{julia}
+# summarize mpg price weight
+summarize_stata(auto, [:mpg, :price, :weight])
+```
+
+```{julia}
+# summarize price, detail
+summarize_stata(auto, :price; detail=true)
+```
+
+### 1.3.3 Example: The regress command
+
+```{julia}
+#=
+regress mpg price weight
+=#
+#=
+regress mpg price weight
+=#
+# regress mpg price weight
+model1 = FixedEffectModels.reg(auto, @formula(mpg ~ price + weight))
+println(model1)
+```
+
+```{julia}
+#=
+by foreign: regress mpg price weight if weight < 4000, vce (robust)
+=#
+#=
+by foreign: regress mpg price weight if weight < 4000, vce (robust)
+=#
+# by foreign: regress mpg price weight if weight < 4000, vce(robust)
+for g in groupby(filter(r -> r.weight < 4000, auto), :foreign)
+    println("\nforeign = $(first(g.foreign))")
+    m = FixedEffectModels.reg(DataFrame(g), @formula(mpg ~ price + weight))
+    println(m)
+end
+```
+
+```{julia}
+#=
+quietly regress mpg price weight
+=#
+#=
+quietly regress mpg price weight
+=#
+# quietly regress mpg price weight
+model_quiet = FixedEffectModels.reg(auto, @formula(mpg ~ price + weight));
+#nothing  # suppress output
+```
+
+```{julia}
+#=
+* Factor variable for rep78 - base category is omitted
+clear
+sysuse auto
+summarize i.rep78
+=#
+#=
+* Factor variable for rep78 - base category is omitted
+clear
+sysuse auto
+summarize i.rep78
+=#
+# Factor variable for rep78 - base category is omitted
+auto.rep78_cat = CategoricalArrays.categorical(auto.rep78)
+println("Summary of rep78 indicator levels:")
+println(combine(groupby(auto, :rep78_cat), nrow => :count))
+```
+
+```{julia}
+#=
+* Factor variable for rep78 - no category is omitted
+summarize ibn.rep78
+=#
+#=
+* Factor variable for rep78 - no category is omitted
+summarize ibn.rep78
+=#
+# summarize i.rep78  -- expand rep78 into 0/1 dummies (drop missings), summarize each
+vals = [_rawval(v) for v in skipmissing(auto.rep78)]
+levs = sort(unique(vals))
+dummies = DataFrame((Symbol("$(Int(l)).rep78") => Int.(vals .== l) for l in levs)...)
+summarize_stata(dummies)
+```
+
+```{julia}
+#=
+* Factor variables for interaction between two categorical variables
+summarize i.rep78#i.foreign, allbaselevels
+=#
+#=
+* Factor variables for interaction between two categorical variables
+summarize i.rep78#i.foreign, allbaselevels
+=#
+# Factor variable for rep78 - no category is omitted (all dummies)
+println("Counts for each level of rep78:")
+for lev in sort(unique(auto.rep78))
+    n = sum(auto.rep78 .== lev)
+    println("  rep78 == $lev : N = $n, Mean = $(round(mean(auto.rep78 .== lev), digits=4))")
+end
+```
+
+```{julia}
+#=
+* Factor variables for interaction between categorical and continuous variables
+summarize i.rep78#c.weight
+=#
+#=
+* Factor variables for interaction between categorical and continuous variables
+summarize i.rep78#c.weight
+=#
+# summarize i.rep78#i.foreign, allbaselevels
+# Drop rows where either factor is missing, then build a 0/1 dummy for every (rep78, foreign) cell
+sub   = dropmissing(auto[:, [:rep78, :foreign]])
+rep78v  = [_rawval(v) for v in sub.rep78]
+foreignv = [_rawval(v) for v in sub.foreign]
+rlevs = sort(unique(rep78v))
+flevs = sort(unique(foreignv))
+dummies = DataFrame((Symbol("$(Int(r)).rep78#$(Int(f)).foreign") =>
+                     Int.((rep78v .== r) .& (foreignv .== f))
+                     for r in rlevs, f in flevs)...)
+summarize_stata(dummies)
+```
+
+```{julia}
+#=
+* Factor variables for interaction between two continuous variables
+regress mpg price c.weight c.weight#c.weight, noheader
+=#
+#=
+* Factor variables for interaction between two continuous variables
+regress mpg price c.weight c.weight#c.weight, noheader
+=#
+# summarize i.rep78#c.weight
+# For each level r of rep78: weight when rep78==r, else 0 (drop rows where rep78 is missing)
+sub = dropmissing(auto[:, [:rep78, :weight]])
+rep78v = [_rawval(v) for v in sub.rep78]
+wv     = Float64.(sub.weight)
+rlevs  = sort(unique(rep78v))
+inter = DataFrame((Symbol("$(Int(r)).rep78#c.weight") =>
+                   ifelse.(rep78v .== r, wv, 0.0) for r in rlevs)...)
+summarize_stata(inter)
+```
+
+```{julia}
+# Factor variables for interaction between two continuous variables
+# regress mpg price c.weight c.weight#c.weight
+# NOTE: auto.dta stores weight as Int16 — squaring Int16 overflows silently in Julia,
+# so we cast to Float64 first to match Stata's numeric precision.
+auto.weight_sq = Float64.(auto.weight) .^ 2
+model_sq = FixedEffectModels.reg(auto, @formula(mpg ~ price + weight + weight_sq))
+println(model_sq)
+```
+
+
+### 1.3.4 Abbreviations, case sensitivity, and wildcards
+
+```{julia}
+#=
+summarize t*
+=#
+#=
+summarize t*
+=#
+# summarize t*     (variables starting with t)
+summarize_stata(auto, "t*")
+```
+
+```{julia}
+# summarize *e     (variables ending with e)
+summarize_stata(auto, "*e")
+```
+
+```{julia}
+# summarize price-weight    (range of columns, by column order)
+summarize_stata(auto, "price-weight")
+```
+
+### 1.3.5 Arithmetic, relational, and logical operators
+
+```{julia}
+#=
+display -2*(9/ (8+2-7))^2
+=#
+#=
+display -2*(9/ (8+2-7))^2
+=#
+# display -2*(9/(8+2-7))^2
+println(-2 * (9 / (8 + 2 - 7))^2)
+```
+
+```{julia}
+#=
+display 2/0
+=#
+#=
+display 2/0
+=#
+# display 2/0
+println(2 / 0)  # Julia returns Inf
+```
+
+```{julia}
+#=
+regress mpg price weight if weight <= 4000 & price <= 10000
+=#
+#=
+regress mpg price weight if weight <= 4000 & price <= 10000
+=#
+# regress mpg price weight if weight <= 4000 & price <= 10000
+sub = filter(r -> r.weight <= 4000 && r.price <= 10000, auto)
+model_sub = FixedEffectModels.reg(sub, @formula(mpg ~ price + weight))
+println(model_sub)
+```
+
+### 1.3.6 Error messages
+
+```{julia}
+#=
+*regress mpg notthere
+=#
+#=
+*regress mpg notthere
+=#
+# regress mpg notthere  -- would produce error
+# try
+#     FixedEffectModels.reg(auto, @formula(mpg ~ notthere))
+# catch e
+#     println("Error: ", e)
+# end
+```
+
+## 1.4 Do-files and log files
+
+### 1.4.1 Writing a do-file
+
+### 1.4.2 Running do-files
+
+```{julia}
+#=
+*do example. do
+=#
+#=
+*do example. do
+=#
+# do example.do  -- In Julia, use include("example.jl")
+# include("example.jl")
+```
+
+### 1.4.3 log files
+
+```{julia}
+#=
+*log using example.txt, text replace
+=#
+#=
+*log using example.txt, text replace
+=#
+# log using example.txt -- In Julia, redirect output to file
+# open("example.txt", "w") do io
+#     redirect_stdout(io) do
+#         # commands here
+#     end
+# end
+```
+
+### 1.4.4 A three-step process
+
+1. Create or change the do-file.
+2. Execute the do-file in Stata.
+3. Read the resulting log with a text editor.
+
+### 1.4.5 Comments and long lines
+
+```{julia}
+#=
+* Demonstrate use of comments
+* This program reads in system file auto.dta and gets summary statistics
+clear // Remove data from memory
+* The next code shows how to allow a single command to span two lines
+sysuse ///
+auto.dta
+summarize
+=#
+#=
+* Demonstrate use of comments
+* This program reads in system file auto.dta and gets summary statistics
+clear // Remove data from memory
+* The next code shows how to allow a single command to span two lines
+sysuse ///
+auto.dta
+summarize
+=#
+# Demonstrate use of comments
+# This program reads in system file auto.dta and gets summary statistics
+# In Julia, comments use #
+auto = DataFrame(ReadStatTables.readstat("auto.dta"))
+DataFrames.describe(auto)
+```
+
+
+```{julia}
+# Demonstrate use of comments
+# This program reads in system file auto.dta and gets summary statistics
+# In Julia, comments use #
+auto = DataFrame(ReadStatTables.readstat("auto.dta"))
+summarize_stata(auto)
+```
+
+### 1.4.6 Different implementations of Stata
+
+```{julia}
+#=
+*set matsize 300
+=#
+#=
+*set matsize 300
+=#
+# set matsize 300  -- not needed in Julia (no matrix size limit)
+```
+
+## 1.5 Scalars and matrices
+
+### 1.5.1 Scalars
+
+```{julia}
+#=
+* Scalars: Example
+scalar a = 2*3
+scalar b = "2 times 3 = "
+display b a
+=#
+#=
+* Scalars: Example
+scalar a = 2*3
+scalar b = "2 times 3 = "
+display b a
+=#
+# Scalars: Example
+a = 2 * 3
+b = "2 times 3 = "
+println(b, a)
+```
+
+### 1.5.2 Matrices
+
+```{julia}
+#=
+*Matrix commands : Example
+matrix define A = ( 1,2,3 \ 4,5,6 )
+matrix list A
+=#
+#=
+*Matrix commands : Example
+matrix define A = ( 1,2,3 \ 4,5,6 )
+matrix list A
+=#
+# Matrix commands: Example
+A = [1 2 3; 4 5 6]
+display(A)
+```
+
+```{julia}
+#=
+scalar c = A[2,3]
+display c
+=#
+#=
+scalar c = A[2,3]
+display c
+=#
+c = A[2, 3]
+println(c)
+```
+
+## 1.6 Using results from Stata commands
+
+### 1.6.1 Using results from the r-class command summarize
+
+```{julia}
+#=
+* Illustrate use of return list for r-class command summarize
+summarize mpg
+=#
+#=
+* Illustrate use of return list for r-class command summarize
+summarize mpg
+=#
+# Illustrate use of summary statistics for mpg
+println("Summary of mpg:")
+println("  N     = ", length(auto.mpg))
+println("  Mean  = ", round(mean(auto.mpg), digits=4))
+println("  Std   = ", round(std(auto.mpg), digits=4))
+println("  Min   = ", minimum(auto.mpg))
+println("  Max   = ", maximum(auto.mpg))
+```
+
+```{julia}
+#=
+return list
+=#
+#=
+return list
+=#
+summarize_stata(auto, :mpg)
+```
+
+```{julia}
+#=
+* Illustrate use of r()
+quietly summarize mpg
+scalar range = r(max) - r(min)
+display "Sample range = " range
+=#
+#=
+* Illustrate use of r()
+quietly summarize mpg
+scalar range = r(max) - r(min)
+display "Sample range = " range
+=#
+# return list equivalent - stored results
+r_mean = mean(auto.mpg)
+r_sd   = std(auto.mpg)
+r_min  = minimum(auto.mpg)
+r_max  = maximum(auto.mpg)
+r_N    = length(auto.mpg)
+r_sum  = sum(auto.mpg)
+println("r(N)    = ", r_N)
+println("r(mean) = ", r_mean)
+println("r(Var) = ", r_sd^2)
+println("r(sd)   = ", r_sd)
+println("r(min)  = ", r_min)
+println("r(max)  = ", r_max)
+println("r(sum)  = ", r_sum)
+```
+
+```{julia}
+#=
+*Save a result in r() as a scalar
+scalar mpgmean = r(mean)
+=#
+#=
+*Save a result in r() as a scalar
+scalar mpgmean = r(mean)
+=#
+# Illustrate use of r()
+range_mpg = r_max - r_min
+println("Sample range = ", range_mpg)
+```
+
+```{julia}
+# Save a result as a scalar
+mpgmean = r_mean
+```
+
+### 1.6.2 Using results from the e-class command regress
+
+```{julia}
+#=
+regress mpg price weight
+=#
+#=
+regress mpg price weight
+=#
+# regress mpg price weight
+model_ols = FixedEffectModels.reg(auto, @formula(mpg ~ price + weight))
+println(model_ols)
+```
+
+```{julia}
+#=
+* *ereturn list after e-class command regress
+ereturn list
+=#
+#=
+* *ereturn list after e-class command regress
+ereturn list
+=#
+# ereturn list
+ereturn_list(model_ols);
+```
+
+```{julia}
+#=
+* Use of e() where scalar
+scalar r2 = e(mss ) / ( e(mss) + e(rss) )
+display "r-squared = " r2
+=#
+#=
+* Use of e() where scalar
+scalar r2 = e(mss ) / ( e(mss) + e(rss) )
+display "r-squared = " r2
+=#
+# ereturn list after regress
+println("Number of obs = ", StatsBase.nobs(model_ols))
+println("R-squared     = ", round(StatsBase.r2(model_ols), digits=6))
+println("Adj R-squared = ", round(StatsBase.adjr2(model_ols), digits=6))
+println("Coefficients  = ", StatsBase.coef(model_ols))
+println("Std errors    = ", StatsBase.stderror(model_ols))
+```
+
+```{julia}
+#=
+* Use of e() where matrix
+matrix best = e(b)
+scalar bprice = best[1,1]
+matrix Vest = e(V)
+scalar Vprice = Vest[1,1]
+scalar tprice = bprice/sqrt(Vprice)
+display "t statistic for H O : b_price = 0 is " tprice
+=#
+#=
+* Use of e() where matrix
+matrix best = e(b)
+scalar bprice = best[1,1]
+matrix Vest = e(V)
+scalar Vprice = Vest[1,1]
+scalar tprice = bprice/sqrt(Vprice)
+display "t statistic for H O : b_price = 0 is " tprice
+=#
+# Use of e() where scalar -- compute R-squared manually
+tss = sum((auto.mpg .- mean(auto.mpg)).^2)
+rss = GLM.deviance(model_ols)
+r2_manual = 1 - rss / tss
+println("r-squared = ", round(r2_manual, digits=6))
+```
+
+```{julia}
+# Use of e() where matrix
+best   = StatsBase.coef(model_ols)
+bprice = best[2]  # coefficient on price
+Vest   = StatsBase.vcov(model_ols)
+Vprice = Vest[2, 2]
+tprice = bprice / sqrt(Vprice)
+println("t statistic for H0: b_price = 0 is ", round(tprice, digits=4))
+```
+
+## 1.7 Global and local macros
+
+### 1.7.1 Global macros
+
+```{julia}
+#=
+* Global macro definition and use
+global xlist price weight
+regress mpg $xlist , noheader // $ prefix is necessary
+=#
+#=
+* Global macro definition and use
+global xlist price weight
+regress mpg $xlist , noheader // $ prefix is necessary
+=#
+# Global macro definition and use
+xlist = [:price, :weight]
+f = Term(:mpg) ~ sum(Term.(xlist))
+model_g = FixedEffectModels.reg(auto, f)
+println(model_g)
+```
+
+### 1.7.2 local macros
+
+```{julia}
+#=
+* Local macro definition and use
+local xlist "price weigh"
+regress mpg `xlist', noheader // single quotes are necessary
+=#
+#=
+* Local macro definition and use
+local xlist "price weigh"
+regress mpg `xlist', noheader // single quotes are necessary
+=#
+# Local macro definition and use
+xlist = [:price, :weight]
+f = Term(:mpg) ~ sum(Term.(xlist))
+model_l = FixedEffectModels.reg(auto, f)
+println(model_l)
+```
+
+```{julia}
+#=
+* Local macro definition without double quotes
+local y mpg
+regress `y' `xlist', noheader
+=#
+#=
+* Local macro definition without double quotes
+local y mpg
+regress `y' `xlist', noheader
+=#
+# Local macro definition without double quotes
+y = :mpg
+f = Term(y) ~ sum(Term.(xlist))
+model_l2 = FixedEffectModels.reg(auto, f)
+println(model_l2)
+```
+
+```{julia}
+#=
+* Local macro definition through function evaluation
+local z = 2+2
+display `z'
+=#
+#=
+* Local macro definition through function evaluation
+local z = 2+2
+display `z'
+=#
+# Local macro definition through function evaluation
+z = 2 + 2
+println(z)
+```
+
+### 1.7.3 Scalar or macro?
+
+```{julia}
+#=
+* Scalars disappear after clear all but macro does not
+global b 3
+local c 4
+scalar d = 5
+clear
+display $b_ _skip(3) `c' // display macros
+=#
+#=
+* Scalars disappear after clear all but macro does not
+global b 3
+local c 4
+scalar d = 5
+clear
+display $b_ _skip(3) `c' // display macros
+=#
+# In Julia, variables persist until they go out of scope
+b = 3
+c = 4
+d = 5
+println(b, "   ", c)  # display variables
+```
+
+```{julia}
+#=
+* display the scalar
+display d 
+=#
+#=
+* display the scalar
+display d 
+=#
+# display the scalar
+println(d)
+```
+
+```{julia}
+#=
+clear all
+display $b _skip(3) `c' // display macros
+=#
+#=
+clear all
+display $b _skip(3) `c' // display macros
+=#
+# After clearing workspace, variables are gone
+# In Julia, variables remain in scope unless explicitly removed
+println(b, "   ", c)
+```
+
+```{julia}
+#=
+* display the scalar
+*display d 
+=#
+#=
+* display the scalar
+*display d 
+=#
+# display the scalar
+# println(d)  # would still work in Julia
+```
+
+## 1.8 Looping commands
+
+```{julia}
+#=
+* Make artificial dataset of 100 observations on 4 uniform variables
+clear
+set obs 100
+*obs was 0 , now 100
+set seed 10101
+generate x1var = runiform()
+generate x2var = runiform()
+generate x3var = runiform()
+generate x4var = runiform()
+=#
+#=
+* Make artificial dataset of 100 observations on 4 uniform variables
+clear
+set obs 100
+*obs was 0 , now 100
+set seed 10101
+generate x1var = runiform()
+generate x2var = runiform()
+generate x3var = runiform()
+generate x4var = runiform()
+=#
+# Make artificial dataset of 100 observations on 4 uniform variables
+Random.seed!(10101)
+df_loop = DataFrame(
+    x1var = Random.rand(100),
+    x2var = Random.rand(100),
+    x3var = Random.rand(100),
+    x4var = Random.rand(100)
+)
+```
+
+```{julia}
+#=
+* Manually obtain the sum of four variables
+generate sum = x1var + x2var + x3var + x4var
+summarize sum
+=#
+#=
+* Manually obtain the sum of four variables
+generate sum = x1var + x2var + x3var + x4var
+summarize sum
+=#
+# Manually obtain the sum of four variables
+df_loop.sum_var = df_loop.x1var .+ df_loop.x2var .+ df_loop.x3var .+ df_loop.x4var
+println("Summary of sum:")
+println("  N    = ", length(df_loop.sum_var))
+println("  Mean = ", round(mean(df_loop.sum_var), digits=4))
+println("  Std  = ", round(std(df_loop.sum_var), digits=4))
+println("  Min  = ", round(minimum(df_loop.sum_var), digits=4))
+println("  Max  = ", round(maximum(df_loop.sum_var), digits=4))
+```
+
+### 1.8.1 The foreach loop
+
+```{julia}
+#=
+* foreach loop with a variable list
+quietly replace sum = 0
+foreach var of varlist x1var x2var x3var x4var {
+    quietly replace sum = sum + `var'
+    }
+summarize sum
+=#
+#=
+* foreach loop with a variable list
+quietly replace sum = 0
+foreach var of varlist x1var x2var x3var x4var {
+    quietly replace sum = sum + `var'
+    }
+summarize sum
+=#
+# foreach loop with a variable list
+df_loop.sum_var .= 0.0
+for var in [:x1var, :x2var, :x3var, :x4var]
+    df_loop.sum_var .+= df_loop[!, var]
+end
+println("Summary of sum (foreach):")
+println("  Mean = ", round(mean(df_loop.sum_var), digits=4))
+println("  Std  = ", round(std(df_loop.sum_var), digits=4))
+```
+
+### 1.8.2 The forvalues loop
+
+```{julia}
+#=
+* forvalues loop to create a swn of variables
+quietly replace sum = 0
+forvalues i = 1/4 {
+    quietly replace sum = sum + x`i'var
+    }
+summarize sum
+=#
+#=
+* forvalues loop to create a swn of variables
+quietly replace sum = 0
+forvalues i = 1/4 {
+    quietly replace sum = sum + x`i'var
+    }
+summarize sum
+=#
+# forvalues loop to create a sum of variables
+df_loop.sum_var .= 0.0
+for i in 1:4
+    df_loop.sum_var .+= df_loop[!, Symbol("x$(i)var")]
+end
+println("Summary of sum (forvalues):")
+println("  Mean = ", round(mean(df_loop.sum_var), digits=4))
+println("  Std  = ", round(std(df_loop.sum_var), digits=4))
+```
+
+```{julia}
+#=
+// Not included in book
+* foreach loop with a number list
+quietly replace sum = 0
+foreach i of numlist 1 2 3 4 {
+    quietly replace sum = sum + x`i'var
+}
+summarize sum
+=#
+#=
+// Not included in book
+* foreach loop with a number list
+quietly replace sum = 0
+foreach i of numlist 1 2 3 4 {
+    quietly replace sum = sum + x`i'var
+}
+summarize sum
+=#
+# foreach loop with a number list
+df_loop.sum_var .= 0.0
+for i in [1, 2, 3, 4]
+    df_loop.sum_var .+= df_loop[!, Symbol("x$(i)var")]
+end
+println("Summary of sum (numlist):")
+println("  Mean = ", round(mean(df_loop.sum_var), digits=4))
+```
+
+### 1.8.3 The while loop
+
+```{julia}
+#=
+* While loop and local macros to create a sum of variables
+quietly replace sum = 0
+local i 1
+while `i' <= 4 {
+    quietly replace sum = sum + x`i'var
+    local i = `i' + 1
+    }
+summarize sum
+=#
+#=
+* While loop and local macros to create a sum of variables
+quietly replace sum = 0
+local i 1
+while `i' <= 4 {
+    quietly replace sum = sum + x`i'var
+    local i = `i' + 1
+    }
+summarize sum
+=#
+# While loop and local variables to create a sum of variables
+df_loop.sum_var .= 0.0
+i = 1
+while i <= 4
+    df_loop.sum_var .+= df_loop[!, Symbol("x$(i)var")]
+    i += 1
+end
+println("Summary of sum (while):")
+println("  Mean = ", round(mean(df_loop.sum_var), digits=4))
+println("  Std  = ", round(std(df_loop.sum_var), digits=4))
+```
+
+### 1.8.4 The continue command
+
+## 1.9 Some useful commands
+
+## 1.10 Template do-file
+
+```{julia}
+#=
+*log close
+* 1. Program name
+* mus01p2template.do is a template do-file
+* 2. Write output to a log file
+log using musr/mus01p2template.txt, text replace
+* 3. Stata version
+version 10.1 // so will still run in a later version o f Stata
+* 4. Program explanation
+*This illustrative program creates 100 uniform variates
+* 5. Change Stata default settings - two examples are given
+set more off // scroll screen output by at full speed
+set mem 20m // set aside 20 mb for memory space
+* 6. Set program parameters using global macros
+global numobs 100
+local seed 10101
+local xlist xvar
+* 7. Generate data and summarize
+set obs $numobs
+set seed `seed'
+generate xvar = runiform()
+generate yvar = xvar^2
+summarize
+* 8. Demonstrate use of results stored in r ()
+summarize xvar
+display "Sample range = " r(max)-r(min)
+regress yvar `xlist'
+scalar r2 = e(mss) / ( e(mss)+e(rss) )
+display "r-squared = " r2
+* 9. Close output file and exit Stata
+log close
+exit, clear
+=#
+#=
+*log close
+* 1. Program name
+* mus01p2template.do is a template do-file
+* 2. Write output to a log file
+log using musr/mus01p2template.txt, text replace
+* 3. Stata version
+version 10.1 // so will still run in a later version o f Stata
+* 4. Program explanation
+*This illustrative program creates 100 uniform variates
+* 5. Change Stata default settings - two examples are given
+set more off // scroll screen output by at full speed
+set mem 20m // set aside 20 mb for memory space
+* 6. Set program parameters using global macros
+global numobs 100
+local seed 10101
+local xlist xvar
+* 7. Generate data and summarize
+set obs $numobs
+set seed `seed'
+generate xvar = runiform()
+generate yvar = xvar^2
+summarize
+* 8. Demonstrate use of results stored in r ()
+summarize xvar
+display "Sample range = " r(max)-r(min)
+regress yvar `xlist'
+scalar r2 = e(mss) / ( e(mss)+e(rss) )
+display "r-squared = " r2
+* 9. Close output file and exit Stata
+log close
+exit, clear
+=#
+# mus01p2template.jl is a template script
+# Julia equivalent of Stata template do-file
+
+# Program parameters
+numobs = 100
+seed   = 10101
+
+# Generate data and summarize
+Random.seed!(seed)
+df_template = DataFrame(xvar = Random.rand(numobs))
+df_template.yvar = df_template.xvar .^ 2
+println("Summary:")
+println(DataFrames.describe(df_template))
+
+# Demonstrate use of stored results
+xmean = mean(df_template.xvar)
+xmin  = minimum(df_template.xvar)
+xmax  = maximum(df_template.xvar)
+println("\nSample range = ", xmax - xmin)
+
+# Regression
+model_template = FixedEffectModels.reg(df_template, @formula(yvar ~ xvar))
+r2_val = StatsBase.r2(model_template)
+println("r-squared = ", round(r2_val, digits=6))
+```
+
+## 1.11 User-written commands
+
+```{julia}
+#=
+findit instrumental variables
+=#
+#=
+findit instrumental variables
+=#
+# In Julia, additional packages are installed via Pkg
+# using Pkg
+# Pkg.add("IVRegression")  # or similar package for instrumental variables
+```
+
+```{julia}
+#=
+findit ivreg2
+=#
+#=
+findit ivreg2
+=#
+# findit ivreg2 equivalent
+# In Julia, search for packages at https://juliahub.com/
+```
+
+## 1.12 Stata resources

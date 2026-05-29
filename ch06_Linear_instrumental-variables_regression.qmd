@@ -1,0 +1,3631 @@
+---
+title: "Microeconometrics Using Stata"
+Authors:
+- Colin Cameron
+- Pravin Trivedi
+format:
+  html:
+    toc: true
+    toc-depth: 5
+    toc-expand: true
+    toc-title: Contents
+    toc-location: left
+execute:
+  enabled: true
+jupyter: julia-1.12
+---
+
+[Microeconometrics with R](https://ycroissant.github.io/micsr_book/)
+
+[UCLA](https://stats.oarc.ucla.edu/stata/modules/)
+
+[Github](https://github.com/thousandoaks?tab=repositories)
+
+# Julia setup
+
+
+```{julia}
+using CairoMakie
+CairoMakie.activate!(type = "png")
+using CategoricalArrays
+using CSV
+using Chain
+using DataFrames
+using Downloads
+using FixedEffectModels
+using Gadfly
+using GLM
+using HypothesisTests
+using Makie
+using PrettyTables
+using ReadStatTables
+using RegressionTables
+using Statistics
+
+using DataFrames, ReadStatTables, CSV, CairoMakie, PrettyTables
+using Statistics, StatsBase, GLM, FixedEffectModels
+using CategoricalArrays, LinearAlgebra
+using RegressionTables
+using KernelDensity, Loess
+using RDatasets, Random, Printf
+using Optim, Distributions, SpecialFunctions, HypothesisTests
+using MixedModels   # panel RE (xtreg, re  effectively)
+using Combinatorics # for FE logit (conditional MLE subset enumeration)
+using ForwardDiff   # explicit gradients for Optim (autodiff kwarg pipeline broken in current Optim)
+
+# PrettyTables v3 compatibility shim. v3 dropped `ft_printf` (now
+# `fmt__printf`) and requires the `formatters` keyword to be a Vector.
+# All call sites in this document use the v2 form
+# `formatters = PrettyTables.ft_printf(fmt, cols)`; re-create
+# `ft_printf` so it returns a single-element Vector wrapping the new
+# `fmt__printf`, accepting either an Int column index or a range.
+if !isdefined(PrettyTables, :ft_printf)
+    @eval PrettyTables begin
+        ft_printf(fmt, cols) =
+            [fmt__printf(fmt, collect(cols isa Integer ? (cols:cols) : cols))]
+        ft_printf(fmt) = [fmt__printf(fmt)]   # apply to all columns (v2 single-arg)
+    end
+end
+
+# PrettyTables v3 also renamed the `header` keyword to `column_labels`
+# (which must be an `AbstractVector` — a flat vector for one header row,
+# or a vector of row-vectors for stacked headers; a Tuple is rejected).
+# `_pt_compat` wraps `pretty_table` so the document's v2-style calls keep
+# working: it maps `header` → `column_labels` (Tuple → Vector), and
+# normalises `formatters` to a flat Vector. All `PrettyTables.pretty_table`
+# call sites in the document route through this wrapper. `_PT_REAL` holds
+# the real function (no trailing `(`, so the route-through rewrite leaves
+# it untouched — no recursion).
+const _PT_REAL = PrettyTables.pretty_table
+function _pt_compat(data; header = nothing, formatters = nothing,
+                    body_hlines = nothing, kwargs...)
+    kw = Dict{Symbol,Any}(kwargs)
+    if header !== nothing
+        kw[:column_labels] = header isa Tuple ? collect(header) : header
+    end
+    if formatters !== nothing
+        kw[:formatters] =
+            formatters isa Function ? [formatters] :
+            formatters isa Tuple ?
+                collect(Iterators.flatten(
+                    x isa Union{AbstractVector,Tuple} ? x : (x,) for x in formatters)) :
+                formatters
+    end
+    # `body_hlines` (v2) has no v3 equivalent — it only drew cosmetic
+    # horizontal rules after given rows. Captured here and dropped so the
+    # table still renders (without the extra separators). `alignment` and
+    # `row_labels` are unchanged in v3 and pass straight through.
+    return _PT_REAL(data; kw...)
+end
+
+# Optim autodiff compat shim. The installed Optim's `autodiff` kwarg
+# rejects the Symbol form `:forward` (it now expects an ADTypes type),
+# and even the ADTypes path trips a DifferentiationInterface bug in
+# this version. The fix: don't use Optim's autodiff plumbing at all —
+# wrap `f` with an explicit ForwardDiff-computed gradient and call the
+# 5-arg `optimize(f, g!, x0, method, opts)` form, which doesn't go
+# through autodiff. `_optimize_compat` routes every Optim.optimize call
+# in the document through this translation; 4-arg calls with
+# `autodiff = :forward` are rewritten to the 5-arg gradient form, all
+# other shapes pass through. `_OPT_REAL` holds the real function (no
+# trailing `(`, so the route-through rewrite leaves it untouched).
+const _OPT_REAL = Optim.optimize
+function _optimize_compat(args...; kwargs...)
+    kw = Dict{Symbol,Any}(kwargs)
+    ad = pop!(kw, :autodiff, nothing)
+    # If `autodiff = :forward` is requested, build the gradient via
+    # ForwardDiff and use the explicit-gradient path. Handles any arg
+    # shape where args[1]=f, args[2]=x0 (method/options follow): 3-arg
+    # `(f, x0, method)`, 4-arg `(f, x0, method, opts)`, etc.
+    if ad isa Symbol && (ad === :forward || ad === :forwarddiff) && length(args) >= 2
+        f, x0 = args[1], args[2]
+        g!(g, x) = ForwardDiff.gradient!(g, f, x)
+        return _OPT_REAL(f, g!, x0, args[3:end]...; kw...)
+    end
+    return ad === nothing ? _OPT_REAL(args...; kw...) :
+                            _OPT_REAL(args...; autodiff = ad, kw...)
+end
+```
+
+```{julia}
+_rawval(x) = hasproperty(x, :value) ? x.value : x  # unwrap ReadStatTables.LabeledValue
+
+function _numeric_vec(col)
+    vals = collect(skipmissing(col))
+    isempty(vals) && return Float64[]
+    T = Base.nonmissingtype(eltype(col))
+    T <: Real && return convert(Vector{Float64}, vals)
+    try
+        return Float64[Float64(_rawval(v)) for v in vals]
+    catch
+        return nothing  # non-numeric (strings, etc.)
+    end
+end
+
+"""
+Expand a Stata-style varlist pattern against DataFrame columns. Supports:
+  * `t*`, `*t`, `*mpg*`, `t?`   — glob wildcards
+  * `price-weight`              — range of columns (inclusive, by column order)
+  * exact names, Symbols, vectors, and the literal "_all"
+"""
+function _expand_varlist(df, vars)
+    cols = string.(DataFrames.names(df))
+    patterns = vars isa Union{Symbol,AbstractString} ? [string(vars)] :
+               vars isa AbstractVector ? [string(v) for v in vars] :
+               [string(v) for v in collect(vars)]
+
+    out = String[]
+    for p in patterns
+        if p == "_all"
+            append!(out, cols)
+        elseif occursin('*', p) || occursin('?', p)
+            rx = Regex("^" * replace(p, "*" => ".*", "?" => ".") * "\$")
+            for c in cols
+                occursin(rx, c) && push!(out, c)
+            end
+        elseif occursin('-', p) && !startswith(p, "-") && !(p in cols)
+            parts = split(p, '-', limit=2)
+            i = findfirst(==(String(parts[1])), cols)
+            j = findfirst(==(String(parts[2])), cols)
+            (i === nothing || j === nothing) && error("Unknown variable in range '$p'")
+            i, j = minmax(i, j)
+            append!(out, cols[i:j])
+        else
+            push!(out, p)
+        end
+    end
+
+    seen = Set{String}(); uniq = String[]
+    for v in out
+        v in seen || (push!(seen, v); push!(uniq, v))
+    end
+    return Symbol.(uniq)
+end
+
+function summarize_stata(df::DataFrames.AbstractDataFrame, vars=nothing; detail::Bool=false)
+    if vars === nothing
+        varlist = Symbol[]
+        for n in DataFrames.names(df)
+            _numeric_vec(df[!, n]) === nothing || push!(varlist, Symbol(n))
+        end
+    else
+        varlist = _expand_varlist(df, vars)
+    end
+
+    rows = []
+    for v in varlist
+        xraw = _numeric_vec(df[!, v])
+        x = xraw === nothing ? Float64[] : xraw
+        n = length(x)
+        if n == 0
+            push!(rows, (; Variable=string(v), Obs=0, Mean=missing,
+                           Std=missing, Min=missing, Max=missing))
+            continue
+        end
+        μ  = Statistics.mean(x)
+        σ  = n > 1 ? Statistics.std(x) : missing
+        base = (; Variable=string(v), Obs=n, Mean=μ, Std=σ,
+                  Min=minimum(x), Max=maximum(x))
+        if detail
+            qs = Statistics.quantile(x, [0.01,0.05,0.10,0.25,0.50,0.75,0.90,0.95,0.99])
+            # Stata uses biased moments for skewness/kurtosis
+            m2 = Statistics.mean((x .- μ).^2)
+            m3 = Statistics.mean((x .- μ).^3)
+            m4 = Statistics.mean((x .- μ).^4)
+            skew = m2 > 0 ? m3 / m2^(3/2) : missing
+            kurt = m2 > 0 ? m4 / m2^2     : missing
+            push!(rows, merge(base,
+                (; p1=qs[1], p5=qs[2], p10=qs[3], p25=qs[4], p50=qs[5],
+                   p75=qs[6], p90=qs[7], p95=qs[8], p99=qs[9],
+                   Variance = ismissing(σ) ? missing : σ^2,
+                   Skewness = skew, Kurtosis = kurt)))
+        else
+            push!(rows, base)
+        end
+    end
+
+    # Stata's `summarize, detail` block — one per requested variable.
+    if detail
+        _g9d(x; w::Int = 9, mx::Int = 7) = begin
+            (ismissing(x) || !isfinite(x)) && return "."
+            sig = mx
+            s = Printf.@sprintf("%.*g", sig, x)
+            while length(s) > w && sig > 1
+                sig -= 1; s = Printf.@sprintf("%.*g", sig, x)
+            end
+            0 < abs(x) < 1 ? replace(s, r"^(-?)0\." => s"\1.") : s
+        end
+        _comma_d(n::Integer) = replace(string(n), r"(\d)(?=(\d{3})+$)" => s"\1,")
+        for r in rows
+            v = r.Variable
+            x = _numeric_vec(df[!, Symbol(v)])
+            x === nothing && (println("$v: not numeric"); continue)
+            n = length(x); ssorted = sort(x)
+            small4 = ssorted[1:min(4, n)]
+            large4 = ssorted[max(1, n - 3):n]    # ascending; Stata also shows ascending here
+            println()
+            println(lpad(v, 36))
+            println("-"^61)
+            println(lpad("Percentiles", 26),  lpad("Smallest", 16))
+            pct = [0.01, 0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95, 0.99]
+            qs  = Statistics.quantile(x, pct)
+            sml = [get(small4, i, missing) for i in 1:4]
+            lrg = [get(large4, i, missing) for i in 1:4]
+            # Row 1: 1% / small[1]
+            Printf.@printf("%3s%12s%16s\n", "1%",
+                           _g9d(qs[1]), _g9d(sml[1]))
+            # Row 2: 5% / small[2]
+            Printf.@printf("%3s%12s%16s\n", "5%",
+                           _g9d(qs[2]), _g9d(sml[2]))
+            # Row 3: 10% / small[3]                Obs <N>
+            Printf.@printf("%3s%12s%16s%14s %s\n", "10%",
+                           _g9d(qs[3]), _g9d(sml[3]),
+                           "Obs", _comma_d(n))
+            # Row 4: 25% / small[4]                Sum of wgt.
+            Printf.@printf("%3s%12s%16s%14s %s\n", "25%",
+                           _g9d(qs[4]), _g9d(sml[4]),
+                           "Sum of wgt.", _comma_d(n))
+            println()
+            # Row 5: 50% / blank          Mean
+            Printf.@printf("%3s%12s%16s%14s %s\n", "50%",
+                           _g9d(qs[5]), "", "Mean", _g9d(r.Mean))
+            Printf.@printf("%3s%12s%16s%14s %s\n",
+                           "", "", "Largest",
+                           "Std. dev.", _g9d(r.Std))
+            # Row 6: 75% / large[1]
+            Printf.@printf("%3s%12s%16s\n", "75%",
+                           _g9d(qs[6]), _g9d(lrg[1]))
+            println()
+            # Row 7: 90% / large[2]                Variance
+            Printf.@printf("%3s%12s%16s%14s %s\n", "90%",
+                           _g9d(qs[7]), _g9d(lrg[2]),
+                           "Variance", _g9d(r.Variance))
+            # Row 8: 95% / large[3]                Skewness
+            Printf.@printf("%3s%12s%16s%14s %s\n", "95%",
+                           _g9d(qs[8]), _g9d(lrg[3]),
+                           "Skewness", _g9d(r.Skewness))
+            # Row 9: 99% / large[4]                Kurtosis
+            Printf.@printf("%3s%12s%16s%14s %s\n", "99%",
+                           _g9d(qs[9]), _g9d(lrg[4]),
+                           "Kurtosis", _g9d(r.Kurtosis))
+        end
+        return
+    end
+
+    # Stata %9.0g: up to 7 sig figs, capped at 9 chars total (so leading "0."
+    # for |x|<1 fits), then leading "0" stripped from |x|<1.
+    _g9(x; w::Int=9, mx::Int=7) = begin
+        (ismissing(x) || !isfinite(x)) && return "."
+        sig = mx
+        s = Printf.@sprintf("%.*g", sig, x)
+        while length(s) > w && sig > 1
+            sig -= 1
+            s = Printf.@sprintf("%.*g", sig, x)
+        end
+        0 < abs(x) < 1 ? replace(s, r"^(-?)0\." => s"\1.") : s
+    end
+    _comma(num::Integer) = begin
+        s = string(abs(num)); parts = String[]; i = length(s)
+        while i >= 1; push!(parts, s[max(1, i-2):i]); i -= 3; end
+        (num < 0 ? "-" : "") * join(reverse(parts), ",")
+    end
+
+    println("    Variable |        Obs        Mean    Std. dev.       Min        Max")
+    println("-"^13, "+", "-"^57)
+    for r in rows
+        Printf.@printf("%12s |  %9s   %9s   %9s  %9s  %9s\n",
+                       r.Variable, _comma(r.Obs),
+                       _g9(r.Mean), _g9(r.Std),
+                       _g9(r.Min),  _g9(r.Max))
+    end
+end
+
+"""
+    wald_test(model, vars; values=zeros(length(vars)))
+
+Stata-style `test <varlist>` after a regression — joint Wald test of
+H0: βⱼ = value[j] for each j in `vars`. Uses the model's vcov (so it
+respects robust/cluster SE if fitted that way). Reports the F statistic
+F(q, dof_resid) and p-value, like Stata's `test` after `regress`.
+"""
+function wald_test(model, vars::AbstractVector; values=zeros(length(vars)))
+    β     = StatsBase.coef(model)
+    V     = StatsBase.vcov(model)
+    names = string.(StatsBase.coefnames(model))
+    vs    = string.(vars)
+    idx   = [findfirst(==(v), names) for v in vs]
+    miss  = findall(x -> x === nothing, idx)
+    isempty(miss) || error("variable(s) not found in model: $(vs[miss])")
+
+    # Drop coefficients with non-finite β or vcov row (collinear / dropped),
+    # mirroring Stata's `test`/`testparm` behaviour.
+    vals = collect(values)
+    bad  = findall(k -> !isfinite(β[idx[k]]) || any(!isfinite, V[idx[k], idx]),
+                   eachindex(idx))
+    if !isempty(bad)
+        @warn "Dropping collinear / non-finite coefficient(s): $(vs[bad])"
+        keep = setdiff(eachindex(idx), bad)
+        vs, idx, vals = vs[keep], idx[keep], vals[keep]
+    end
+    isempty(vs) && error("No testable coefficients remain.")
+
+    q     = length(vs)
+    Rβ    = β[idx] .- vals
+    W     = Rβ' * (V[idx, idx] \ Rβ)
+    dfr   = StatsBase.dof_residual(model)
+    Fstat = W / q
+    p     = 1 - Distributions.cdf(Distributions.FDist(q, dfr), Fstat)
+
+    println("Wald F test (respects model's vcov):")
+    for (k, v) in enumerate(vs)
+        Printf.@printf("  ( %d)  %s = %g\n", k, v, values[k])
+    end
+    Printf.@printf("\n       F( %d, %g) = %.4f\n", q, dfr, Fstat)
+    Printf.@printf("            Prob > F = %.4f\n", p)
+    return (; F=Fstat, df1=q, df2=dfr, p=p, chi2=W)
+end
+
+"""
+    regress_stata(model; level=0.95)
+
+Stata-style `regress` output — prints the ANOVA table, overall F-statistic,
+R², adjusted R², Root MSE, and the coefficient table with t-statistics,
+p-values, and confidence intervals, matching the format of Stata's
+`regress` command. The intercept is relabelled `_cons`.
+
+Works with any `StatsBase`-compatible OLS model, e.g. the output of
+`FixedEffectModels.reg(df, @formula(y ~ x2 + x3))`.
+"""
+function regress_stata(model; level::Float64=0.95, noheader::Bool=false)
+    β      = StatsBase.coef(model)
+    V      = StatsBase.vcov(model)
+    se     = sqrt.(max.(LinearAlgebra.diag(V), 0.0))
+    nm_raw = string.(StatsBase.coefnames(model))
+    nm     = replace.(nm_raw, "(Intercept)" => "_cons")
+    has_int = any(==("_cons"), nm)
+
+    n      = Int(StatsBase.nobs(model))
+    rss    = StatsBase.deviance(model)
+    r2     = StatsBase.r2(model)
+    ar2    = StatsBase.adjr2(model)
+    dof_r  = Int(StatsBase.dof_residual(model))
+    k      = length(β) - (has_int ? 1 : 0)
+    tss    = rss / max(1 - r2, eps())
+    mss    = tss - rss
+    rmse   = sqrt(rss / dof_r)
+    Fstat  = (mss / k) / (rss / dof_r)
+    pF     = 1 - Distributions.cdf(Distributions.FDist(k, dof_r), Fstat)
+
+    yname = try
+        string(StatsBase.responsename(model))
+    catch
+        hasproperty(model, :yname) ? string(model.yname) : "y"
+    end
+
+    t_stat = β ./ se
+    tcrit  = Distributions.quantile(Distributions.TDist(dof_r), 1 - (1-level)/2)
+    p_val  = 2 .* (1 .- Distributions.cdf.(Distributions.TDist(dof_r), abs.(t_stat)))
+    ci_lo  = β .- tcrit .* se
+    ci_hi  = β .+ tcrit .* se
+
+    # Stata %10.0g-style: `sig` significant digits, strip leading 0 for |x|<1,
+    # right-aligned in width `w`.
+    function _g(x, w; sig=7)
+        (ismissing(x) || !isfinite(x)) && return Printf.@sprintf("%*s", w, ".")
+        s = Printf.@sprintf("%.*g", sig, x)
+        if 0 < abs(x) < 1
+            s = replace(s, r"^(-?)0\." => s"\1.")
+        end
+        return Printf.@sprintf("%*s", w, s)
+    end
+
+    # ── ANOVA table + summary-stats block (skipped when `noheader=true`,
+    # matching Stata's `regress y x, noheader` option)
+    if !noheader
+        println()
+        Printf.@printf("%12s | %10s %10s %10s    %-13s = %10d\n",
+                       "Source", "SS", "df", "MS", "Number of obs", n)
+        println("-"^13, "+", "-"^34, "   ",
+                Printf.@sprintf("%-13s = %10.2f", "F($k, $dof_r)", Fstat))
+        Printf.@printf("%12s | %s %10d %s    %-13s = %10.4f\n",
+                       "Model", _g(mss, 10), k, _g(mss/k, 10), "Prob > F", pF)
+        Printf.@printf("%12s | %s %10d %s    %-13s = %10.4f\n",
+                       "Residual", _g(rss, 10), dof_r, _g(rss/dof_r, 10),
+                       "R-squared", r2)
+        println("-"^13, "+", "-"^34, "   ",
+                Printf.@sprintf("%-13s = %10.4f", "Adj R-squared", ar2))
+        Printf.@printf("%12s | %s %10d %s    %-13s = %10.4f\n",
+                       "Total", _g(tss, 10), n-1, _g(tss/(n-1), 10),
+                       "Root MSE", rmse)
+    end
+    println()
+
+    # ── Coefficient table
+    println("-"^78)
+    Printf.@printf("%12s | %10s  %9s  %6s  %5s     [%d%% conf. interval]\n",
+                   yname, "Coefficient", "Std. err.", "t", "P>|t|",
+                   round(Int, 100*level))
+    println("-"^13, "+", "-"^64)
+    for i in eachindex(β)
+        Printf.@printf("%12s | %s  %s  %6.2f  %5.3f  %s  %s\n",
+                       nm[i],
+                       _g(β[i], 10),
+                       _g(se[i], 9),
+                       t_stat[i],
+                       p_val[i],
+                       _g(ci_lo[i], 11),
+                       _g(ci_hi[i], 11))
+    end
+    println("-"^78)
+    return nothing
+end
+
+"""
+    regress_stata(df, y, xs; level=0.95, vcov=nothing)
+
+Convenience method: fit `y ~ xs…` on `df` with `FixedEffectModels.reg` and
+print the Stata-style `regress` output. `y` is the dependent variable (Symbol
+or String); `xs` is a Symbol, String, or vector of regressor names. Pass
+`vcov=Vcov.robust()` (or similar) for non-default standard errors.
+
+Example:
+
+    regress_stata(df5, :y, [:x2, :x3])
+    regress_stata(df5, :y, [:x2, :x3]; vcov=Vcov.robust())
+"""
+function regress_stata(df::DataFrames.AbstractDataFrame, y, xs;
+                       level::Float64=0.95, vcov=nothing, weights=nothing,
+                       noheader::Bool=false)
+    ys  = Symbol(y)
+    xsv = xs isa Union{Symbol,AbstractString} ? [Symbol(xs)] :
+          [Symbol(v) for v in xs]
+    f = term(ys) ~ sum(term.(xsv))
+    kw = weights === nothing ? (;) : (; weights=Symbol(weights))
+    m = vcov === nothing ?
+        FixedEffectModels.reg(df, f; kw...) :
+        FixedEffectModels.reg(df, f, vcov; kw...)
+    regress_stata(m; level=level, noheader=noheader)
+    return nothing
+end
+
+"""
+    sureg_fit(df, eqs::Pair...; reps=0, seed=nothing)
+
+Silent companion to `sureg`: runs the same FGLS SUR (with optional bootstrap
+vcov) and returns a `NamedTuple` of results — no printing. Use this before
+`test_sureg` to run cross-equation Wald tests on the stored fit.
+
+Fields: `β`, `V`, `coefnames` (as `"[eqname]var"`), `eqnames`, `cns`, `ks`,
+`offsets`, `N`, `Σ̂`, `β_eq`, `V_eq`, `se_eq`, `rmse`, `r2s`, `chi2s`,
+`pvals`, `reps`.
+"""
+function sureg_fit(df::DataFrames.AbstractDataFrame, eqs::Pair...;
+                   reps::Int=0, seed::Union{Int,Nothing}=nothing,
+                   constraints::AbstractVector=String[])
+    M = length(eqs)
+    all_vars = Symbol[]
+    for (y, xs) in eqs
+        push!(all_vars, Symbol(y))
+        xsv = xs isa Union{Symbol,AbstractString} ? [Symbol(xs)] :
+              [Symbol(v) for v in xs]
+        append!(all_vars, xsv)
+    end
+    d = DataFrames.dropmissing(df, unique(all_vars))
+    N = DataFrames.nrow(d)
+
+    Xs      = Vector{Matrix{Float64}}(undef, M)
+    Ys      = Vector{Vector{Float64}}(undef, M)
+    cns     = Vector{Vector{String}}(undef, M)
+    eqnames = Vector{String}(undef, M)
+    for (j, (y, xs)) in enumerate(eqs)
+        ys  = Symbol(y)
+        xsv = xs isa Union{Symbol,AbstractString} ? [Symbol(xs)] :
+              [Symbol(v) for v in xs]
+        Xs[j] = hcat(ones(N), [Float64.(_rawval.(d[!, v])) for v in xsv]...)
+        Ys[j] = Float64.(_rawval.(d[!, ys]))
+        cns[j] = vcat("_cons", string.(xsv))  # intercept at column 1
+        eqnames[j] = string(ys)
+    end
+    ks      = [size(X, 2) for X in Xs]
+    kt      = sum(ks)
+    offsets = vcat(0, cumsum(ks))
+
+    # Full coefnames used for constraint parsing and reporting.
+    coefnames_full = String[]
+    for j in 1:M, i in 1:ks[j]
+        push!(coefnames_full, "[$(eqnames[j])]$(cns[j][i])")
+    end
+
+    # Parse constraint strings into (R, r) — same grammar as `test_sureg`.
+    R_con = zeros(0, kt); r_con = Float64[]; con_labels = String[]
+    if !isempty(constraints)
+        function _resolve(token::AbstractString)
+            tok = String(strip(token))
+            num = tryparse(Float64, tok)
+            num !== nothing && return (Int[], num)
+            if startswith(tok, "[") && occursin(']', tok)
+                k = findfirst(==(tok), coefnames_full)
+                k === nothing && error("Coefficient not found: $tok")
+                return ([k], 0.0)
+            end
+            idx = Int[]
+            for (k, cn) in enumerate(coefnames_full)
+                m = match(r"^\[(.+)\](.+)$", cn)
+                (m === nothing || m.captures[2] != tok) && continue
+                push!(idx, k)
+            end
+            isempty(idx) && error("Coefficient not found in any equation: $tok")
+            return (idx, 0.0)
+        end
+        R_rows = Vector{Vector{Float64}}()
+        for c in constraints
+            cs = strip(string(c))
+            occursin('=', cs) ||
+                error("Constraint must contain '=': got '$cs'")
+            lhs_s, rhs_s = split(cs, '='; limit=2)
+            lhs_idx, lhs_c = _resolve(lhs_s)
+            rhs_idx, rhs_c = _resolve(rhs_s)
+            (length(lhs_idx) > 1 || length(rhs_idx) > 1) &&
+                error("Ambiguous short name in '$cs' — use [eq]name")
+            row = zeros(kt)
+            for k in lhs_idx; row[k] += 1.0; end
+            for k in rhs_idx; row[k] -= 1.0; end
+            push!(R_rows, row); push!(r_con, rhs_c - lhs_c)
+            push!(con_labels,
+                  !isempty(lhs_idx) && !isempty(rhs_idx) ?
+                      "$(coefnames_full[lhs_idx[1]]) = $(coefnames_full[rhs_idx[1]])" :
+                  !isempty(lhs_idx) ?
+                      "$(coefnames_full[lhs_idx[1]]) = $(rhs_c)" :
+                      "$(coefnames_full[rhs_idx[1]]) = $(lhs_c)")
+        end
+        R_con = reduce(vcat, permutedims.(R_rows))
+    end
+    has_con = !isempty(con_labels)
+
+    # Projection of (β_u, V_u) onto Rβ = r.
+    function _constrain(β_u, V_u)
+        has_con || return (β_u, V_u)
+        RVR   = R_con * V_u * R_con'
+        VRT   = V_u * R_con'
+        β_c   = β_u .- VRT * (RVR \ (R_con * β_u .- r_con))
+        V_c   = V_u .- VRT * LinearAlgebra.inv(RVR) * R_con * V_u
+        return (β_c, V_c)
+    end
+
+    # Step 1: OLS residuals → Σ̂
+    β_ols = [Xs[j] \ Ys[j] for j in 1:M]
+    e_ols = [Ys[j] - Xs[j] * β_ols[j] for j in 1:M]
+    Σ̂ = [LinearAlgebra.dot(e_ols[i], e_ols[j]) / N for i in 1:M, j in 1:M]
+
+    # Step 2: FGLS via blocked (Σ⁻¹ ⊗ I) sandwich
+    Σinv = LinearAlgebra.inv(Σ̂)
+    XWX  = zeros(kt, kt)
+    XWY  = zeros(kt)
+    for i in 1:M, j in 1:M
+        ri = (offsets[i]+1):offsets[i+1]
+        rj = (offsets[j]+1):offsets[j+1]
+        XWX[ri, rj] .= Σinv[i, j] .* (Xs[i]' * Xs[j])
+        XWY[ri]    .+= Σinv[i, j] .* (Xs[i]' * Ys[j])
+    end
+    β_u_full = XWX \ XWY
+    V_u_full = LinearAlgebra.inv(XWX)
+    β_sur, V_sur = _constrain(β_u_full, V_u_full)
+
+    β_eq  = [β_sur[(offsets[j]+1):offsets[j+1]]                              for j in 1:M]
+    V_eq  = [V_sur[(offsets[j]+1):offsets[j+1], (offsets[j]+1):offsets[j+1]] for j in 1:M]
+    se_eq = [sqrt.(max.(LinearAlgebra.diag(V), 0.0)) for V in V_eq]
+    e_sur = [Ys[j] - Xs[j] * β_eq[j] for j in 1:M]
+
+    rmse  = [sqrt(LinearAlgebra.dot(e_sur[j], e_sur[j]) / N) for j in 1:M]
+    r2s   = Float64[]; chi2s = Float64[]; pvals = Float64[]
+    for j in 1:M
+        rss = LinearAlgebra.dot(e_sur[j], e_sur[j])
+        tss = sum((Ys[j] .- Statistics.mean(Ys[j])).^2)
+        push!(r2s, 1 - rss / tss)
+        slope = 2:ks[j]     # exclude intercept (column 1)
+        βs = β_eq[j][slope]; Vs = V_eq[j][slope, slope]
+        # pinv handles rank-deficient V_s when constraints bind on this block.
+        χ2 = βs' * LinearAlgebra.pinv(Vs) * βs
+        push!(chi2s, χ2)
+        push!(pvals, 1 - Distributions.cdf(Distributions.Chisq(length(slope)), χ2))
+    end
+
+    # ── Bootstrap vcov (replaces V̂_SUR for the coefficient table SEs/CIs;
+    #     summary-block χ² is unchanged and still uses the analytical V̂_SUR).
+    if reps > 0
+        seed !== nothing && Random.seed!(seed)
+        β_boot = Matrix{Float64}(undef, reps, kt)
+        for b in 1:reps
+            idx  = StatsBase.sample(1:N, N; replace=true)
+            Xs_b = [X[idx, :]   for X in Xs]
+            Ys_b = [Y[idx]      for Y in Ys]
+            β_ols_b = [Xs_b[j] \ Ys_b[j] for j in 1:M]
+            e_b     = [Ys_b[j] - Xs_b[j] * β_ols_b[j] for j in 1:M]
+            Σ_b     = [LinearAlgebra.dot(e_b[i], e_b[j]) / N for i in 1:M, j in 1:M]
+            Σinv_b  = LinearAlgebra.inv(Σ_b)
+            XWX_b = zeros(kt, kt); XWY_b = zeros(kt)
+            for i in 1:M, j in 1:M
+                ri = (offsets[i]+1):offsets[i+1]
+                rj = (offsets[j]+1):offsets[j+1]
+                XWX_b[ri, rj] .= Σinv_b[i, j] .* (Xs_b[i]' * Xs_b[j])
+                XWY_b[ri]    .+= Σinv_b[i, j] .* (Xs_b[i]' * Ys_b[j])
+            end
+            β_ub = XWX_b \ XWY_b
+            if has_con
+                V_ub = LinearAlgebra.inv(XWX_b)
+                β_ub, _ = _constrain(β_ub, V_ub)
+            end
+            β_boot[b, :] = β_ub
+        end
+        V_sur = Statistics.cov(β_boot)
+        V_eq  = [V_sur[(offsets[j]+1):offsets[j+1], (offsets[j]+1):offsets[j+1]] for j in 1:M]
+        se_eq = [sqrt.(max.(LinearAlgebra.diag(V), 0.0)) for V in V_eq]
+    end
+
+    return (; β=β_sur, V=V_sur, coefnames=coefnames_full,
+              eqnames, cns, ks, offsets, N, Σ̂,
+              β_eq, V_eq, se_eq,
+              rmse, r2s, chi2s, pvals, reps,
+              constraints=con_labels)
+end
+
+"""
+    sureg(df, (y1 => [x1s…]), (y2 => [x2s…]), …;
+          level=0.95, reps=0, seed=nothing)
+
+Stata-style `sureg` — seemingly unrelated regression (FGLS). Each pair
+`y => xs` becomes an equation `y ~ 1 + xs…`. Prints Stata's `sureg` summary
+block (Obs, Params, RMSE, R², χ², P>χ²), the pooled coefficient table with
+z-statistics, the residual correlation matrix, and the Breusch–Pagan test
+of independence against a diagonal Σ.
+
+Algorithm: equation-by-equation OLS gives Σ̂ = (eᵢ′eⱼ)/N; a single FGLS
+step with W = Σ̂⁻¹ ⊗ Iₙ recovers β̂_SUR and V̂_SUR. The correlation matrix
+and BP test use the OLS-step Σ̂ (matching Stata's default non-iterated
+`sureg`).
+
+Pass `reps=400, seed=10101` to mimic Stata's `bootstrap, reps(400) seed(10101): sureg …` —
+β̂_SUR is kept as the observed coefficient, but V̂_SUR is replaced by the
+sample covariance of B bootstrap replications (each a full SUR on a
+resampled dataset). The coefficient table header changes to
+"Observed coefficient | Bootstrap std. err. | Normal-based CI". The summary
+block's χ² still uses the analytical V̂_SUR to match Stata.
+
+Examples:
+
+    sureg(df_sur,
+          :ldrugexp => [:age, :age2, :actlim, :totchr, :medicaid, :private],
+          :ltotothr => [:age, :age2, :educyr, :actlim, :totchr, :private])
+
+    sureg(df_sur,
+          :ldrugexp => [:age, :age2, :actlim, :totchr, :medicaid, :private],
+          :ltotothr => [:age, :age2, :educyr, :actlim, :totchr, :private];
+          reps=400, seed=10101)
+"""
+function sureg(df::DataFrames.AbstractDataFrame, eqs::Pair...;
+               level::Float64=0.95, reps::Int=0,
+               seed::Union{Int,Nothing}=nothing,
+               constraints::AbstractVector=String[])
+    fit = sureg_fit(df, eqs...; reps=reps, seed=seed, constraints=constraints)
+    if !isempty(fit.constraints)
+        println("Constraints imposed:")
+        for (i, c) in enumerate(fit.constraints)
+            Printf.@printf(" ( %d)  %s\n", i, c)
+        end
+        println()
+    end
+    M       = length(fit.eqnames)
+    eqnames = fit.eqnames
+    cns     = fit.cns
+    ks      = fit.ks
+    N       = fit.N
+    β_eq    = fit.β_eq
+    se_eq   = fit.se_eq
+    rmse    = fit.rmse
+    r2s     = fit.r2s
+    chi2s   = fit.chi2s
+    pvals   = fit.pvals
+    Σ̂       = fit.Σ̂
+
+    # ── Summary table (PrettyTables)
+    println("Seemingly unrelated regression\n")
+    summary_df = DataFrames.DataFrame(
+        Equation    = eqnames,
+        Obs         = fill(N, M),
+        Params      = [k - 1 for k in ks],
+        RMSE        = rmse,
+        R_squared   = r2s,
+        chi2        = chi2s,
+        P_chi2      = pvals,
+    )
+    _pt_compat(summary_df;
+        header     = ["Equation", "Obs", "Params", "RMSE", "R-squared",
+                      "chi2", "P>chi2"],
+        formatters = vcat(
+            PrettyTables.ft_printf("%.6f", [4]),
+            PrettyTables.ft_printf("%.4f", [5, 7]),
+            PrettyTables.ft_printf("%.2f", [6]),
+        ),
+        alignment  = [:l, :r, :r, :r, :r, :r, :r],
+    )
+
+    # ── Coefficient table (PrettyTables), slopes first then intercept
+    zcrit = Distributions.quantile(Distributions.Normal(), 1 - (1-level)/2)
+    eqn_col  = String[]; var_col = String[]
+    β_col    = Float64[]; se_col  = Float64[]
+    z_col    = Float64[]; p_col   = Float64[]
+    lo_col   = Float64[]; hi_col  = Float64[]
+    hline_at = Int[]
+    nrows    = 0
+    for j in 1:M
+        order = vcat(collect(2:ks[j]), 1)
+        first_row = true
+        for i in order
+            β_i  = β_eq[j][i]
+            se_i = se_eq[j][i]
+            z_i  = β_i / se_i
+            p_i  = 2 * (1 - Distributions.cdf(Distributions.Normal(), abs(z_i)))
+            push!(eqn_col, first_row ? eqnames[j] : "")
+            push!(var_col, cns[j][i])
+            push!(β_col, β_i);   push!(se_col, se_i)
+            push!(z_col, z_i);   push!(p_col, p_i)
+            push!(lo_col, β_i - zcrit * se_i)
+            push!(hi_col, β_i + zcrit * se_i)
+            first_row = false
+            nrows += 1
+        end
+        j < M && push!(hline_at, nrows)
+    end
+    coef_df = DataFrames.DataFrame(
+        Equation     = eqn_col,
+        Variable     = var_col,
+        Coefficient  = β_col,
+        StdErr       = se_col,
+        z            = z_col,
+        p            = p_col,
+        CI_low       = lo_col,
+        CI_high      = hi_col,
+    )
+    lvl = round(Int, 100 * level)
+    println()
+    coef_header = reps > 0 ?
+        (["", "", "Observed", "Bootstrap", "", "", "Normal-based", ""],
+         ["Equation", "Variable", "coefficient", "std. err.",
+          "z", "P>|z|", "[$(lvl)% CI low]", "[$(lvl)% CI high]"]) :
+        ["Equation", "Variable", "Coefficient", "Std. err.",
+         "z", "P>|z|", "[$(lvl)% CI low]", "[$(lvl)% CI high]"]
+    _pt_compat(coef_df;
+        header     = coef_header,
+        formatters = vcat(
+            PrettyTables.ft_printf("%.7f", [3, 4, 7, 8]),
+            PrettyTables.ft_printf("%.2f",  [5]),
+            PrettyTables.ft_printf("%.3f",  [6]),
+        ),
+        body_hlines = hline_at,
+        alignment   = [:l, :l, :r, :r, :r, :r, :r, :r],
+    )
+    reps > 0 && Printf.@printf("  (bootstrap replications = %d)\n", reps)
+
+    # ── Residual correlation matrix (from OLS-step Σ̂)
+    Rmat = [Σ̂[i, j] / sqrt(Σ̂[i, i] * Σ̂[j, j]) for i in 1:M, j in 1:M]
+    corr_strs = [j <= i ? Printf.@sprintf("%.4f", Rmat[i, j]) : ""
+                 for i in 1:M, j in 1:M]
+    println("\nCorrelation matrix of residuals:\n")
+    _pt_compat(corr_strs;
+        header     = eqnames,
+        row_labels = eqnames,
+        alignment  = fill(:r, M),
+    )
+
+    # ── Breusch–Pagan test of independence
+    bp = 0.0
+    for i in 1:M-1, j in (i+1):M
+        bp += Rmat[i, j]^2
+    end
+    bp *= N
+    df_bp = M * (M - 1) ÷ 2
+    p_bp  = 1 - Distributions.cdf(Distributions.Chisq(df_bp), bp)
+    Printf.@printf("\nBreusch–Pagan test of independence: chi2(%d) = %.3f, Pr = %.4f\n",
+                   df_bp, bp, p_bp)
+    return nothing
+end
+
+"""
+    test_sureg(fit, vars)
+
+Stata-style `test <varlist>` after `sureg`/`sureg_fit`. Jointly tests that
+every coefficient whose short name matches any of `vars` is zero **in every
+equation where it appears** — exactly what Stata's `test age age2` does
+after `sureg`. Uses the stored joint vcov from `fit`, so cross-equation
+covariances are respected (and the bootstrap vcov is used if the fit was
+made with `reps>0`).
+
+Output mirrors Stata's:
+
+    ( 1)  [eq1]v1 = 0
+    ( 2)  [eq2]v1 = 0
+    ...
+            chi2(q) =   W
+          Prob > chi2 =  p
+
+Example:
+
+    fit = sureg_fit(df_sur,
+                    :ldrugexp => [:age, :age2, :actlim, :totchr, :medicaid, :private],
+                    :ltotothr => [:age, :age2, :educyr, :actlim, :totchr, :private])
+    test_sureg(fit, [:age, :age2])
+"""
+function test_sureg(fit, vars::AbstractVector;
+                    df_F::Union{Integer,Nothing}=nothing)
+    coefnames = fit.coefnames
+    K         = length(coefnames)
+
+    # Resolve a single token to either (idx=Int[], number) or
+    # (coef_idx_list, 0.0). Short names may match >1 equation; `[eq]var` must
+    # match exactly one.
+    function _resolve(token::AbstractString)
+        tok = String(strip(token))
+        num = tryparse(Float64, tok)
+        num !== nothing && return (Int[], num)
+        if startswith(tok, "[") && occursin(']', tok)
+            k = findfirst(==(tok), coefnames)
+            k === nothing && error("Coefficient not found: $tok")
+            return ([k], 0.0)
+        end
+        idx = Int[]
+        for (k, cn) in enumerate(coefnames)
+            m = match(r"^\[(.+)\](.+)$", cn)
+            (m === nothing || m.captures[2] != tok) && continue
+            push!(idx, k)
+        end
+        isempty(idx) && error("Coefficient not found in any equation: $tok")
+        return (idx, 0.0)
+    end
+
+    R_rows = Vector{Vector{Float64}}()
+    r_vals = Float64[]
+    labels = String[]
+
+    for v in vars
+        vs = strip(string(v))
+        if occursin('=', vs)
+            # Equality restriction → one row.
+            lhs_s, rhs_s = split(vs, '='; limit=2)
+            lhs_idx, lhs_c = _resolve(lhs_s)
+            rhs_idx, rhs_c = _resolve(rhs_s)
+            length(lhs_idx) > 1 &&
+                error("Ambiguous short name on lhs of '$vs' — use [eq]name")
+            length(rhs_idx) > 1 &&
+                error("Ambiguous short name on rhs of '$vs' — use [eq]name")
+            row = zeros(K)
+            for k in lhs_idx; row[k] += 1.0; end
+            for k in rhs_idx; row[k] -= 1.0; end
+            push!(R_rows, row)
+            push!(r_vals, rhs_c - lhs_c)
+            if !isempty(lhs_idx) && !isempty(rhs_idx)
+                push!(labels,
+                      "$(coefnames[lhs_idx[1]]) - $(coefnames[rhs_idx[1]]) = 0")
+            elseif !isempty(lhs_idx)
+                push!(labels, "$(coefnames[lhs_idx[1]]) = $(rhs_c)")
+            else
+                push!(labels, "$(coefnames[rhs_idx[1]]) = $(lhs_c)")
+            end
+        else
+            # Bare token → one zero-restriction per matching coef.
+            idx_all, _ = _resolve(vs)
+            for k in idx_all
+                row = zeros(K); row[k] = 1.0
+                push!(R_rows, row)
+                push!(r_vals, 0.0)
+                push!(labels, "$(coefnames[k]) = 0")
+            end
+        end
+    end
+    isempty(R_rows) && error("No restrictions parsed from: $(vars)")
+
+    R = reduce(vcat, permutedims.(R_rows))          # q × K
+    r = r_vals
+    d = R * fit.β .- r
+    W = d' * LinearAlgebra.inv(R * fit.V * R') * d
+    q = length(r)
+
+    for (i, lbl) in enumerate(labels)
+        Printf.@printf(" ( %d)  %s\n", i, lbl)
+    end
+    println()
+
+    # F-form if df_F supplied (e.g. after `sqreg_stata`), else χ².
+    if df_F === nothing
+        p_chi = 1 - Distributions.cdf(Distributions.Chisq(q), W)
+        Printf.@printf("           chi2(%3d) = %7.2f\n", q, W)
+        Printf.@printf("         Prob > chi2 = %7.4f\n", p_chi)
+        return (; chi2=W, df=q, p=p_chi, restrictions=labels, R, r)
+    else
+        Fs  = W / q
+        p_F = 1 - Distributions.cdf(Distributions.FDist(q, df_F), Fs)
+        Printf.@printf("       F(%3d, %5d) = %7.2f\n", q, df_F, Fs)
+        Printf.@printf("            Prob > F = %7.4f\n", p_F)
+        return (; F=Fs, df1=q, df2=df_F, p=p_F,
+                  chi2=W, restrictions=labels, R, r)
+    end
+end
+
+"""
+    reg3(df, (y1 => [rhs1…]), (y2 => [rhs2…]), …; level=0.95)
+
+Stata-style `reg3` — three-stage least-squares estimation of a linear
+simultaneous-equations system. Each pair `y => rhs` specifies one equation;
+`rhs` can include variables that are dependent in another equation
+(those are the endogenous RHS regressors). All variables that appear on
+the RHS somewhere but are **not** a dependent variable anywhere form
+the instrument set.
+
+Algorithm:
+  1. 2SLS equation-by-equation using `P_Z = Z(Z'Z)⁻¹Z'` (Z = all exog +
+     `_cons`) to get initial residuals.
+  2. `Σ̂ᵢⱼ = (eᵢ'eⱼ)/N` from the 2SLS residuals.
+  3. Blocked GLS with weight `Σ̂⁻¹ ⊗ Iₙ` applied to the P_Z-projected
+     regressors: `β̂_3SLS = (Σⱼ Σ̂⁻¹ᵢⱼ X̂ᵢ'X̂ⱼ)⁻¹ (Σⱼ Σ̂⁻¹ᵢⱼ X̂ᵢ'yⱼ)`.
+
+Prints Stata's two-block output (summary + coefficient table via
+`PrettyTables`) and the Endogenous/Exogenous footer. Returns the fitted
+NamedTuple.
+"""
+function reg3(df::DataFrames.AbstractDataFrame, eqs::Pair...;
+              level::Float64=0.95)
+    M = length(eqs)
+
+    # Detect endogenous (all LHS) and exogenous (RHS variables that are not LHS).
+    endog_set = Set{Symbol}()
+    for (y, _) in eqs
+        push!(endog_set, Symbol(y))
+    end
+    exog_set = Symbol[]
+    seen     = Set{Symbol}()
+    for (_, rhs) in eqs
+        for v in rhs
+            sv = Symbol(v)
+            if !(sv in endog_set) && !(sv in seen)
+                push!(exog_set, sv); push!(seen, sv)
+            end
+        end
+    end
+
+    all_vars = Symbol[]
+    for (y, rhs) in eqs
+        push!(all_vars, Symbol(y))
+        append!(all_vars, Symbol.(rhs))
+    end
+    d = DataFrames.dropmissing(df, unique(all_vars))
+    N = DataFrames.nrow(d)
+
+    Xs      = Vector{Matrix{Float64}}(undef, M)
+    Ys      = Vector{Vector{Float64}}(undef, M)
+    cns     = Vector{Vector{String}}(undef, M)
+    eqnames = Vector{String}(undef, M)
+    for (j, (y, rhs)) in enumerate(eqs)
+        ys    = Symbol(y)
+        rhs_v = [Symbol(v) for v in rhs]
+        Xs[j] = hcat(ones(N), [Float64.(_rawval.(d[!, v])) for v in rhs_v]...)
+        Ys[j] = Float64.(_rawval.(d[!, ys]))
+        cns[j] = vcat("_cons", string.(rhs_v))
+        eqnames[j] = string(ys)
+    end
+    ks       = [size(X, 2) for X in Xs]
+    kt       = sum(ks)
+    offsets  = vcat(0, cumsum(ks))
+
+    # Instrument matrix Z = [_cons, exog…]
+    Z     = hcat(ones(N),
+                 [Float64.(_rawval.(d[!, v])) for v in exog_set]...)
+    ZtZi  = LinearAlgebra.inv(Z' * Z)
+    PX    = [Z * (ZtZi * (Z' * Xs[j])) for j in 1:M]            # X̂ⱼ = P_Z Xⱼ
+
+    # Step 1: 2SLS for each equation → residuals for Σ̂
+    β_2sls = Vector{Vector{Float64}}(undef, M)
+    e_2sls = Vector{Vector{Float64}}(undef, M)
+    for j in 1:M
+        β_2sls[j] = (PX[j]' * PX[j]) \ (PX[j]' * Ys[j])
+        e_2sls[j] = Ys[j] .- Xs[j] * β_2sls[j]
+    end
+    Σ̂    = [LinearAlgebra.dot(e_2sls[i], e_2sls[j]) / N for i in 1:M, j in 1:M]
+    Σinv = LinearAlgebra.inv(Σ̂)
+
+    # Step 2: 3SLS block GLS
+    XWX = zeros(kt, kt)
+    XWY = zeros(kt)
+    for i in 1:M, j in 1:M
+        ri = (offsets[i]+1):offsets[i+1]
+        rj = (offsets[j]+1):offsets[j+1]
+        XWX[ri, rj] .= Σinv[i, j] .* (PX[i]' * PX[j])
+        XWY[ri]    .+= Σinv[i, j] .* (PX[i]' * Ys[j])
+    end
+    β_3sls = XWX \ XWY
+    V_3sls = LinearAlgebra.inv(XWX)
+
+    # Per-equation slices
+    β_eq  = [β_3sls[(offsets[j]+1):offsets[j+1]]                              for j in 1:M]
+    V_eq  = [V_3sls[(offsets[j]+1):offsets[j+1], (offsets[j]+1):offsets[j+1]] for j in 1:M]
+    se_eq = [sqrt.(max.(LinearAlgebra.diag(V), 0.0)) for V in V_eq]
+    e_3sls = [Ys[j] .- Xs[j] * β_eq[j] for j in 1:M]
+
+    rmse   = [sqrt(LinearAlgebra.dot(e_3sls[j], e_3sls[j]) / N) for j in 1:M]
+    r2s    = Float64[]; chi2s = Float64[]; pvals = Float64[]
+    for j in 1:M
+        rss = LinearAlgebra.dot(e_3sls[j], e_3sls[j])
+        tss = sum((Ys[j] .- Statistics.mean(Ys[j])).^2)
+        push!(r2s, 1 - rss / tss)                        # may be negative (3SLS)
+        slope = 2:ks[j]
+        βs = β_eq[j][slope]; Vs = V_eq[j][slope, slope]
+        χ2 = βs' * (Vs \ βs)
+        push!(chi2s, χ2)
+        push!(pvals, 1 - Distributions.cdf(Distributions.Chisq(length(slope)), χ2))
+    end
+
+    # ── Summary table (PrettyTables) — identical layout to sureg
+    println("Three-stage least-squares regression\n")
+    summary_df = DataFrames.DataFrame(
+        Equation   = eqnames,
+        Obs        = fill(N, M),
+        Params     = [k - 1 for k in ks],
+        RMSE       = rmse,
+        R_squared  = r2s,
+        chi2       = chi2s,
+        P_chi2     = pvals,
+    )
+    _pt_compat(summary_df;
+        header     = ["Equation", "Obs", "Params", "RMSE", "R-squared",
+                      "chi2", "P>chi2"],
+        formatters = vcat(
+            PrettyTables.ft_printf("%.6f", [4]),
+            PrettyTables.ft_printf("%.4f", [5, 7]),
+            PrettyTables.ft_printf("%.2f", [6]),
+        ),
+        alignment  = [:l, :r, :r, :r, :r, :r, :r],
+    )
+
+    # ── Coefficient table — slopes first, `_cons` last, one block per equation
+    zcrit = Distributions.quantile(Distributions.Normal(), 1 - (1-level)/2)
+    eqn_col  = String[]; var_col = String[]
+    β_col    = Float64[]; se_col  = Float64[]
+    z_col    = Float64[]; p_col   = Float64[]
+    lo_col   = Float64[]; hi_col  = Float64[]
+    hline_at = Int[]; nrows = 0
+    for j in 1:M
+        first_row = true
+        order = vcat(collect(2:ks[j]), 1)
+        for i in order
+            β_i  = β_eq[j][i]
+            se_i = se_eq[j][i]
+            z_i  = β_i / se_i
+            p_i  = 2 * (1 - Distributions.cdf(Distributions.Normal(), abs(z_i)))
+            push!(eqn_col, first_row ? eqnames[j] : "")
+            push!(var_col, cns[j][i])
+            push!(β_col, β_i);   push!(se_col, se_i)
+            push!(z_col, z_i);   push!(p_col, p_i)
+            push!(lo_col, β_i - zcrit * se_i)
+            push!(hi_col, β_i + zcrit * se_i)
+            first_row = false; nrows += 1
+        end
+        j < M && push!(hline_at, nrows)
+    end
+    coef_df = DataFrames.DataFrame(
+        Equation    = eqn_col,
+        Variable    = var_col,
+        Coefficient = β_col,
+        StdErr      = se_col,
+        z           = z_col,
+        p           = p_col,
+        CI_low      = lo_col,
+        CI_high     = hi_col,
+    )
+    lvl = round(Int, 100 * level)
+    println()
+    _pt_compat(coef_df;
+        header = ["Equation", "Variable", "Coefficient", "Std. err.",
+                  "z", "P>|z|", "[$(lvl)% CI low]", "[$(lvl)% CI high]"],
+        formatters = vcat(
+            PrettyTables.ft_printf("%.7f", [3, 4, 7, 8]),
+            PrettyTables.ft_printf("%.2f",  [5]),
+            PrettyTables.ft_printf("%.3f",  [6]),
+        ),
+        body_hlines = hline_at,
+        alignment   = [:l, :l, :r, :r, :r, :r, :r, :r],
+    )
+
+    Printf.@printf("Endogenous: %s\n", join(sort(string.(collect(endog_set))), " "))
+    Printf.@printf("Exogenous:  %s\n", join(string.(exog_set), " "))
+
+    # Build joint coefnames for potential post-estimation (e.g. test_sureg-style).
+    coefnames_full = String[]
+    for j in 1:M, i in 1:ks[j]
+        push!(coefnames_full, "[$(eqnames[j])]$(cns[j][i])")
+    end
+    return (; β=β_3sls, V=V_3sls, coefnames=coefnames_full,
+              eqnames, cns, ks, offsets, N, Σ̂,
+              β_eq, V_eq, se_eq, rmse, r2s, chi2s, pvals,
+              endog=collect(endog_set), exog=exog_set)
+end
+
+"""
+    qreg_stata(df, y, xs; τ=0.5, level=0.95)
+
+Stata-style `qreg y xs…[, quantile(τ)]` — quantile regression by
+minimizing the asymmetric "check" loss
+`ρ_τ(u) = u · (τ − 1{u < 0})`. Slopes are listed first in the coefficient
+table and `_cons` is last, matching Stata's display order.
+
+Standard errors use the classical **iid** Koenker-Bassett formula
+`V̂ = s(τ)² · (X'X)⁻¹`, with sparsity `ω = (û_{τ+h} − û_{τ−h})/(2h)` and
+Hall-Sheather bandwidth `h = n^{-1/3} · z_{α/2}^{2/3} ·
+(1.5φ(Φ⁻¹(τ))²/(2Φ⁻¹(τ)²+1))^{1/3}`. `s(τ) = √(τ(1−τ)) · ω`. Inference
+is t-based on `n − k` df.
+
+Pseudo R² (Koenker–Machado): `1 − MSD/RSD`, where MSD is the minimized
+check-loss and RSD is the check-loss of the constant-only model (its
+fit is the τ-th quantile of y).
+"""
+function qreg_stata(df, y, xs::AbstractVector; τ::Float64=0.5,
+                    level::Float64=0.95,
+                    max_iter::Int=5000, tol::Float64=1e-12,
+                    quiet::Bool=false)
+    ys   = Symbol(y)
+    xsv  = [Symbol(v) for v in xs]
+    d    = DataFrames.dropmissing(df, unique(vcat(ys, xsv)))
+    n    = DataFrames.nrow(d)
+    Y    = Float64.(_rawval.(d[!, ys]))
+    Xmat = hcat([Float64.(_rawval.(d[!, v])) for v in xsv]..., ones(n))  # slopes, _cons
+    k    = size(Xmat, 2)
+
+    # ── IRLS (majorize-minimize on |u|) — robust for the non-smooth check loss.
+    # Majorization: |u| ≤ u²/(2|u*|) + |u*|/2; minimizing the upper bound on
+    # Σ ρ_τ(eᵢ) yields  β̂ = (X'WX)⁻¹ [X'W y + (2τ−1) · X'1],  with
+    # weights wᵢ = 1/max(|eᵢ*|, δ).  δ is shrunk as iterations progress.
+    β   = Xmat \ Y
+    one = ones(n)
+    δ   = 1e-2
+    for iter in 1:max_iter
+        e    = Y .- Xmat * β
+        δ    = max(min(δ, 0.5 * Statistics.median(abs.(e)) + 1e-12), 1e-10)
+        w    = 1.0 ./ max.(abs.(e), δ)
+        rhs  = Xmat' * (w .* Y) .+ (2τ - 1) .* (Xmat' * one)
+        XtWX = Xmat' * (w .* Xmat)
+        β_nw = XtWX \ rhs
+        dif  = sqrt(sum((β_nw .- β).^2)) / max(1.0, sqrt(sum(β.^2)))
+        β    = β_nw
+        dif < tol && break
+    end
+    û  = Y .- Xmat * β
+
+    _rho(u, τ) = u >= 0 ? τ * u : (τ - 1) * u
+    MSD   = sum(_rho(û[i], τ) for i in 1:n)
+    q_y   = Statistics.quantile(Y, τ)
+    RSD   = sum(_rho(Y[i] - q_y, τ) for i in 1:n)
+    R²_ps = 1 - MSD / RSD
+
+    # Hall-Sheather bandwidth and Koenker–Bassett (iid) sparsity
+    α     = 1 - level
+    z_α   = Distributions.quantile(Distributions.Normal(), 1 - α/2)
+    Φinv  = Distributions.quantile(Distributions.Normal(), τ)
+    φ_τ   = Distributions.pdf(Distributions.Normal(), Φinv)
+    h     = n^(-1/3) * z_α^(2/3) *
+            ((1.5 * φ_τ^2) / (2 * Φinv^2 + 1))^(1/3)
+    p_up  = min(τ + h, 1 - 1/n)
+    p_dn  = max(τ - h, 1/n)
+    ω     = (Statistics.quantile(û, p_up) -
+             Statistics.quantile(û, p_dn)) / (p_up - p_dn)
+    s_τ   = sqrt(τ * (1 - τ)) * ω
+
+    V     = s_τ^2 .* LinearAlgebra.inv(Xmat' * Xmat)
+    se    = sqrt.(max.(LinearAlgebra.diag(V), 0.0))
+
+    dofv  = n - k
+    t_st  = β ./ se
+    tcrit = Distributions.quantile(Distributions.TDist(dofv), 1 - α/2)
+    pvals = 2 .* (1 .- Distributions.cdf.(Distributions.TDist(dofv), abs.(t_st)))
+    ci_lo = β .- tcrit .* se
+    ci_hi = β .+ tcrit .* se
+
+    nms  = vcat(string.(xsv), "_cons")
+    if !quiet
+        _fmtn(x) = replace(string(x), r"(\d)(?=(\d{3})+$)" => s"\1,")
+        title = τ == 0.5 ? "Median regression" :
+                            Printf.@sprintf("Quantile regression (τ = %.2f)", τ)
+        println()
+        header_tail = Printf.@sprintf("Number of obs = %10s", _fmtn(n))
+        println(title, " "^max(0, 52 - length(title)), header_tail)
+        Printf.@printf("  Raw sum of deviations %.2f (about %g)\n", RSD, q_y)
+        left3 = Printf.@sprintf("  Min sum of deviations %.3f", MSD)
+        tail3 = Printf.@sprintf("Pseudo R2     = %10.4f", R²_ps)
+        println(left3, " "^max(0, 52 - length(left3)), tail3)
+        println()
+
+        lvl  = round(Int, 100 * level)
+        coef_df = DataFrames.DataFrame(
+            Variable    = nms,
+            Coefficient = β,
+            StdErr      = se,
+            t           = t_st,
+            p           = pvals,
+            CI_low      = ci_lo,
+            CI_high     = ci_hi,
+        )
+        _pt_compat(coef_df;
+            header = [string(ys), "Coefficient", "Std. err.",
+                      "t", "P>|t|", "[$(lvl)% CI low]", "[$(lvl)% CI high]"],
+            formatters = vcat(
+                PrettyTables.ft_printf("%.7f", [2, 3, 6, 7]),
+                PrettyTables.ft_printf("%.2f",  [4]),
+                PrettyTables.ft_printf("%.3f",  [5]),
+            ),
+            alignment = [:l, :r, :r, :r, :r, :r, :r],
+        )
+    end
+
+    return (; β, V, se, t=t_st, p=pvals, ci_lo, ci_hi,
+              coefnames=nms, n, MSD, RSD, pseudo_R2=R²_ps, τ)
+end
+
+"""
+    sqreg_stata(df, y, xs; τs=[0.25, 0.5, 0.75], reps=400,
+                seed=nothing, level=0.95)
+
+Stata-style `sqreg y xs…, q(τ₁ τ₂ …) reps(B)` — **simultaneous** quantile
+regression at several τ values with **bootstrap** standard errors. Each
+bootstrap replicate resamples rows once and re-fits every quantile on
+the same sample, so covariance across quantiles is preserved (this is
+what distinguishes `sqreg` from running `bsqreg` separately at each τ).
+
+Prints the Stata header (`Number of obs`, a line per quantile with its
+Pseudo R²) followed by a grouped coefficient table — one block per
+quantile — with Bootstrap std. err. and t-based CIs on `n − k` df.
+"""
+function sqreg_stata(df, y, xs::AbstractVector;
+                     τs::AbstractVector{<:Real}=[0.25, 0.50, 0.75],
+                     reps::Int=400, seed::Union{Int,Nothing}=nothing,
+                     level::Float64=0.95)
+    ys  = Symbol(y)
+    xsv = [Symbol(v) for v in xs]
+    d   = DataFrames.dropmissing(df, unique(vcat(ys, xsv)))
+    n   = DataFrames.nrow(d)
+    k   = length(xsv) + 1
+    Q   = length(τs)
+
+    # Point estimates at each τ (silent).
+    fits = [qreg_stata(d, ys, xsv; τ=Float64(τ), quiet=true) for τ in τs]
+    β0   = [f.β for f in fits]
+
+    # Paired bootstrap — resample rows once per rep, refit every τ.
+    seed !== nothing && Random.seed!(seed)
+    β_boot = [Matrix{Float64}(undef, reps, k) for _ in 1:Q]
+    for b in 1:reps
+        idx = StatsBase.sample(1:n, n; replace=true)
+        db  = d[idx, :]
+        for (j, τ) in enumerate(τs)
+            β_boot[j][b, :] = qreg_stata(db, ys, xsv; τ=Float64(τ), quiet=true).β
+        end
+    end
+    se = [vec(Statistics.std(β_boot[j]; dims=1)) for j in 1:Q]
+
+    # Inference (t on n − k df)
+    α     = 1 - level
+    dofv  = n - k
+    tcrit = Distributions.quantile(Distributions.TDist(dofv), 1 - α/2)
+    t_q   = [β0[j] ./ se[j] for j in 1:Q]
+    p_q   = [2 .* (1 .- Distributions.cdf.(Distributions.TDist(dofv), abs.(t_q[j])))
+             for j in 1:Q]
+    lo_q  = [β0[j] .- tcrit .* se[j] for j in 1:Q]
+    hi_q  = [β0[j] .+ tcrit .* se[j] for j in 1:Q]
+
+    _fmtn(x) = replace(string(x), r"(\d)(?=(\d{3})+$)" => s"\1,")
+    nms  = vcat(string.(xsv), "_cons")
+
+    # ─── Header block
+    println()
+    title = "Simultaneous quantile regression"
+    Printf.@printf("%s%*sNumber of obs = %10s\n",
+                   title, max(0, 52 - length(title)), "", _fmtn(n))
+    left_boot = Printf.@sprintf("  bootstrap(%d) SEs", reps)
+    Printf.@printf("%s%*s.%02d Pseudo R2 = %10.4f\n",
+                   left_boot, max(0, 52 - length(left_boot)), "",
+                   round(Int, 100*τs[1]), fits[1].pseudo_R2)
+    for j in 2:Q
+        Printf.@printf("%52s.%02d Pseudo R2 = %10.4f\n",
+                       "", round(Int, 100*τs[j]), fits[j].pseudo_R2)
+    end
+    println()
+
+    # ─── Grouped coefficient table in Stata's exact 78-col layout
+    _g(x, w; sig=7) = begin
+        (ismissing(x) || !isfinite(x)) && return Printf.@sprintf("%*s", w, ".")
+        s = Printf.@sprintf("%.*g", sig, x)
+        0 < abs(x) < 1 && (s = replace(s, r"^(-?)0\." => s"\1."))
+        Printf.@sprintf("%*s", w, s)
+    end
+    lvl = round(Int, 100 * level)
+    println("-"^78)
+    Printf.@printf("%12s | %22s\n", "", "Bootstrap")
+    Printf.@printf("%12s | %10s  %9s  %6s  %5s     [%d%% conf. interval]\n",
+                   string(ys), "Coefficient", "std. err.", "t", "P>|t|", lvl)
+    println("-"^13, "+", "-"^64)
+    for j in 1:Q
+        qlabel = Printf.@sprintf("q%02d", round(Int, 100*τs[j]))
+        Printf.@printf("%-12s |\n", qlabel)
+        for i in 1:k
+            Printf.@printf("%12s | %s  %s  %7.2f  %6.3f  %s  %s\n",
+                           nms[i],
+                           _g(β0[j][i], 10),
+                           _g(se[j][i], 9),
+                           t_q[j][i], p_q[j][i],
+                           _g(lo_q[j][i], 11),
+                           _g(hi_q[j][i], 10))
+        end
+        j < Q && println("-"^13, "+", "-"^64)
+    end
+    println("-"^78)
+
+    # Joint (stacked) β, V, coefnames in `[qXX]var` format — enables
+    # post-estimation tests across quantiles via `test_sureg`.
+    β_joint = reduce(vcat, β0)
+    boot_stack = reduce(hcat, β_boot)              # B × (Q·k)
+    V_joint = Statistics.cov(boot_stack)
+    coefnames_joint = String[]
+    for τ in τs, v in nms
+        push!(coefnames_joint,
+              "[" * Printf.@sprintf("q%02d", round(Int, 100*τ)) * "]" * v)
+    end
+
+    return (; β = β_joint, V = V_joint, coefnames = coefnames_joint,
+              β_by_q = β0, se, t = t_q, p = p_q,
+              ci_lo = lo_q, ci_hi = hi_q,
+              pseudo_R2 = [f.pseudo_R2 for f in fits],
+              varnames = nms, τs, n, reps, df_resid = dofv)
+end
+
+"""
+    ivregress_2sls(df, y, endog => instruments, exog=Symbol[];
+                   robust=true, level=0.95, first=true)
+
+Stata-style `ivregress 2sls y (endog = iv) x2list[, vce(robust) first]`.
+Runs the model through `FixedEffectModels.reg`:
+  * first stage: each endogenous variable regressed on `exog + instruments`
+    (plain OLS with robust SE), printed with the familiar
+    "Linear regression" header (F, R², Adj R², Root MSE, t-stats);
+  * 2SLS:  `reg(df, @formula(y ~ exog + (endog ~ instruments)), vce)`,
+    printed with Wald χ², R², Root MSE, z-stats, and Endogenous/Exogenous
+    footer.
+
+`endog => instruments` is a Pair where each side is a Symbol or vector of
+Symbols. The endogenous variable is placed first in the 2SLS coefficient
+table (matching Stata's convention); `_cons` is shown last.
+
+Example:
+
+    ivregress_2sls(df6, :ldrugexp, :hi_empunion => :ssiratio,
+                   [:totchr, :age, :female, :blhisp, :linc];
+                   robust=true, first=true)
+"""
+function ivregress_2sls(df, y, endog_iv::Pair, exog=Symbol[];
+                        robust::Bool=true, level::Float64=0.95,
+                        first::Bool=true)
+    ys        = Symbol(y)
+    endog     = endog_iv.first isa Union{Symbol,AbstractString} ?
+                [Symbol(endog_iv.first)] :
+                [Symbol(v) for v in endog_iv.first]
+    iv        = endog_iv.second isa Union{Symbol,AbstractString} ?
+                [Symbol(endog_iv.second)] :
+                [Symbol(v) for v in endog_iv.second]
+    exog_v    = isempty(exog) ? Symbol[] :
+                (exog isa Union{Symbol,AbstractString} ?
+                    [Symbol(exog)] : [Symbol(v) for v in exog])
+    vcov      = robust ? FixedEffectModels.Vcov.robust() :
+                         FixedEffectModels.Vcov.simple()
+    _fmtn(x)  = replace(string(x), r"(\d)(?=(\d{3})+$)" => s"\1,")
+
+    # Printer shared by the first-stage (OLS, t) and 2SLS (z) blocks.
+    function _print(m, depname; mode::Symbol, endog_nms=nothing)
+        β      = StatsBase.coef(m)
+        V      = StatsBase.vcov(m)
+        se     = sqrt.(max.(LinearAlgebra.diag(V), 0.0))
+        nm_raw = string.(StatsBase.coefnames(m))
+        nm     = replace.(nm_raw, "(Intercept)" => "_cons")
+        n      = Int(StatsBase.nobs(m))
+        k      = length(β)
+        dof_r  = Int(StatsBase.dof_residual(m))
+        rss    = StatsBase.deviance(m)
+        r2     = StatsBase.r2(m)
+        rmse   = sqrt(rss / dof_r)
+
+        cons_idx = findfirst(==("_cons"), nm)
+        slope    = cons_idx === nothing ? collect(1:k) :
+                    setdiff(1:k, [cons_idx])
+        q        = length(slope)
+        Wstat    = β[slope]' * LinearAlgebra.inv(V[slope, slope]) * β[slope]
+
+        lvl = round(Int, 100 * level)
+
+        if mode == :first
+            Fstat = Wstat / q
+            pF    = 1 - Distributions.cdf(Distributions.FDist(q, dof_r), Fstat)
+            ar2   = 1 - (1 - r2) * (n - 1) / dof_r
+            Printf.@printf("%-56s%-14s= %6s\n",  "", "Number of obs", _fmtn(n))
+            Printf.@printf("%-56s%-14s= %6.2f\n","", "F($q, $dof_r)", Fstat)
+            Printf.@printf("%-56s%-14s= %6.4f\n","", "Prob > F",      pF)
+            Printf.@printf("%-56s%-14s= %6.4f\n","", "R-squared",     r2)
+            Printf.@printf("%-56s%-14s= %6.4f\n","", "Adj R-squared", ar2)
+            Printf.@printf("%-56s%-14s= %6.4f\n","", "Root MSE",      rmse)
+            println()
+
+            t_stat = β ./ se
+            tcrit  = Distributions.quantile(Distributions.TDist(dof_r),
+                                            1 - (1 - level) / 2)
+            pvals  = 2 .* (1 .-
+                     Distributions.cdf.(Distributions.TDist(dof_r), abs.(t_stat)))
+            ci_lo  = β .- tcrit .* se
+            ci_hi  = β .+ tcrit .* se
+            order  = cons_idx === nothing ? slope : vcat(slope, cons_idx)
+
+            coef_df = DataFrames.DataFrame(
+                Variable    = nm[order],
+                Coefficient = β[order],
+                StdErr      = se[order],
+                t           = t_stat[order],
+                p           = pvals[order],
+                CI_low      = ci_lo[order],
+                CI_high     = ci_hi[order],
+            )
+            _pt_compat(coef_df;
+                header = (["",         "",            "Robust",    "",  "",      "",                "" ],
+                          [depname,    "Coefficient", "std. err.", "t", "P>|t|",
+                           "[$(lvl)% CI low]", "[$(lvl)% CI high]"]),
+                formatters = vcat(
+                    PrettyTables.ft_printf("%.7f", [2, 3, 6, 7]),
+                    PrettyTables.ft_printf("%.2f", [4]),
+                    PrettyTables.ft_printf("%.3f", [5]),
+                ),
+                alignment = [:l, :r, :r, :r, :r, :r, :r],
+            )
+        else        # :second — 2SLS
+            pW = 1 - Distributions.cdf(Distributions.Chisq(q), Wstat)
+            Printf.@printf("%-50s%-16s= %10s\n",
+                           "Instrumental-variables 2SLS regression",
+                           "Number of obs", _fmtn(n))
+            Printf.@printf("%-50s%-16s= %10.2f\n", "", "Wald chi2($q)", Wstat)
+            Printf.@printf("%-50s%-16s= %10.4f\n", "", "Prob > chi2",   pW)
+            Printf.@printf("%-50s%-16s= %10.4f\n", "", "R-squared",     r2)
+            Printf.@printf("%-50s%-16s= %10.4f\n", "", "Root MSE",      rmse)
+            println()
+
+            z_stat = β ./ se
+            zcrit  = Distributions.quantile(Distributions.Normal(),
+                                            1 - (1 - level) / 2)
+            pvals  = 2 .* (1 .-
+                     Distributions.cdf.(Distributions.Normal(), abs.(z_stat)))
+            ci_lo  = β .- zcrit .* se
+            ci_hi  = β .+ zcrit .* se
+
+            # Put endogenous vars first, then the rest of the slopes, then _cons.
+            endog_pos = Int[]
+            if endog_nms !== nothing
+                for ev in endog_nms
+                    i = findfirst(==(string(ev)), nm)
+                    i !== nothing && push!(endog_pos, i)
+                end
+            end
+            rest = setdiff(slope, endog_pos)
+            order = cons_idx === nothing ?
+                    vcat(endog_pos, rest) :
+                    vcat(endog_pos, rest, cons_idx)
+
+            coef_df = DataFrames.DataFrame(
+                Variable    = nm[order],
+                Coefficient = β[order],
+                StdErr      = se[order],
+                z           = z_stat[order],
+                p           = pvals[order],
+                CI_low      = ci_lo[order],
+                CI_high     = ci_hi[order],
+            )
+            _pt_compat(coef_df;
+                header = (["",         "",            "Robust",    "",  "",      "",                "" ],
+                          [depname,    "Coefficient", "std. err.", "z", "P>|z|",
+                           "[$(lvl)% CI low]", "[$(lvl)% CI high]"]),
+                formatters = vcat(
+                    PrettyTables.ft_printf("%.7f", [2, 3, 6, 7]),
+                    PrettyTables.ft_printf("%.2f", [4]),
+                    PrettyTables.ft_printf("%.3f", [5]),
+                ),
+                alignment = [:l, :r, :r, :r, :r, :r, :r],
+            )
+        end
+    end
+
+    # ── First-stage regressions
+    first_stage_models = Any[]
+    if first
+        println("First-stage regressions")
+        println("-"^23)
+        println()
+        rhs = vcat(exog_v, iv)
+        for ev in endog
+            f_fs = term(ev) ~ sum(term.(rhs))
+            m_fs = FixedEffectModels.reg(df, f_fs, vcov)
+            _print(m_fs, string(ev); mode=:first)
+            println()
+            push!(first_stage_models, m_fs)
+        end
+    end
+
+    # ── 2SLS (build the IV formula dynamically via @formula + Meta.parse)
+    exog_part  = isempty(exog_v) ? "1" : join(string.(exog_v), " + ")
+    endog_part = join(string.(endog), " + ")
+    iv_part    = join(string.(iv), " + ")
+    fmla_str   = "@formula($(string(ys)) ~ $exog_part + ($endog_part ~ $iv_part))"
+    f_iv       = Base.eval(@__MODULE__, Meta.parse(fmla_str))
+    m_iv       = FixedEffectModels.reg(df, f_iv, vcov)
+    _print(m_iv, string(ys); mode=:second, endog_nms=endog)
+    Printf.@printf("Endogenous: %s\n", join(string.(endog), " "))
+    Printf.@printf("Exogenous:  %s\n",
+                   join(string.(vcat(exog_v, iv)), " "))
+
+    return (; first_stage=first_stage_models, iv=m_iv)
+end
+
+"""
+    iv_gmm(df, y, endog, instruments, exog=Symbol[];
+           estimator=:twosls, wmatrix=:classical,
+           cluster=nothing, iterate=false, max_iter=100, tol=1e-9)
+
+Linear IV by 2SLS or GMM. Returns `(; β, V, se, coefnames, n)`. `coefnames`
+is `["_cons", endog…, exog…]`.
+
+`estimator`:
+  * `:twosls` — β̂ with W = (Z'Z)⁻¹;
+  * `:gmm`  — β̂ with W = Ω̂⁻¹.
+
+`wmatrix` selects both the point-estimate weight (for `:gmm`) and the
+reported vcov:
+  * `:classical` (2SLS only): σ̂² · (X'Z W Z'X)⁻¹;
+  * `:robust`   : Ω̂ = Σ zᵢzᵢ'ûᵢ²  (heteroskedasticity-robust);
+  * `:cluster`  : Σ_g (Σ_i∈g zᵢûᵢ)(Σ_i∈g zᵢûᵢ)' with `cluster` Symbol.
+
+`iterate=true` runs iterated GMM (β ↔ Ω̂ until `‖β−β_prev‖ < tol`).
+"""
+function iv_gmm(df, y, endog, instruments, exog=Symbol[];
+                estimator::Symbol=:twosls, wmatrix::Symbol=:classical,
+                cluster::Union{Symbol,Nothing}=nothing,
+                iterate::Bool=false, max_iter::Int=100, tol::Float64=1e-9)
+    ys      = Symbol(y)
+    endog_v = endog isa Union{Symbol,AbstractString} ?
+              [Symbol(endog)] : [Symbol(v) for v in endog]
+    iv_v    = instruments isa Union{Symbol,AbstractString} ?
+              [Symbol(instruments)] : [Symbol(v) for v in instruments]
+    exog_v  = isempty(exog) ? Symbol[] :
+              (exog isa Union{Symbol,AbstractString} ?
+                  [Symbol(exog)] : [Symbol(v) for v in exog])
+
+    needed = vcat(ys, endog_v, exog_v, iv_v)
+    cluster !== nothing && push!(needed, cluster)
+    d = DataFrames.dropmissing(df, unique(needed))
+    n = DataFrames.nrow(d)
+
+    y_vec      = Float64.(_rawval.(d[!, ys]))
+    endog_mat  = hcat([Float64.(_rawval.(d[!, v])) for v in endog_v]...)
+    exog_mat   = isempty(exog_v) ? zeros(n, 0) :
+                 hcat([Float64.(_rawval.(d[!, v])) for v in exog_v]...)
+    iv_mat     = hcat([Float64.(_rawval.(d[!, v])) for v in iv_v]...)
+    cl_vec     = cluster === nothing ? nothing : _rawval.(d[!, cluster])
+
+    X = hcat(ones(n), endog_mat, exog_mat)
+    Z = hcat(ones(n), exog_mat,  iv_mat)
+
+    _point(y_, X_, Z_, W) = (XZ = X_'Z_; (XZ * W * XZ') \ (XZ * W * (Z_'y_)))
+    function _sand(Z_, u, cl)
+        m = size(Z_, 2); Ω = zeros(m, m)
+        if cl === nothing
+            for i in 1:length(u)
+                zi = @view Z_[i, :]
+                Ω .+= (u[i]^2) .* (zi * zi')
+            end
+        else
+            for g in unique(cl)
+                sel = cl .== g
+                zu  = Z_[sel, :]' * u[sel]
+                Ω  .+= zu * zu'
+            end
+        end
+        return Ω
+    end
+    _vcov(X_, Z_, W, Ω) = begin
+        A_inv = LinearAlgebra.inv(X_'Z_ * W * Z_'X_)
+        A_inv * (X_'Z_ * W * Ω * W * Z_'X_) * A_inv
+    end
+
+    if estimator == :twosls
+        W = LinearAlgebra.inv(Z' * Z)
+        β = _point(y_vec, X, Z, W)
+        u = y_vec .- X * β
+        if wmatrix == :classical
+            σ² = sum(abs2, u) / (n - size(X, 2))
+            V  = σ² .* LinearAlgebra.inv(X'Z * W * Z'X)
+        else
+            cl_for = wmatrix == :cluster ? cl_vec : nothing
+            V      = _vcov(X, Z, W, _sand(Z, u, cl_for))
+        end
+    elseif estimator == :gmm
+        cl_for = wmatrix == :cluster ? cl_vec : nothing
+        # Step 1 — 2SLS for initial residuals
+        W0 = LinearAlgebra.inv(Z' * Z)
+        β  = _point(y_vec, X, Z, W0)
+        u  = y_vec .- X * β
+        # Step 2 — efficient W = Ω̂⁻¹ and re-estimate
+        Ω  = _sand(Z, u, cl_for)
+        W  = LinearAlgebra.inv(Ω)
+        β  = _point(y_vec, X, Z, W)
+        u  = y_vec .- X * β
+        if iterate
+            for _ in 1:max_iter
+                Ω_new = _sand(Z, u, cl_for)
+                β_new = _point(y_vec, X, Z, LinearAlgebra.inv(Ω_new))
+                u_new = y_vec .- X * β_new
+                LinearAlgebra.norm(β_new - β) < tol &&
+                    (β = β_new; u = u_new; break)
+                β, u = β_new, u_new
+            end
+        end
+        Ω  = _sand(Z, u, cl_for)
+        W  = LinearAlgebra.inv(Ω)
+        V  = _vcov(X, Z, W, Ω)
+    else
+        error("Unknown estimator: $estimator (expected :twosls or :gmm)")
+    end
+
+    se        = sqrt.(max.(LinearAlgebra.diag(V), 0.0))
+    coefnames = vcat("_cons", string.(endog_v), string.(exog_v))
+    return (; β, V, se, coefnames, n)
+end
+
+"""
+    liml_fit(df, y, endog, instruments, exog=Symbol[]; robust=true)
+
+Limited Information Maximum Likelihood (LIML) IV estimator for linear
+models. Returns `(; β, V, se, coefnames, n)` with `coefnames` =
+`["_cons", endog…, exog…]`.
+
+LIML κ is the smallest generalized eigenvalue of `(A, B)` with
+`A = W' M_{X_exog} W`, `B = W' M_Z W`, and `W = [y, X_endog]`. The
+estimator is `β̂ = (X'(I − κ M_Z) X)⁻¹ X'(I − κ M_Z) y`. With `robust=true`
+the SEs come from the heteroskedasticity-consistent sandwich
+`(X'(I−κM_Z)X)⁻¹ · [Σᵢ ûᵢ² x̃ᵢx̃ᵢ'] · (X'(I−κM_Z)X)⁻¹` where
+`x̃ᵢ = ((I−κM_Z)X)ᵢ`.
+"""
+function liml_fit(df, y, endog, instruments, exog=Symbol[]; robust::Bool=true)
+    ys      = Symbol(y)
+    endog_v = endog isa Union{Symbol,AbstractString} ?
+              [Symbol(endog)] : [Symbol(v) for v in endog]
+    inst_v  = instruments isa Union{Symbol,AbstractString} ?
+              [Symbol(instruments)] : [Symbol(v) for v in instruments]
+    exog_v  = isempty(exog) ? Symbol[] :
+              (exog isa Union{Symbol,AbstractString} ?
+                   [Symbol(exog)] : [Symbol(v) for v in exog])
+
+    needed = unique(vcat(ys, endog_v, exog_v, inst_v))
+    d      = DataFrames.dropmissing(df, needed)
+    n      = DataFrames.nrow(d)
+    Y      = Float64.(_rawval.(d[!, ys]))
+    X_endog = hcat([Float64.(_rawval.(d[!, v])) for v in endog_v]...)
+    X_exog  = isempty(exog_v) ? zeros(n, 0) :
+              hcat([Float64.(_rawval.(d[!, v])) for v in exog_v]...)
+    Z_excl  = hcat([Float64.(_rawval.(d[!, v])) for v in inst_v]...)
+
+    X_all       = hcat(ones(n), X_endog, X_exog)          # _cons + endog + exog
+    X_exog_c    = hcat(ones(n), X_exog)                    # _cons + exog only
+    Z_full      = hcat(ones(n), X_exog, Z_excl)            # all instruments
+
+    # W = [y, X_endog]
+    W     = hcat(Y, X_endog)
+    WtW   = W' * W
+    XeInv = LinearAlgebra.inv(X_exog_c' * X_exog_c)
+    ZtZi  = LinearAlgebra.inv(Z_full' * Z_full)
+    WtXe  = W' * X_exog_c
+    WtZ   = W' * Z_full
+    A     = WtW - WtXe * XeInv * WtXe'                     # W' M_{Xe} W
+    B     = WtW - WtZ  * ZtZi  * WtZ'                      # W' M_Z  W
+    κ     = minimum(real.(LinearAlgebra.eigvals(A, B)))
+
+    # Efficient (κ M_Z X) evaluation: M_Z X = X − P_Z X; P_Z X = Z (Z'Z)⁻¹ Z' X.
+    ZtX    = Z_full' * X_all
+    PZ_X   = Z_full * (ZtZi * ZtX)                         # n × k_all
+    KX     = (1 - κ) .* X_all .+ κ .* PZ_X                 # (I − κM_Z) X
+
+    ZtY    = Z_full' * Y
+    PZ_Y   = Z_full * (ZtZi * ZtY)                         # n-vector
+    KY     = (1 - κ) .* Y .+ κ .* PZ_Y
+
+    XKX    = X_all' * KX
+    β      = XKX \ (X_all' * KY)
+    u      = Y .- X_all * β
+
+    if robust
+        meat   = KX' * LinearAlgebra.Diagonal(u.^2) * KX
+        XKXinv = LinearAlgebra.inv(XKX)
+        V      = XKXinv * meat * XKXinv'
+    else
+        σ² = sum(u.^2) / (n - size(X_all, 2))
+        V  = σ² .* LinearAlgebra.inv(XKX)
+    end
+
+    se        = sqrt.(max.(LinearAlgebra.diag(V), 0.0))
+    coefnames = vcat("_cons", string.(endog_v), string.(exog_v))
+    return (; β, V, se, coefnames, n, κ)
+end
+
+"""
+    jive_fit(df, y, endog, instruments, exog=Symbol[]; robust=true)
+
+Jackknife IV (JIVE1 of Angrist, Imbens & Krueger 1999) for linear IV
+models. Replaces each endogenous regressor by its leave-one-out first-
+stage prediction, `X̂ᵢ = (X̂_full,ᵢ − hᵢᵢ Xᵢ) / (1 − hᵢᵢ)`, then solves
+`β̂_JIVE = (X̂'X)⁻¹ X̂'y`. With `robust=true` the SE is a
+heteroskedasticity-consistent sandwich.
+"""
+function jive_fit(df, y, endog, instruments, exog=Symbol[]; robust::Bool=true)
+    ys      = Symbol(y)
+    endog_v = endog isa Union{Symbol,AbstractString} ?
+              [Symbol(endog)] : [Symbol(v) for v in endog]
+    inst_v  = instruments isa Union{Symbol,AbstractString} ?
+              [Symbol(instruments)] : [Symbol(v) for v in instruments]
+    exog_v  = isempty(exog) ? Symbol[] :
+              (exog isa Union{Symbol,AbstractString} ?
+                   [Symbol(exog)] : [Symbol(v) for v in exog])
+
+    needed = unique(vcat(ys, endog_v, exog_v, inst_v))
+    d      = DataFrames.dropmissing(df, needed)
+    n      = DataFrames.nrow(d)
+    Y      = Float64.(_rawval.(d[!, ys]))
+    X_endog = hcat([Float64.(_rawval.(d[!, v])) for v in endog_v]...)
+    X_exog  = isempty(exog_v) ? zeros(n, 0) :
+              hcat([Float64.(_rawval.(d[!, v])) for v in exog_v]...)
+    Z_excl  = hcat([Float64.(_rawval.(d[!, v])) for v in inst_v]...)
+
+    X_all  = hcat(ones(n), X_endog, X_exog)
+    Z_full = hcat(ones(n), X_exog, Z_excl)
+
+    # First-stage projections and leverages
+    ZtZi      = LinearAlgebra.inv(Z_full' * Z_full)
+    X_hat_ez  = Z_full * (ZtZi * (Z_full' * X_endog))       # full first-stage
+    ZZi       = Z_full * ZtZi                                # n × m
+    h         = vec(sum(ZZi .* Z_full, dims=2))              # hᵢᵢ diagonal
+
+    # JIVE leave-one-out prediction for the endogenous regressors
+    X_jive_endog = (X_hat_ez .- h .* X_endog) ./ (1 .- h)
+    X_jive       = hcat(ones(n), X_jive_endog, X_exog)
+
+    XjX = X_jive' * X_all
+    β   = XjX \ (X_jive' * Y)
+    u   = Y .- X_all * β
+
+    if robust
+        meat  = X_jive' * LinearAlgebra.Diagonal(u.^2) * X_jive
+        XjXi  = LinearAlgebra.inv(XjX)
+        V     = XjXi * meat * XjXi'
+    else
+        σ² = sum(u.^2) / (n - size(X_all, 2))
+        V  = σ² .* LinearAlgebra.inv(XjX)
+    end
+
+    se        = sqrt.(max.(LinearAlgebra.diag(V), 0.0))
+    coefnames = vcat("_cons", string.(endog_v), string.(exog_v))
+    return (; β, V, se, coefnames, n)
+end
+
+"""
+    estimates_compare(models, labels; vars_order=nothing, fmt="%9.5f")
+
+Stata-style `estimates table` for side-by-side comparison of estimators.
+Each entry of `models` is a NamedTuple with `β`, `se`, `coefnames`; `labels`
+are the column headers (truncated to 9 chars à la Stata, e.g. `TwoSLS_def`
+→ `TwoSLS_~f`). Prints two lines per variable — coefficients on the first,
+SEs on the second.
+"""
+function estimates_compare(models::AbstractVector, labels::AbstractVector;
+                           vars_order=nothing, fmt::AbstractString="%9.5f",
+                           stats::AbstractVector=String[])
+    length(models) == length(labels) ||
+        error("models and labels must have the same length")
+    _trunc9(s) = length(s) <= 9 ? s : s[1:7] * "~" * s[end:end]
+    labels_disp = _trunc9.(String.(labels))
+
+    all_nm = String[]
+    for m in models, n in m.coefnames
+        n in all_nm || push!(all_nm, n)
+    end
+    vars = vars_order === nothing ? all_nm : String.(vars_order)
+
+    n_est = length(models)
+    # Derive column width from fmt: " %W.Nf  " → width W + 3
+    mfmt = match(r"%-?(\d+)", fmt)
+    col_w = mfmt === nothing ? 12 : parse(Int, mfmt.captures[1]) + 3
+    var_w = 12
+    total = var_w + 2 + n_est * col_w
+
+    # Runtime-built format for user-supplied `fmt` (@sprintf needs a literal).
+    cell_fmt = Printf.Format(" " * String(fmt) * "  ")
+
+    # Center labels in a fixed width (Stata's `estimates table` convention).
+    _center(s, w) = begin
+        slen = length(s)
+        slen >= w && return first(s, w)
+        lead  = max(div(w - slen - 1, 2), 0)
+        trail = w - lead - slen
+        " "^lead * s * " "^trail
+    end
+
+    println("-"^total)
+    hdr = lpad("Variable", var_w) * " |"
+    for lbl in labels_disp
+        hdr *= _center(lbl, col_w)
+    end
+    println(hdr)
+    println("-"^var_w * "+" * "-"^(total - var_w - 1))
+
+    blank = " "^col_w
+    for v in vars
+        row_b = lpad(v, var_w) * " |"
+        row_s = lpad("", var_w) * " |"
+        for m in models
+            i = findfirst(==(v), m.coefnames)
+            if i === nothing
+                row_b *= blank; row_s *= blank
+            else
+                row_b *= Printf.format(cell_fmt, m.β[i])
+                row_s *= Printf.format(cell_fmt, m.se[i])
+            end
+        end
+        println(row_b)
+        println(row_s)
+    end
+
+    # ─── Optional statistics footer (N, r2, sigma_u, etc.)
+    if !isempty(stats)
+        println("-"^var_w * "+" * "-"^(total - var_w - 1))
+        int_fmt = Printf.Format("  %-*d  ")     # for integer stats like N
+        for s in stats
+            s_str = String(s)
+            row = lpad(s_str, var_w) * " |"
+            for m in models
+                val = hasproperty(m, :stats) ? get(m.stats, s_str, nothing) : nothing
+                if val === nothing
+                    row *= blank
+                elseif val isa Integer
+                    # Pretend it's a float for the common cell width (e.g. "     4165  ").
+                    row *= Printf.format(cell_fmt, Float64(val))
+                    # Ditch trailing decimals if the format has any:
+                    row = replace(row,
+                        r"(?<=\s)(-?\d+)\.0+(?=\s)" => s"\1",
+                        count = 1)
+                else
+                    row *= Printf.format(cell_fmt, val)
+                end
+            end
+            println(row)
+        end
+    end
+
+    println("-"^total)
+end
+
+"""
+    estat_endogenous(df, y, endog, instruments, exog=Symbol[]; robust=true)
+
+Stata-style `estat endogenous` after `ivregress 2sls` — the
+Durbin–Wu–Hausman test of whether the regressors listed in `endog` are
+exogenous. Implemented by the Wooldridge control-function approach:
+
+  1. First stage — regress each endogenous variable on `exog + instruments`;
+     save the residuals v̂.
+  2. Augmented regression — regress `y` on `endog + v̂ + exog` with
+     (robust by default) SEs.
+  3. Joint Wald test on the coefficients of v̂ — under H0 they are zero.
+
+Reports both the χ² form and the asymptotically equivalent F form.
+Returns the stats in a NamedTuple.
+"""
+function estat_endogenous(df, y, endog, instruments, exog=Symbol[];
+                          robust::Bool=true)
+    ys       = Symbol(y)
+    endog_v  = endog isa Union{Symbol,AbstractString} ?
+               [Symbol(endog)] : [Symbol(v) for v in endog]
+    iv_v     = instruments isa Union{Symbol,AbstractString} ?
+               [Symbol(instruments)] : [Symbol(v) for v in instruments]
+    exog_v   = isempty(exog) ? Symbol[] :
+               (exog isa Union{Symbol,AbstractString} ?
+                   [Symbol(exog)] : [Symbol(v) for v in exog])
+
+    needed = unique(vcat(ys, endog_v, exog_v, iv_v))
+    d = DataFrames.dropmissing(df, needed)
+
+    resid_names = Symbol[]
+    for ev in endog_v
+        f_fs = term(ev) ~ sum(term.(vcat(exog_v, iv_v)))
+        m_fs = FixedEffectModels.reg(d, f_fs)
+        vn   = Symbol("_v_", ev)
+        d[!, vn] = Float64.(_rawval.(d[!, ev])) .-
+                   FixedEffectModels.predict(m_fs, d)
+        push!(resid_names, vn)
+    end
+
+    vcov  = robust ? FixedEffectModels.Vcov.robust() :
+                     FixedEffectModels.Vcov.simple()
+    f_aux = term(ys) ~ sum(term.(vcat(endog_v, resid_names, exog_v)))
+    m_aux = FixedEffectModels.reg(d, f_aux, vcov)
+
+    β   = StatsBase.coef(m_aux)
+    V   = StatsBase.vcov(m_aux)
+    nm  = string.(StatsBase.coefnames(m_aux))
+    idx = [findfirst(==(string(v)), nm) for v in resid_names]
+    β_r = β[idx];  V_r = V[idx, idx]
+    q   = length(idx)
+    W   = β_r' * LinearAlgebra.inv(V_r) * β_r          # Wald χ²(q)
+    n   = Int(StatsBase.nobs(m_aux));  k = length(β)
+    df2 = n - k
+    F   = W / q                                        # F-form
+    p_chi = 1 - Distributions.cdf(Distributions.Chisq(q), W)
+    p_F   = 1 - Distributions.cdf(Distributions.FDist(q, df2), F)
+
+    prefix = robust ? "Robust" : ""
+    println("  Tests of endogeneity")
+    println("  H0: Variables are exogenous\n")
+    Printf.@printf("    %s score chi2(%d)           = %9.5f  (p = %.4f)\n",
+                   prefix, q, W, p_chi)
+    Printf.@printf("    %s regression F(%d,%d)%s  = %9.5f  (p = %.4f)\n",
+                   prefix, q, df2, " "^max(0, 4 - length(string(df2))),
+                   F, p_F)
+    return (; chi2=W, df1=q, p_chi, F, df2, p_F,
+              endog_vars=endog_v, instruments=iv_v, exog_vars=exog_v)
+end
+
+"""
+    estat_overid(df, y, endog, instruments, exog=Symbol[]; cluster=nothing)
+
+Stata-style `estat overid` after `ivregress gmm ..., wmatrix(robust)` —
+Hansen's J test of overidentifying restrictions. Runs efficient two-step
+GMM internally and reports
+
+    Hansen's J = (Z'û)' · Ω̂⁻¹ · (Z'û)  ~  χ²(L − K),
+
+where `û` are the GMM residuals, `Ω̂ = Σᵢ zᵢ zᵢ'ûᵢ²` (or its cluster form
+when `cluster` is supplied), and `L − K = #instruments − #regressors` is
+the number of overidentifying restrictions.
+"""
+function estat_overid(df, y, endog, instruments, exog=Symbol[];
+                      cluster::Union{Symbol,Nothing}=nothing)
+    ys      = Symbol(y)
+    endog_v = endog isa Union{Symbol,AbstractString} ?
+              [Symbol(endog)] : [Symbol(v) for v in endog]
+    iv_v    = instruments isa Union{Symbol,AbstractString} ?
+              [Symbol(instruments)] : [Symbol(v) for v in instruments]
+    exog_v  = isempty(exog) ? Symbol[] :
+              (exog isa Union{Symbol,AbstractString} ?
+                  [Symbol(exog)] : [Symbol(v) for v in exog])
+
+    needed = vcat(ys, endog_v, exog_v, iv_v)
+    cluster !== nothing && push!(needed, cluster)
+    d = DataFrames.dropmissing(df, unique(needed))
+    n = DataFrames.nrow(d)
+
+    y_vec     = Float64.(_rawval.(d[!, ys]))
+    endog_mat = hcat([Float64.(_rawval.(d[!, v])) for v in endog_v]...)
+    exog_mat  = isempty(exog_v) ? zeros(n, 0) :
+                hcat([Float64.(_rawval.(d[!, v])) for v in exog_v]...)
+    iv_mat    = hcat([Float64.(_rawval.(d[!, v])) for v in iv_v]...)
+    cl_vec    = cluster === nothing ? nothing : _rawval.(d[!, cluster])
+
+    X = hcat(ones(n), endog_mat, exog_mat)
+    Z = hcat(ones(n), exog_mat,  iv_mat)
+
+    # Step 1 — 2SLS for initial residuals
+    W0 = LinearAlgebra.inv(Z' * Z)
+    XZ = X' * Z
+    β0 = (XZ * W0 * XZ') \ (XZ * W0 * (Z' * y_vec))
+    u0 = y_vec .- X * β0
+
+    # Step 2 — Ω̂ (robust or cluster)
+    m = size(Z, 2)
+    Ω = zeros(m, m)
+    if cl_vec === nothing
+        for i in 1:n
+            zi = @view Z[i, :]
+            Ω .+= (u0[i]^2) .* (zi * zi')
+        end
+    else
+        for g in unique(cl_vec)
+            sel = cl_vec .== g
+            zu  = Z[sel, :]' * u0[sel]
+            Ω  .+= zu * zu'
+        end
+    end
+
+    # Step 3 — efficient GMM β̂ at W = Ω̂⁻¹
+    W = LinearAlgebra.inv(Ω)
+    β = (XZ * W * XZ') \ (XZ * W * (Z' * y_vec))
+    u = y_vec .- X * β
+
+    gvec  = Z' * u
+    J     = gvec' * W * gvec
+    df_J  = size(Z, 2) - size(X, 2)
+    p_val = df_J > 0 ? 1 - Distributions.cdf(Distributions.Chisq(df_J), J) : NaN
+
+    println("Test of overidentifying restriction:\n")
+    if df_J <= 0
+        println("  Model is just-identified (df = 0); J test not applicable.")
+    else
+        Printf.@printf("  Hansen's J chi2(%d) = %.5f (p = %.4f)\n",
+                       df_J, J, p_val)
+    end
+    return (; J, df=df_J, p=p_val, n)
+end
+
+"""
+    estat_firststage(df, y, endog, instruments, exog=Symbol[])
+
+Stata-style `estat firststage, forcenonrobust all` after `ivregress 2sls`.
+Reports the three blocks Stata prints for weak-instrument diagnostics:
+
+  1. **First-stage regression summary** — for each endogenous regressor,
+     R², Adj R², Partial R² (contribution of excluded instruments after
+     partialling out the exogenous regressors), the **robust** F on the
+     excluded instruments, and its p-value.
+  2. **Shea's partial R²** (for a single endog this equals Partial R²).
+  3. **Minimum eigenvalue statistic** (the classical, non-robust
+     first-stage F in the single-endog case) and the Stock–Yogo (2005)
+     critical-values table for 2SLS/LIML size tests.
+
+The Stock–Yogo table is hardcoded for `(# endog = 1, # excluded IV ∈ 1..5)`
+and "relative bias" is marked `(not available)` when `L = 1`
+(just-identified).
+"""
+function estat_firststage(df, y, endog, instruments, exog=Symbol[];
+                          all::Bool=false, robust::Bool=true)
+    # — Parse inputs
+    ys      = Symbol(y)
+    endog_v = endog isa Union{Symbol,AbstractString} ?
+              [Symbol(endog)] : [Symbol(v) for v in endog]
+    inst_v  = instruments isa Union{Symbol,AbstractString} ?
+              [Symbol(instruments)] : [Symbol(v) for v in instruments]
+    exog_v  = isempty(exog) ? Symbol[] :
+              (exog isa Union{Symbol,AbstractString} ?
+                   [Symbol(exog)] : [Symbol(v) for v in exog])
+
+    needed  = unique(vcat(ys, endog_v, exog_v, inst_v))
+    d       = DataFrames.dropmissing(df, needed)
+    n       = DataFrames.nrow(d)
+    n_endog = length(endog_v)
+    L       = length(inst_v)
+
+    fs_rows      = NTuple{8, Any}[]
+    shea_rows    = NTuple{3, Any}[]
+    min_eig_vals = Float64[]
+
+    for ev in endog_v
+        # Full first stage (both forms: classical always; robust if requested)
+        f_full = term(ev) ~ sum(term.(vcat(exog_v, inst_v)))
+        m_cls  = FixedEffectModels.reg(d, f_full)
+        m_rob  = robust ? FixedEffectModels.reg(d, f_full,
+                                                FixedEffectModels.Vcov.robust()) :
+                          m_cls
+
+        # Partial R² = (RSS_restricted − RSS_full) / RSS_restricted
+        RSS_full = StatsBase.deviance(m_cls)
+        RSS_restr = if isempty(exog_v)
+            y_ev = Float64.(_rawval.(d[!, ev]))
+            sum((y_ev .- Statistics.mean(y_ev)).^2)
+        else
+            f_restr = term(ev) ~ sum(term.(exog_v))
+            StatsBase.deviance(FixedEffectModels.reg(d, f_restr))
+        end
+        R²_full    = StatsBase.r2(m_cls)
+        adjR²_full = StatsBase.adjr2(m_cls)
+        partial_R² = (RSS_restr - RSS_full) / RSS_restr
+
+        β       = StatsBase.coef(m_cls)
+        nmvec   = string.(StatsBase.coefnames(m_cls))
+        iv_idx  = [findfirst(==(string(v)), nmvec) for v in inst_v]
+        β_iv    = β[iv_idx]
+        df_den  = Int(StatsBase.dof_residual(m_cls))
+
+        # F reported in the first-stage summary — robust or classical per kwarg.
+        V_main  = StatsBase.vcov(m_rob)
+        V_iv_m  = V_main[iv_idx, iv_idx]
+        F_main  = (β_iv' * LinearAlgebra.inv(V_iv_m) * β_iv) / L
+        p_main  = 1 - Distributions.cdf(Distributions.FDist(L, df_den), F_main)
+        push!(fs_rows, (string(ev), R²_full, adjR²_full, partial_R²,
+                         F_main, p_main, L, df_den))
+
+        # Shea's partial R² ≡ Partial R² for single endog.
+        k_total = length(β)
+        shea_adj = 1 - (1 - partial_R²) * (n - 1) / (n - k_total)
+        push!(shea_rows, (string(ev), partial_R², shea_adj))
+
+        # Minimum eigenvalue = classical F (single endog case)
+        V_cls  = StatsBase.vcov(m_cls)
+        V_iv_c = V_cls[iv_idx, iv_idx]
+        F_cls  = (β_iv' * LinearAlgebra.inv(V_iv_c) * β_iv) / L
+        push!(min_eig_vals, F_cls)
+    end
+
+    # ─── Block 1: first-stage summary
+    println()
+    println("  First-stage regression summary statistics")
+    println("  " * "-"^74)
+    label_robust = robust ? "Robust" : "      "
+    println("               |            Adjusted      Partial       $(label_robust)")
+    Printf.@printf("      Variable |   R-sq.       R-sq.        R-sq.    F(%d,%d)   Prob > F\n",
+                   fs_rows[1][7], fs_rows[1][8])
+    println("  -------------+" * "-"^60)
+    for r in fs_rows
+        Printf.@printf("  %12s | %6.4f      %6.4f       %6.4f    %10.4f    %.4f\n",
+                       r[1], r[2], r[3], r[4], r[5], r[6])
+    end
+    println("  " * "-"^74)
+    println()
+
+    # ─── Block 2: Shea's partial R² (only with `all`, matching Stata)
+    if all
+        println()
+        println("  Shea's partial R-squared")
+        println("  " * "-"^50)
+        println("               |     Shea's             Shea's")
+        println("      Variable |  partial R-sq.   adj. partial R-sq.")
+        println("  -------------+" * "-"^36)
+        for r in shea_rows
+            Printf.@printf("  %12s |     %6.4f             %6.4f\n",
+                           r[1], r[2], r[3])
+        end
+        println("  " * "-"^50)
+        println()
+    end
+
+    # ─── Block 3: Minimum eigenvalue + Stock–Yogo table
+    println()
+    Printf.@printf("  Minimum eigenvalue statistic = %.2f\n\n", min_eig_vals[1])
+
+    # Stock–Yogo (2005) critical values for n_endog = 1
+    sy_2sls_size = Dict(  # levels 10%, 15%, 20%, 25%
+        1 => (16.38,  8.96,  6.66,  5.53),
+        2 => (19.93, 11.59,  8.75,  7.25),
+        3 => (22.30, 12.83,  9.54,  7.80),
+        4 => (24.58, 13.96, 10.26,  8.31),
+        5 => (26.87, 15.09, 10.98,  8.82),
+    )
+    sy_liml_size = Dict(  # levels 10%, 15%, 20%, 25%
+        1 => (16.38, 8.96, 6.66, 5.53),
+        2 => ( 8.68, 5.33, 4.42, 3.92),
+        3 => ( 6.46, 4.36, 3.69, 3.32),
+        4 => ( 5.44, 3.87, 3.30, 2.98),
+        5 => ( 4.84, 3.56, 3.05, 2.77),
+    )
+    sy_2sls_bias = Dict(  # levels 5%, 10%, 20%, 30% (only L ≥ 3)
+        3 => (13.91, 9.08, 6.46, 5.39),
+        4 => (16.85, 10.27, 6.71, 5.34),
+        5 => (18.37, 10.83, 6.77, 5.25),
+    )
+
+    Printf.@printf("  Critical Values                      # of endogenous regressors: %4d\n", n_endog)
+    Printf.@printf("  H0: Instruments are weak             # of excluded instruments:  %4d\n", L)
+    println("  " * "-"^69)
+    # Bias row
+    println("                                     |    5%     10%     20%     30%")
+    if n_endog == 1 && haskey(sy_2sls_bias, L)
+        b = sy_2sls_bias[L]
+        Printf.@printf("  2SLS relative bias                 |  %5.2f   %5.2f   %5.2f   %5.2f\n",
+                       b[1], b[2], b[3], b[4])
+    else
+        println("  2SLS relative bias                 |         (not available)")
+    end
+    println("  -----------------------------------+" * "-"^33)
+    # Size rows
+    println("                                     |   10%     15%     20%     25%")
+    if n_endog == 1 && haskey(sy_2sls_size, L)
+        v = sy_2sls_size[L]
+        Printf.@printf("  2SLS size of nominal 5%% Wald test  |  %5.2f   %5.2f   %5.2f   %5.2f\n",
+                       v[1], v[2], v[3], v[4])
+    else
+        println("  2SLS size of nominal 5% Wald test  |         (not available)")
+    end
+    if n_endog == 1 && haskey(sy_liml_size, L)
+        v = sy_liml_size[L]
+        Printf.@printf("  LIML size of nominal 5%% Wald test  |  %5.2f   %5.2f   %5.2f   %5.2f\n",
+                       v[1], v[2], v[3], v[4])
+    else
+        println("  LIML size of nominal 5% Wald test  |         (not available)")
+    end
+    println("  " * "-"^69)
+    return (; fs_rows, shea_rows, min_eig = min_eig_vals, n, n_endog, L)
+end
+
+"""
+    correlate(df, vars; filter_missing=Symbol[])
+
+Stata-style `correlate varlist [if …]` — prints the lower-triangular
+Pearson correlation matrix with 4-decimal display and Stata's 8-char
+variable-name truncation via `~`. Pass extra variables in
+`filter_missing` to emulate Stata's `if var != .` subsetting (rows with
+missing on any listed variable are dropped in addition to the `vars`
+themselves).
+
+Returns the `n × n` correlation matrix.
+"""
+function correlate(df, vars::AbstractVector; filter_missing=Symbol[])
+    vars_v   = [Symbol(v) for v in vars]
+    filter_v = [Symbol(v) for v in filter_missing]
+    d        = DataFrames.dropmissing(df, unique(vcat(vars_v, filter_v)))
+    M        = hcat([Float64.(_rawval.(d[!, v])) for v in vars_v]...)
+    R        = Statistics.cor(M)
+    n_var    = length(vars_v)
+
+    _trunc(s) = length(s) <= 8 ? s : s[1:6] * "~" * s[end:end]
+    nms       = string.(vars_v)
+    nms_disp  = _trunc.(nms)
+
+    hdr = Printf.@sprintf("%12s |", "")
+    for nm in nms_disp
+        hdr *= Printf.@sprintf(" %8s", nm)
+    end
+    println(hdr)
+    println("-"^13 * "+" * "-"^(9 * n_var))
+
+    for i in 1:n_var
+        row = Printf.@sprintf("%12s |", nms[i])
+        for j in 1:i
+            row *= Printf.@sprintf("%9.4f", R[i, j])
+        end
+        println(row)
+    end
+    return R
+end
+
+"""
+    treatreg(df, y, exog, treat, treat_exog; level=0.95, max_iter=2000)
+
+Stata-style `treatreg y indepvars, treat(D = varlist)` — full-information
+MLE of the Heckman treatment-effects model with endogenous binary
+treatment:
+
+  Outcome    : yᵢ = Xᵢβ + δDᵢ + εᵢ
+  Treatment  : Dᵢ = 𝟙{Zᵢγ + uᵢ > 0}
+  (ε, u) ~ 𝒩(0, [[σ² , ρσ], [ρσ, 1]])
+
+Joint log-likelihood:
+
+  ℓᵢ = −log σ − ½ log 2π − ½(εᵢ/σ)² + log Φ((2Dᵢ−1)(Zᵢγ + ρεᵢ/σ)/√(1−ρ²))
+
+Internally parameterized via `athrho = atanh(ρ)` and `lnsigma = log(σ)`
+(numerical stability; matches Stata). SEs from the inverse observed
+information (ForwardDiff Hessian). CI for ρ, σ transformed from the
+athrho, lnsigma CIs; CI for λ = ρσ by delta method.
+
+Prints the Stata block (summary header → outcome → treatment → athrho /
+lnsigma → rho / sigma / lambda → LR test of ρ=0 vs. independent OLS +
+probit).
+"""
+function treatreg(df, y, exog::AbstractVector, treat, treat_exog::AbstractVector;
+                  level::Float64=0.95, max_iter::Int=2000, show_trace::Bool=false)
+    ys           = Symbol(y)
+    exog_v       = [Symbol(v) for v in exog]
+    treat_v      = Symbol(treat)
+    treat_exog_v = [Symbol(v) for v in treat_exog]
+
+    needed = unique(vcat(ys, exog_v, treat_v, treat_exog_v))
+    d = DataFrames.dropmissing(df, needed)
+    n = DataFrames.nrow(d)
+
+    Y        = Float64.(_rawval.(d[!, ys]))
+    D        = Float64.(_rawval.(d[!, treat_v]))
+    # Outcome design: [exog..., treat, _cons]
+    X_out    = hcat([Float64.(_rawval.(d[!, v])) for v in exog_v]..., D, ones(n))
+    # Treatment design: [treat_exog..., _cons]
+    X_treat  = hcat([Float64.(_rawval.(d[!, v])) for v in treat_exog_v]..., ones(n))
+    k_out    = size(X_out, 2)
+    k_treat  = size(X_treat, 2)
+
+    names_out   = vcat(string.(exog_v), string(treat_v), "_cons")
+    names_treat = vcat(string.(treat_exog_v), "_cons")
+
+    # Negative log-likelihood
+    function nll(θ)
+        β      = θ[1:k_out]
+        γ      = θ[k_out+1:k_out+k_treat]
+        athrho = θ[k_out+k_treat+1]
+        lnsig  = θ[k_out+k_treat+2]
+        ρ      = tanh(athrho)
+        σ      = exp(lnsig)
+        ε      = Y .- X_out * β
+        η      = X_treat * γ
+        denom  = sqrt(1 - ρ^2)
+        ll     = -n * (log(σ) + 0.5 * log(2π)) - 0.5 * sum((ε ./ σ) .^ 2)
+        arg    = (2 .* D .- 1) .* (η .+ ρ .* ε ./ σ) ./ denom
+        ll    += sum(log.(max.(Distributions.cdf.(Distributions.Normal(), arg),
+                                1e-300)))
+        return -ll
+    end
+
+    # Starting values: OLS + probit + ρ=0, σ=OLS residual SD.
+    β0   = X_out \ Y
+    f_pr = term(treat_v) ~ sum(term.(treat_exog_v))
+    pfit = GLM.glm(f_pr, d, GLM.Binomial(), GLM.ProbitLink())
+    pcf  = GLM.coef(pfit); pnm = string.(GLM.coefnames(pfit))
+    γ0   = zeros(k_treat)
+    for (i, v) in enumerate(treat_exog_v)
+        j = findfirst(==(string(v)), pnm); j !== nothing && (γ0[i] = pcf[j])
+    end
+    ji   = findfirst(==("(Intercept)"), pnm)
+    ji !== nothing && (γ0[end] = pcf[ji])
+    ε0   = Y .- X_out * β0
+    σ0   = sqrt(mean(ε0 .^ 2))
+    θ0   = vcat(β0, γ0, 0.0, log(σ0))
+
+    res  = _optimize_compat(nll, θ0, Optim.LBFGS(),
+                          Optim.Options(iterations = max_iter,
+                                        show_trace = show_trace);
+                          autodiff = :forward)
+    θ̂    = Optim.minimizer(res)
+    logL = -Optim.minimum(res)
+    H    = ForwardDiff.hessian(nll, θ̂)   # Optim's TwiceDifferentiable autodiff plumbing is broken in this Optim version
+    V    = LinearAlgebra.inv(H)
+    se   = sqrt.(max.(LinearAlgebra.diag(V), 0.0))
+
+    β̂       = θ̂[1:k_out]
+    γ̂       = θ̂[k_out+1:k_out+k_treat]
+    athrho  = θ̂[k_out+k_treat+1]
+    lnsig   = θ̂[k_out+k_treat+2]
+    ρ̂       = tanh(athrho)
+    σ̂       = exp(lnsig)
+    λ̂       = ρ̂ * σ̂
+    se_β    = se[1:k_out]
+    se_γ    = se[k_out+1:k_out+k_treat]
+    se_ath  = se[k_out+k_treat+1]
+    se_lns  = se[k_out+k_treat+2]
+
+    # Delta method for λ; transformation CIs for ρ and σ.
+    zcrit   = Distributions.quantile(Distributions.Normal(), 1 - (1-level)/2)
+    V_ag    = V[[k_out+k_treat+1, k_out+k_treat+2],
+                 [k_out+k_treat+1, k_out+k_treat+2]]
+    se_ρ    = sqrt(max((1 - ρ̂^2)^2 * V_ag[1, 1], 0.0))
+    se_σ    = σ̂ * se_lns
+    Jλ      = [σ̂ * (1 - ρ̂^2), ρ̂ * σ̂]
+    se_λ    = sqrt(max(Jλ' * V_ag * Jλ, 0.0))
+
+    ρ_ci = (tanh(athrho - zcrit*se_ath), tanh(athrho + zcrit*se_ath))
+    σ_ci = (exp(lnsig - zcrit*se_lns),   exp(lnsig + zcrit*se_lns))
+    λ_ci = (λ̂ - zcrit*se_λ,              λ̂ + zcrit*se_λ)
+
+    # Wald χ² for "all outcome slopes = 0" (exclude _cons at last position).
+    slope_idx  = 1:(k_out-1)
+    βs         = β̂[slope_idx]
+    Vs         = V[slope_idx, slope_idx]
+    Wald       = βs' * LinearAlgebra.inv(Vs) * βs
+    df_wald    = length(slope_idx)
+    p_wald     = 1 - Distributions.cdf(Distributions.Chisq(df_wald), Wald)
+
+    # LR test of ρ = 0 vs independent OLS + probit.
+    σ²_r        = mean(ε0 .^ 2)
+    logL_ols    = -n/2 * (log(2π) + log(σ²_r) + 1)
+    logL_probit = GLM.loglikelihood(pfit)
+    logL_r      = logL_ols + logL_probit
+    LR          = -2 * (logL_r - logL)
+    p_LR        = 1 - Distributions.cdf(Distributions.Chisq(1), LR)
+
+    # ── Stata-style output
+    _fmtn(x)  = replace(string(x), r"(\d)(?=(\d{3})+$)" => s"\1,")
+    _g(x, w; sig=7) = begin
+        (ismissing(x) || !isfinite(x)) && return Printf.@sprintf("%*s", w, ".")
+        s = Printf.@sprintf("%.*g", sig, x)
+        0 < abs(x) < 1 && (s = replace(s, r"^(-?)0\." => s"\1."))
+        Printf.@sprintf("%*s", w, s)
+    end
+
+    println()
+    Printf.@printf("Treatment-effects model -- MLE%24s Number of obs = %7s\n",
+                   "", _fmtn(n))
+    Printf.@printf("%54s Wald chi2(%d)  = %7.2f\n",
+                   "", df_wald, Wald)
+    Printf.@printf("Log likelihood = %10.3f%28s Prob > chi2   = %7.4f\n",
+                   logL, "", p_wald)
+    println()
+
+    println("-"^78)
+    Printf.@printf("%12s | %-11s  %-9s  %6s  %5s     [%d%% conf. interval]\n",
+                   "", "Coefficient", "Std. err.", "z", "P>|z|",
+                   round(Int, 100*level))
+    println("-"^13, "+", "-"^64)
+
+    function _row(nm, b, s; show_z=true)
+        if show_z
+            z = b/s; p = 2*(1 - Distributions.cdf(Distributions.Normal(), abs(z)))
+            lo = b - zcrit*s; hi = b + zcrit*s
+            Printf.@printf("%12s | %s  %s  %7.2f  %6.3f  %s  %s\n",
+                           nm, _g(b,10), _g(s,9), z, p, _g(lo,11), _g(hi,10))
+        else
+            lo, hi = s  # s here is a tuple (lo, hi) — overload helper below
+        end
+    end
+
+    # Outcome block
+    Printf.@printf("%-12s |\n", string(ys))
+    for i in 1:k_out
+        b = β̂[i]; s = se_β[i]
+        z = b/s; p = 2*(1 - Distributions.cdf(Distributions.Normal(), abs(z)))
+        lo = b - zcrit*s; hi = b + zcrit*s
+        Printf.@printf("%12s | %s  %s  %7.2f  %6.3f  %s  %s\n",
+                       names_out[i], _g(b,10), _g(s,9), z, p, _g(lo,11), _g(hi,10))
+    end
+    println("-"^13, "+", "-"^64)
+
+    # Treatment block
+    Printf.@printf("%-12s |\n", string(treat_v))
+    for i in 1:k_treat
+        g = γ̂[i]; s = se_γ[i]
+        z = g/s; p = 2*(1 - Distributions.cdf(Distributions.Normal(), abs(z)))
+        lo = g - zcrit*s; hi = g + zcrit*s
+        Printf.@printf("%12s | %s  %s  %7.2f  %6.3f  %s  %s\n",
+                       names_treat[i], _g(g,10), _g(s,9), z, p, _g(lo,11), _g(hi,10))
+    end
+    println("-"^13, "+", "-"^64)
+
+    # Auxiliary (athrho / lnsigma) — has z / p
+    for (nm, v, s) in (("/athrho", athrho, se_ath), ("/lnsigma", lnsig, se_lns))
+        z = v/s; p = 2*(1 - Distributions.cdf(Distributions.Normal(), abs(z)))
+        lo = v - zcrit*s; hi = v + zcrit*s
+        Printf.@printf("%12s | %s  %s  %7.2f  %6.3f  %s  %s\n",
+                       nm, _g(v,10), _g(s,9), z, p, _g(lo,11), _g(hi,10))
+    end
+    println("-"^13, "+", "-"^64)
+
+    # Derived (rho / sigma / lambda) — no z / p (shown as blanks)
+    for (nm, v, s, lo, hi) in (
+        ("rho",    ρ̂, se_ρ, ρ_ci[1], ρ_ci[2]),
+        ("sigma",  σ̂, se_σ, σ_ci[1], σ_ci[2]),
+        ("lambda", λ̂, se_λ, λ_ci[1], λ_ci[2]))
+        Printf.@printf("%12s | %s  %s  %7s  %6s  %s  %s\n",
+                       nm, _g(v,10), _g(s,9), "", "", _g(lo,11), _g(hi,10))
+    end
+    println("-"^78)
+    Printf.@printf("LR test of indep. eqns. (rho = 0):   chi2(1) = %8.2f   Prob > chi2 = %.4f\n",
+                   LR, p_LR)
+    return (; β=β̂, γ=γ̂, ρ=ρ̂, σ=σ̂, λ=λ̂, logL, Wald, df_wald, p_wald,
+              LR, p_LR, names_out, names_treat, V, se)
+end
+
+"""
+    correlate(df, vars)
+
+Stata-style `correlate var1 var2 ...`. Prints a lower-triangular correlation
+matrix on pairwise-complete rows, with row labels like Stata.
+"""
+function correlate(df, vars::AbstractVector)
+    m = Matrix{Float64}(undef, DataFrames.nrow(df), length(vars))
+    for (j, v) in enumerate(vars)
+        m[:, j] = [ismissing(x) ? NaN : Float64(_rawval(x)) for x in df[!, Symbol(v)]]
+    end
+    keep = .!any(isnan, m; dims=2)[:]
+    m = m[keep, :]
+    n = size(m, 1)
+    C = Statistics.cor(m)
+    disp = [i < j ? "" : Printf.@sprintf("%.4f", C[i, j])
+            for i in 1:length(vars), j in 1:length(vars)]
+    println("(obs = $n)")
+    out = DataFrames.DataFrame()
+    out[!, :Variable] = string.(vars)
+    for (j, v) in enumerate(vars)
+        out[!, Symbol(v)] = disp[:, j]
+    end
+    _pt_compat(out; alignment=:r)
+    return (; cor=C, n=n, vars=string.(vars))
+end
+```
+
+# 6 Linear instrumental-variables regression
+
+## 6.1 Introduction
+
+## 6.2 IV estimation
+
+### 6.2.1 Basic IV theory
+
+### 6.2.2 Model setup
+
+### 6.2.3 IV estimators: IV, 2SLS, and GMM
+
+### 6.2.4 Instrument validity and relevance
+
+### 6.2.5 Robust standard-error estimates
+
+## 6.3 IV example
+
+### 6.3.1 The reg() function for IV in FixedEffectModels.jl
+
+### 6.3.2 Medical expenditures with one endogenous regressor
+
+```{julia}
+#=
+clear all
+* Read data, define global x2list, and summarize data
+use musr/mus06data.dta
+global x2list totchr age female blhisp linc 
+summarize ldrugexp hi_empunion $x2list
+=#
+# Read data
+df6 = DataFrame(ReadStatTables.readstat("musr/mus06data.dta"))
+x2list = [:totchr, :age, :female, :blhisp, :linc]
+DataFrames.describe(df6[:, vcat([:ldrugexp, :hi_empunion], x2list)])
+```
+
+```{julia}
+summarize_stata(df6[:, vcat([:ldrugexp, :hi_empunion], x2list)])
+```
+
+### 6.3.3 Available instruments
+
+```{julia}
+#=
+* Following not included in book
+summarize
+=#
+# Quick overview of all variables
+summarize_stata(df6)
+```
+
+```{julia}
+#=
+* Summarize available instruments 
+summarize ssiratio lowincome multlc firmsz if linc!=.
+=#
+# Summarize available instruments where linc is non-missing
+df6_iv = dropmissing(df6, [:linc])
+summarize_stata(df6_iv[:, [:ssiratio, :lowincome, :multlc, :firmsz]])
+```
+
+### 6.3.4 IV estimation of an exactly identified model
+
+```{julia}
+#=
+* IV estimation of a just-identified model with single endog regressor
+ivregress 2sls ldrugexp (hi_empunion = ssiratio) $x2list, vce(robust) first
+=#
+# 2SLS with single endogenous regressor; hi_empunion instrumented by ssiratio
+iv_just = FixedEffectModels.reg(df6,
+    @formula(ldrugexp ~ totchr + age + female + blhisp + linc +
+                       (hi_empunion ~ ssiratio)),
+    Vcov.robust())
+```
+
+```{julia}
+#* IV estimation of a just-identified model with single endog regressor
+#ivregress 2sls ldrugexp (hi_empunion = ssiratio) $x2list, vce(robust) first
+ivregress_2sls(df6, :ldrugexp, :hi_empunion => :ssiratio, x2list;
+               robust=true, first=true);
+```
+
+### 6.3.5 IV estimation of an overidentified model
+
+```{julia}
+#=
+* Compare 5 estimators and variance estimates for overidentified models
+global ivmodel "ldrugexp (hi_empunion = ssiratio multlc) $x2list"
+quietly ivregress 2sls $ivmodel, vce(robust)
+estimates store TwoSLS
+quietly ivregress gmm  $ivmodel, wmatrix(robust) 
+estimates store GMM_het
+quietly ivregress gmm  $ivmodel, wmatrix(robust) igmm
+estimates store GMM_igmm
+quietly ivregress gmm  $ivmodel, wmatrix(cluster age) 
+estimates store GMM_clu
+quietly ivregress 2sls  $ivmodel
+estimates store TwoSLS_def
+estimates table TwoSLS GMM_het GMM_igmm GMM_clu TwoSLS_def, b(%9.5f) se  
+=#
+# 2SLS with two instruments (ssiratio + multlc) — overidentified
+iv_over = FixedEffectModels.reg(df6,
+    @formula(ldrugexp ~ totchr + age + female + blhisp + linc +
+                       (hi_empunion ~ ssiratio + multlc)),
+    Vcov.robust())
+```
+
+```{julia}
+# Cluster-robust 2SLS
+iv_clu = FixedEffectModels.reg(df6,
+    @formula(ldrugexp ~ totchr + age + female + blhisp + linc +
+                       (hi_empunion ~ ssiratio + multlc)),
+    Vcov.cluster(:age))
+```
+
+```{julia}
+# 2SLS with default (homoskedastic) SE
+iv_def = FixedEffectModels.reg(df6,
+    @formula(ldrugexp ~ totchr + age + female + blhisp + linc +
+                       (hi_empunion ~ ssiratio + multlc)))
+
+println("\n— Comparison of 2SLS coefficient on hi_empunion —")
+for (name, m) in [("2SLS robust", iv_over), ("2SLS cluster(age)", iv_clu),
+                   ("2SLS default", iv_def)]
+    nm = StatsBase.coefnames(m)
+    i  = findfirst(==("hi_empunion"), nm)
+    @printf("%-20s coef=%9.5f  se=%9.5f\n",
+            name, StatsBase.coef(m)[i], sqrt(StatsBase.vcov(m)[i, i]))
+end
+```
+
+```{julia}
+# ivmodel:  ldrugexp (hi_empunion = ssiratio multlc) totchr age female blhisp linc
+#
+#  1) 2SLS, vce(robust)
+#  2) GMM, wmatrix(robust)      -- one-step efficient GMM under heteroskedasticity
+#  3) GMM, wmatrix(robust) igmm -- iterated GMM
+#  4) GMM, wmatrix(cluster age) -- one-step GMM with cluster-robust weight (cluster on age)
+#  5) 2SLS default (classical SE)
+
+df6g = dropmissing(df6, vcat([:ldrugexp, :hi_empunion, :ssiratio, :multlc], x2list))
+n    = DataFrames.nrow(df6g)
+
+y     = Float64.(df6g.ldrugexp)
+endog = Float64.(df6g.hi_empunion)
+Xexog = Matrix{Float64}(df6g[:, x2list])
+Zinst = Matrix{Float64}(df6g[:, [:ssiratio, :multlc]])
+X     = hcat(ones(n), endog, Xexog)                   # regressors
+Z     = hcat(ones(n), Xexog, Zinst)                   # instruments (exog + excl.)
+xnames = ["_cons", "hi_empunion", string.(x2list)...]
+
+# ---- GMM building blocks -----------------------------------------------------
+function gmm_point(y, X, Z, W)
+    XZ = X' * Z
+    (XZ * W * XZ') \ (XZ * W * (Z' * y))
+end
+function sandwich_Ω(Z, u; cluster=nothing)
+    m = size(Z, 2); Ω = zeros(m, m); n_ = length(u)
+    if cluster === nothing
+        for i in 1:n_; zi = @view Z[i, :]; Ω .+= (u[i]^2) .* (zi * zi'); end
+    else
+        for g in unique(cluster)
+            sel = cluster .== g
+            zu  = Z[sel, :]' * u[sel]
+            Ω  .+= zu * zu'
+        end
+    end
+    return Ω
+end
+gmm_vcov(X, Z, W, Ω) = (A = X'*Z * W * Z'*X; inv(A) * (X'*Z * W * Ω * W * Z'*X) * inv(A))
+
+# ---- (1) 2SLS with robust SE -------------------------------------------------
+W_2sls        = inv(Z' * Z)
+β_2sls_robust = gmm_point(y, X, Z, W_2sls)
+u_            = y .- X * β_2sls_robust
+V_2sls_robust = gmm_vcov(X, Z, W_2sls, sandwich_Ω(Z, u_))
+
+# ---- (2) One-step efficient GMM with robust W --------------------------------
+Ω̂_rob     = sandwich_Ω(Z, u_)                        # Ω̂ from 2SLS residuals
+W_rob     = inv(Ω̂_rob)
+β_gmm_het = gmm_point(y, X, Z, W_rob)
+V_gmm_het = gmm_vcov(X, Z, W_rob, sandwich_Ω(Z, y .- X * β_gmm_het))
+
+# ---- (3) Iterated GMM --------------------------------------------------------
+β_it, u_it = β_gmm_het, y .- X * β_gmm_het
+for _ in 1:100
+    W_new = inv(sandwich_Ω(Z, u_it))
+    β_new = gmm_point(y, X, Z, W_new)
+    u_new = y .- X * β_new
+    LinearAlgebra.norm(β_new - β_it) < 1e-9 && (β_it = β_new; u_it = u_new; break)
+    β_it, u_it = β_new, u_new
+end
+V_gmm_igmm = gmm_vcov(X, Z, inv(sandwich_Ω(Z, u_it)), sandwich_Ω(Z, u_it))
+
+# ---- (4) GMM with cluster-robust W (cluster on age) --------------------------
+cluster_age = Vector(df6g.age)
+Ω̂_clu       = sandwich_Ω(Z, u_; cluster=cluster_age)
+W_clu       = inv(Ω̂_clu)
+β_gmm_clu   = gmm_point(y, X, Z, W_clu)
+V_gmm_clu   = gmm_vcov(X, Z, W_clu,
+                       sandwich_Ω(Z, y .- X * β_gmm_clu; cluster=cluster_age))
+
+# ---- (5) 2SLS with classical (default) SE -----------------------------------
+β_2sls_def = β_2sls_robust                             # same point estimate
+σ²         = sum(abs2, u_) / (n - size(X,2))
+V_2sls_def = σ² .* inv(X'*Z * W_2sls * Z'*X)
+
+# ---- Comparison table --------------------------------------------------------
+_se(V) = sqrt.(max.(LinearAlgebra.diag(V), 0.0))
+est_table = DataFrames.DataFrame(
+    variable = xnames,
+    TwoSLS_rob_b  = β_2sls_robust, TwoSLS_rob_se  = _se(V_2sls_robust),
+    GMM_het_b     = β_gmm_het,     GMM_het_se     = _se(V_gmm_het),
+    GMM_igmm_b    = β_it,          GMM_igmm_se    = _se(V_gmm_igmm),
+    GMM_clu_b     = β_gmm_clu,     GMM_clu_se     = _se(V_gmm_clu),
+    TwoSLS_def_b  = β_2sls_def,    TwoSLS_def_se  = _se(V_2sls_def),
+)
+println("estimates table TwoSLS GMM_het GMM_igmm GMM_clu TwoSLS_def, b se")
+_pt_compat(est_table;
+    formatters = PrettyTables.ft_printf("%9.5f", 2:11))
+```
+
+```{julia}
+#=
+* Compare 5 estimators and variance estimates for overidentified models
+global ivmodel "ldrugexp (hi_empunion = ssiratio multlc) $x2list"
+quietly ivregress 2sls $ivmodel, vce(robust)
+estimates store TwoSLS
+quietly ivregress gmm  $ivmodel, wmatrix(robust)
+estimates store GMM_het
+quietly ivregress gmm  $ivmodel, wmatrix(robust) igmm
+estimates store GMM_igmm
+quietly ivregress gmm  $ivmodel, wmatrix(cluster age)
+estimates store GMM_clu
+quietly ivregress 2sls  $ivmodel
+estimates store TwoSLS_def
+estimates table TwoSLS GMM_het GMM_igmm GMM_clu TwoSLS_def, b(%9.5f) se
+=#
+TwoSLS     = iv_gmm(df6, :ldrugexp, :hi_empunion, [:ssiratio, :multlc], x2list;
+                    estimator=:twosls, wmatrix=:robust)
+GMM_het    = iv_gmm(df6, :ldrugexp, :hi_empunion, [:ssiratio, :multlc], x2list;
+                    estimator=:gmm,  wmatrix=:robust)
+GMM_igmm   = iv_gmm(df6, :ldrugexp, :hi_empunion, [:ssiratio, :multlc], x2list;
+                    estimator=:gmm,  wmatrix=:robust, iterate=true)
+GMM_clu    = iv_gmm(df6, :ldrugexp, :hi_empunion, [:ssiratio, :multlc], x2list;
+                    estimator=:gmm,  wmatrix=:cluster, cluster=:age)
+TwoSLS_def = iv_gmm(df6, :ldrugexp, :hi_empunion, [:ssiratio, :multlc], x2list;
+                    estimator=:twosls, wmatrix=:classical)
+
+estimates_compare(
+    [TwoSLS, GMM_het, GMM_igmm, GMM_clu, TwoSLS_def],
+    ["TwoSLS", "GMM_het", "GMM_igmm", "GMM_clu", "TwoSLS_def"];
+    vars_order = ["hi_empunion", "totchr", "age", "female", "blhisp", "linc", "_cons"])
+```
+
+
+### 6.3.6 Testing for regressor endogeneity
+
+```{julia}
+#=
+* Obtain OLS estimates to compare with preceding IV estimates
+regress ldrugexp hi_empunion $x2list, vce(robust) 
+=#
+# OLS for comparison
+ols_iv = FixedEffectModels.reg(df6,
+    @formula(ldrugexp ~ hi_empunion + totchr + age + female + blhisp + linc),
+    Vcov.robust())
+```
+
+```{julia}
+#=
+* Robust Durbin-Wu-Hausman test of endogeneity implemented by estat endogenous
+ivregress 2sls ldrugexp (hi_empunion = ssiratio) $x2list, vce(robust)
+estat endogenous
+=#
+#* Obtain OLS estimates to compare with preceding IV estimates
+#regress ldrugexp hi_empunion $x2list, vce(robust)
+regress_stata(df6, :ldrugexp, vcat(:hi_empunion, x2list);
+              vcov = Vcov.robust());
+```
+
+```{julia}
+#=
+* Robust Durbin-Wu-Hausman test of endogeneity implemented manually
+quietly regress hi_empunion ssiratio $x2list
+quietly predict v1hat, resid
+quietly regress ldrugexp hi_empunion v1hat $x2list, vce(robust)
+test v1hat
+=#
+# Durbin–Wu–Hausman: include first-stage residuals in second-stage regression
+# and test their significance.
+df6c = dropmissing(df6, [:ldrugexp, :hi_empunion, :ssiratio, :totchr, :age,
+                          :female, :blhisp, :linc])
+m_first = FixedEffectModels.reg(df6c, @formula(hi_empunion ~ ssiratio + totchr + age + female + blhisp + linc))
+df6c.v1hat = df6c.hi_empunion .- FixedEffectModels.predict(m_first, df6c)
+m_dwh = FixedEffectModels.reg(df6c, @formula(ldrugexp ~ hi_empunion + v1hat + totchr + age +
+                                       female + blhisp + linc), Vcov.robust())
+nm = StatsBase.coefnames(m_dwh)
+i  = findfirst(==("v1hat"), nm)
+t  = StatsBase.coef(m_dwh)[i] / sqrt(StatsBase.vcov(m_dwh)[i, i])
+@printf("DWH t = %.3f, p = %.4f\n",
+        t, 2 * (1 - cdf(Normal(), abs(t))))
+```
+
+```{julia}
+#* Robust Durbin-Wu-Hausman test of endogeneity implemented by estat endogenous
+#ivregress 2sls ldrugexp (hi_empunion = ssiratio) $x2list, vce(robust)
+#estat endogenous
+estat_endogenous(df6, :ldrugexp, :hi_empunion, :ssiratio, x2list;
+                 robust=true);
+```
+
+```{julia}
+# --- (1) OLS for comparison with IV ---
+# regress ldrugexp hi_empunion $x2list, vce(robust)
+df6h = dropmissing(df6, vcat([:ldrugexp, :hi_empunion, :ssiratio], x2list))
+ols_cmp = FixedEffectModels.reg(df6h,
+    @formula(ldrugexp ~ hi_empunion + totchr + age + female + blhisp + linc),
+    Vcov.robust())
+println("OLS (robust SE):"); println(ols_cmp)
+```
+
+```{julia}
+# --- (2) 2SLS with vce(robust), then estat endogenous ---
+# ivregress 2sls ldrugexp (hi_empunion = ssiratio) $x2list, vce(robust)
+iv_cmp = FixedEffectModels.reg(df6h,
+    @formula(ldrugexp ~ totchr + age + female + blhisp + linc +
+                       (hi_empunion ~ ssiratio)),
+    Vcov.robust())
+println("2SLS (robust SE):"); println(iv_cmp)
+
+# estat endogenous — Wooldridge robust DWH test:
+# run first-stage, get residuals v̂, regress y on [hi_empunion, v̂, $x2list] with
+# robust SE, and use the robust Wald t on v̂ as the endogeneity statistic.
+fs_cmp       = FixedEffectModels.reg(df6h,
+    @formula(hi_empunion ~ ssiratio + totchr + age + female + blhisp + linc))
+df6h.v1hat   = df6h.hi_empunion .- FixedEffectModels.predict(fs_cmp, df6h)
+aux_cmp      = FixedEffectModels.reg(df6h,
+    @formula(ldrugexp ~ hi_empunion + v1hat + totchr + age + female + blhisp + linc),
+    Vcov.robust())
+wald_test(aux_cmp, ["v1hat"]);
+```
+
+```{julia}
+# --- (3) Manual Durbin-Wu-Hausman, step by step (matches the cell above) ---
+# quietly regress hi_empunion ssiratio $x2list        → fs_cmp
+# quietly predict v1hat, resid                         → df6h.v1hat
+# quietly regress ldrugexp hi_empunion v1hat $x2list, vce(robust) → aux_cmp
+# test v1hat                                           → wald_test(aux_cmp, ["v1hat"])
+cf = StatsBase.coeftable(aux_cmp)
+println("Auxiliary regression (robust SE) — row for v1hat:")
+println(cf)
+```
+
+```{julia}
+#* Robust Durbin-Wu-Hausman test of endogeneity implemented manually
+#quietly regress hi_empunion ssiratio $x2list
+#quietly predict v1hat, resid
+#quietly regress ldrugexp hi_empunion v1hat $x2list, vce(robust)
+#test v1hat
+df6c = dropmissing(df6, [:ldrugexp, :hi_empunion, :ssiratio,
+                         :totchr, :age, :female, :blhisp, :linc])
+# Step 1-2: first stage + residuals
+m_first = FixedEffectModels.reg(df6c,
+    @formula(hi_empunion ~ ssiratio + totchr + age + female + blhisp + linc))
+df6c.v1hat = df6c.hi_empunion .- FixedEffectModels.predict(m_first, df6c)
+# Step 3: augmented regression with robust SE
+m_aux = FixedEffectModels.reg(df6c,
+    @formula(ldrugexp ~ hi_empunion + v1hat + totchr + age + female + blhisp + linc),
+    Vcov.robust())
+# Step 4: F-test on v1hat coefficient
+β   = StatsBase.coef(m_aux)
+V   = StatsBase.vcov(m_aux)
+i   = findfirst(==("v1hat"), StatsBase.coefnames(m_aux))
+F   = β[i]^2 / V[i, i]
+df2 = Int(StatsBase.dof_residual(m_aux))
+pF  = 1 - Distributions.cdf(Distributions.FDist(1, df2), F)
+
+println("( 1)  v1hat = 0\n")
+Printf.@printf("       F(%3d, %d) = %7.2f\n", 1, df2, F)
+Printf.@printf("            Prob > F = %9.4f\n", pF)
+```
+
+### 6.3.7 Tests of overidentifying restrictions
+
+```{julia}
+#=
+* Test of overidentifying restrictions following ivregress gmm
+quietly ivregress gmm ldrugexp (hi_empunion = ssiratio multlc) ///
+  $x2list, wmatrix(robust) 
+estat overid
+=#
+# Sargan/Hansen J test: regress 2SLS residuals on instruments + exogenous,
+# then J = N·R²
+function sargan_test(model, df, instruments, exog_vars, dep)
+    df_clean = dropmissing(df, vcat([dep], instruments, exog_vars))
+    uhat = df_clean[!, dep] .- FixedEffectModels.predict(model, df_clean)
+    df_clean.uhat = uhat
+    fmla = term(:uhat) ~ sum(term.(vcat(instruments, exog_vars)))
+    aux = FixedEffectModels.reg(df_clean, fmla)
+    J = StatsBase.nobs(aux) * StatsBase.r2(aux)
+    df_J = length(instruments) - 1   # endogenous regressors
+    return J, df_J, 1 - cdf(Chisq(df_J), J)
+end
+J, df_J, p = sargan_test(iv_over, df6, [:ssiratio, :multlc],
+                         [:totchr, :age, :female, :blhisp, :linc], :ldrugexp)
+@printf("Sargan J = %.4f, df = %d, p = %.4f\n", J, df_J, p)
+```
+
+```{julia}
+#=
+* Test of overidentifying restrictions following ivregress gmm
+ivregress gmm ldrugexp (hi_empunion = ssiratio lowincome multlc firmsz) ///
+  $x2list, wmatrix(robust) 
+estat overid
+=#
+# Same test with all four instruments
+iv_4 = FixedEffectModels.reg(df6,
+    @formula(ldrugexp ~ totchr + age + female + blhisp + linc +
+                       (hi_empunion ~ ssiratio + lowincome + multlc + firmsz)),
+    Vcov.robust())
+J, df_J, p = sargan_test(iv_4, df6,
+    [:ssiratio, :lowincome, :multlc, :firmsz],
+    [:totchr, :age, :female, :blhisp, :linc], :ldrugexp)
+@printf("Sargan J (4 instruments) = %.4f, df = %d, p = %.4f\n", J, df_J, p)
+```
+
+
+```{julia}
+# estat overid after `ivregress gmm ..., wmatrix(robust)`
+# Hansen's J = (Z'û)' Ω̂⁻¹ (Z'û)
+#  where û come from the two-step efficient GMM estimator with Ω̂ = Σ zᵢzᵢ'ûᵢ²
+# Under the null of valid instruments, J ~ χ²(#instruments − #endogenous).
+
+"""Two-step efficient GMM + Hansen J, for linear IV with heteroskedastic robust W."""
+function gmm_overid(df, yvar::Symbol, endog_vars, exog_vars, inst_vars)
+    needed = unique(vcat([yvar], endog_vars, exog_vars, inst_vars))
+    d = dropmissing(df, needed)
+    n = DataFrames.nrow(d)
+    y = Float64.(d[!, yvar])
+    X_endog = Matrix{Float64}(d[:, endog_vars])
+    X_exog  = Matrix{Float64}(d[:, exog_vars])
+    Z_inst  = Matrix{Float64}(d[:, inst_vars])
+    X = hcat(ones(n), X_endog, X_exog)
+    Z = hcat(ones(n), X_exog,  Z_inst)
+
+    # Step 1: 2SLS for initial residuals
+    W0 = LinearAlgebra.inv(Z' * Z)
+    β0 = (X'Z * W0 * Z'X) \ (X'Z * W0 * Z'y)
+    u0 = y .- X * β0
+
+    # Step 2: build heteroskedasticity-robust Ω̂ and refit
+    Ω = sandwich_Ω(Z, u0)                  # Σ zᵢzᵢ' ûᵢ²
+    W = LinearAlgebra.inv(Ω)
+    β = (X'Z * W * Z'X) \ (X'Z * W * Z'y)
+    u = y .- X * β
+
+    # Hansen J at the efficient estimator
+    g = Z' * u
+    J = g' * W * g
+    df_J = size(Z, 2) - size(X, 2)          # #instruments − #regressors = #overid restrictions
+    p    = 1 - Distributions.cdf(Distributions.Chisq(max(df_J, 1)), J)
+    return (; J, df = df_J, p, β, n)
+end
+
+# --- Model A: 2 instruments (ssiratio, multlc)  →  1 overid restriction ---
+resA = gmm_overid(df6, :ldrugexp, [:hi_empunion], x2list, [:ssiratio, :multlc])
+Printf.@printf("\nestat overid  [instruments: ssiratio, multlc]\n")
+Printf.@printf("  Hansen J  = %.4f\n", resA.J)
+Printf.@printf("  df        = %d\n",   resA.df)
+Printf.@printf("  Prob > χ² = %.4f\n", resA.p)
+
+# --- Model B: 4 instruments (ssiratio, lowincome, multlc, firmsz)  →  3 overid restrictions ---
+resB = gmm_overid(df6, :ldrugexp, [:hi_empunion], x2list,
+                  [:ssiratio, :lowincome, :multlc, :firmsz])
+Printf.@printf("\nestat overid  [instruments: ssiratio, lowincome, multlc, firmsz]\n")
+Printf.@printf("  Hansen J  = %.4f\n", resB.J)
+Printf.@printf("  df        = %d\n",   resB.df)
+Printf.@printf("  Prob > χ² = %.4f\n", resB.p)
+```
+
+```{julia}
+#* Test of overidentifying restrictions following ivregress gmm
+#quietly ivregress gmm ldrugexp (hi_empunion = ssiratio multlc) ///
+#  $x2list, wmatrix(robust) 
+#estat overid
+estat_overid(df6, :ldrugexp, :hi_empunion, [:ssiratio, :multlc], x2list)
+```
+
+```{julia}
+#* Test of overidentifying restrictions following ivregress gmm
+#ivregress gmm ldrugexp (hi_empunion = ssiratio lowincome multlc firmsz) ///
+#  $x2list, wmatrix(robust) 
+#estat overid
+estat_overid(df6, :ldrugexp, :hi_empunion, [:ssiratio, :lowincome, :multlc, :firmsz], x2list)
+```
+
+### 6.3.8 IV estimation with a binary endogenous regressor
+
+```{julia}
+#=
+* Regression with a dummy variable regressor
+treatreg ldrugexp $x2list, treat(hi_empunion = ssiratio $x2list)
+=#
+# Stata's treatreg fits a Heckman-style treatment-effects model.
+# In Julia we approximate it with 2SLS or with a manual two-step probit + OLS.
+println("treatreg-style estimation: see Sec 16.6 (Heckman) for the manual two-step.")
+```
+
+```{julia}
+# treatreg ldrugexp $x2list, treat(hi_empunion = ssiratio $x2list)
+#
+# Heckman two-step estimator for endogenous binary treatment:
+#   outcome:   ldrugexp = Xβ + δ·hi_empunion + ε
+#   treatment: hi_empunion = 1[Zγ + u > 0],   (ε, u) bivariate normal
+#
+# 1) Probit of hi_empunion on Z = [ssiratio, x2list]
+# 2) Compute the treatment-model inverse Mills ratio
+#        λᵢ = φ(Zγ̂)/Φ(Zγ̂)      if hi_empunion=1
+#        λᵢ = −φ(Zγ̂)/(1−Φ(Zγ̂)) if hi_empunion=0
+# 3) OLS: ldrugexp ~ Xβ + δ·hi_empunion + σ_ερ·λ + error
+#    coef on λ equals σ_ερ; t-test on it is the endogenous-treatment test.
+
+df6t = dropmissing(df6, vcat([:ldrugexp, :hi_empunion, :ssiratio], x2list))
+Nobs = DataFrames.nrow(df6t)
+
+# --- Step 1: Probit selection / treatment equation
+probit_fit = GLM.glm(
+    GLM.@formula(hi_empunion ~ ssiratio + totchr + age + female + blhisp + linc),
+    df6t, GLM.Binomial(), GLM.ProbitLink())
+γ̂  = GLM.coef(probit_fit)
+Z_ = hcat(ones(Nobs), Float64.(df6t.ssiratio), Matrix{Float64}(df6t[:, x2list]))
+Zγ = Z_ * γ̂
+
+# --- Step 2: inverse Mills ratio
+Ndist = Distributions.Normal()
+φ = Distributions.pdf.(Ndist, Zγ)
+Φ = Distributions.cdf.(Ndist, Zγ)
+df6t.lambda = [df6t.hi_empunion[i] == 1 ? φ[i]/Φ[i] : -φ[i]/(1 - Φ[i])  for i in 1:Nobs]
+
+# --- Step 3: augmented OLS outcome equation
+treatreg_fit = FixedEffectModels.reg(df6t,
+    @formula(ldrugexp ~ hi_empunion + totchr + age + female + blhisp + linc + lambda))
+println("Heckman treatment-regression (two-step)")
+println(treatreg_fit)
+
+# Report the treatment effect and the endogeneity-of-treatment test (coef on λ)
+cn   = StatsBase.coefnames(treatreg_fit)
+i_D  = findfirst(==("hi_empunion"), cn)
+i_λ  = findfirst(==("lambda"),      cn)
+β    = StatsBase.coef(treatreg_fit);  Vc = StatsBase.vcov(treatreg_fit)
+Printf.@printf("\nTreatment effect  δ̂ = %.6f   (naive SE = %.6f)\n",
+               β[i_D], sqrt(Vc[i_D, i_D]))
+Printf.@printf("σ_ε · ρ̂ (coef on λ) = %.6f   t = %.3f\n",
+               β[i_λ], β[i_λ]/sqrt(Vc[i_λ, i_λ]))
+```
+
+```{julia}
+#* Regression with a dummy variable regressor
+#treatreg ldrugexp $x2list, treat(hi_empunion = ssiratio $x2list)
+treatreg(df6, :ldrugexp, x2list,
+         :hi_empunion, vcat(:ssiratio, x2list));
+```
+
+## 6.4 Weak instruments
+
+### 6.4.1 Finite-sample properties of IV estimators
+
+### 6.4.2 Weak instruments
+
+#### Diagnostics for weak instruments
+
+```{julia}
+#=
+* Correlations of endogenous regressor with instruments
+correlate hi_empunion ssiratio lowincome multlc firmsz if linc!=.
+=#
+#* Correlations of endogenous regressor with instruments
+#correlate hi_empunion ssiratio lowincome multlc firmsz if linc!=.
+correlate(df6, [:hi_empunion, :ssiratio, :lowincome, :multlc, :firmsz];
+          filter_missing = [:linc]);
+```
+
+```{julia}
+#* Correlations of endogenous regressor with instruments
+#correlate hi_empunion ssiratio lowincome multlc firmsz if linc!=.
+correlate(df6, [:hi_empunion, :ssiratio, :lowincome, :multlc, :firmsz];
+          filter_missing = [:linc]);
+```
+
+#### Formal tests for weak instruments
+
+### 6.4.3 First-stage F-statistics
+
+### 6.4.4 Just-identified model
+
+```{julia}
+#=
+* Weak instrument tests - just-identified model
+quietly ivregress 2sls ldrugexp (hi_empunion = ssiratio) $x2list, vce(robust)
+estat firststage, forcenonrobust all  
+=#
+# First-stage F: regress endogenous on instrument(s) + exogenous
+df6c = dropmissing(df6, [:hi_empunion, :ssiratio, :totchr, :age, :female, :blhisp, :linc])
+fs1 = FixedEffectModels.reg(df6c, @formula(hi_empunion ~ ssiratio + totchr + age + female + blhisp + linc),
+          Vcov.robust())
+nm = StatsBase.coefnames(fs1)
+i  = findfirst(==("ssiratio"), nm)
+F1 = (StatsBase.coef(fs1)[i] / sqrt(StatsBase.vcov(fs1)[i, i]))^2     # squared t = F(1, ·)
+@printf("First-stage F(1) on ssiratio = %.3f\n", F1)
+```
+
+```{julia}
+# ivregress 2sls ldrugexp (hi_empunion = ssiratio) $x2list, vce(robust)
+# estat firststage, forcenonrobust all
+#
+# For a just-identified model with one endogenous regressor and one excluded
+# instrument, `estat firststage, all` reports:
+#  - Partial R² and Adjusted partial R² (instrument contribution to first stage)
+#  - First-stage F statistic on the excluded instrument(s)
+#  - Minimum-eigenvalue statistic (Cragg–Donald) — for 1 endog / 1 IV this
+#    coincides with the first-stage F.
+#  - Stock–Yogo 10/15/20/25% critical values (just-identified: 16.38 for 10%)
+
+df6fs = dropmissing(df6, vcat([:hi_empunion, :ssiratio], x2list))
+N_fs  = DataFrames.nrow(df6fs)
+
+# --- First-stage regression ---
+fs_just = FixedEffectModels.reg(df6fs,
+    @formula(hi_empunion ~ ssiratio + totchr + age + female + blhisp + linc))
+# --- Restricted first stage (exog only, no ssiratio) for partial-R² ---
+fs_restr = FixedEffectModels.reg(df6fs,
+    @formula(hi_empunion ~ totchr + age + female + blhisp + linc))
+
+# --- Partial R² = (R²_full − R²_restricted) / (1 − R²_restricted) ---
+R2_full   = StatsBase.r2(fs_just)
+R2_restr  = StatsBase.r2(fs_restr)
+partialR2 = (R2_full - R2_restr) / (1 - R2_restr)
+
+# --- Adjusted partial R²: same logic on adjusted R² ---
+R2adj_full  = StatsBase.adjr2(fs_just)
+R2adj_restr = StatsBase.adjr2(fs_restr)
+partialR2_adj = (R2adj_full - R2adj_restr) / (1 - R2adj_restr)
+
+# --- First-stage F on the excluded instrument (= squared t on ssiratio) ---
+nm  = StatsBase.coefnames(fs_just)
+i_z = findfirst(==("ssiratio"), nm)
+F_stat = (StatsBase.coef(fs_just)[i_z] / sqrt(StatsBase.vcov(fs_just)[i_z, i_z]))^2
+df_num = 1                                    # one excluded instrument
+df_den = StatsBase.dof_residual(fs_just)
+p_F    = 1 - Distributions.cdf(Distributions.FDist(df_num, df_den), F_stat)
+
+# --- Cragg–Donald statistic: for 1 endog / 1 IV this equals F_stat ---
+CD = F_stat
+
+println("First-stage diagnostics — just-identified IV (hi_empunion = ssiratio)")
+_pt_compat(
+    DataFrames.DataFrame(
+        statistic  = ["R²_full (first stage)",
+                      "R²_restricted (no excl. IV)",
+                      "Partial R²",
+                      "Adjusted partial R²",
+                      "F( $(df_num), $(Int(df_den)) )  on ssiratio",
+                      "Prob > F",
+                      "Minimum eigenvalue (Cragg–Donald)"],
+        value      = [R2_full, R2_restr, partialR2, partialR2_adj,
+                      F_stat, p_F, CD]);
+    formatters = PrettyTables.ft_printf("%10.4f", 2))
+
+# --- Stock–Yogo (2005) critical values — 2SLS bias, 1 endog / 1 IV ---
+println("\nStock–Yogo weak-ID critical values for just-identified 2SLS (bias test):")
+sy = DataFrames.DataFrame(
+    relative_bias = ["5%", "10%", "20%", "30%"],
+    critical_F    = [16.38, 8.96, 6.66, 5.53])
+_pt_compat(sy)
+F_stat > 16.38 ? println("\n→ F > 16.38: instrument is NOT weak at the 5% bias threshold.") :
+F_stat > 10    ? println("\n→ 10 < F ≤ 16.38: instrument probably adequate but borderline.") :
+                 println("\n→ F ≤ 10: instrument is WEAK; 2SLS estimates may be badly biased.")
+```
+
+```{julia}
+#* Weak instrument tests - just-identified model
+#quietly ivregress 2sls ldrugexp (hi_empunion = ssiratio) $x2list, vce(robust)
+#estat firststage, forcenonrobust all
+estat_firststage(df6, :ldrugexp, :hi_empunion, :ssiratio, x2list;
+                 all=true);
+```
+
+### 6.4.5 Overidentified model
+
+```{julia}
+#=
+* Weak instrument tests - two or more overidentifying restrictions
+quietly ivregress gmm ldrugexp (hi_empunion = ssiratio lowincome multlc firmsz) ///
+   $x2list, vce(robust)
+estat firststage, forcenonrobust
+=#
+# Wald test of joint significance of all instruments in the first stage
+fs4 = FixedEffectModels.reg(df6c, @formula(hi_empunion ~ ssiratio + lowincome + multlc + firmsz +
+                                       totchr + age + female + blhisp + linc))
+nm = StatsBase.coefnames(fs4)
+idx = [findfirst(==(n), nm) for n in ("ssiratio","lowincome","multlc","firmsz")]
+βt = StatsBase.coef(fs4)[idx]; Vt = StatsBase.vcov(fs4)[idx, idx]
+F4 = try
+    (βt' * LinearAlgebra.inv(Vt) * βt) / 4
+catch
+    NaN
+end
+@printf("First-stage F(4) on instruments = %.3f\n", F4)
+```
+
+
+```{julia}
+#* Weak instrument tests - two or more overidentifying restrictions
+#quietly ivregress gmm ldrugexp (hi_empunion = ssiratio lowincome multlc firmsz) ///
+#   $x2list, vce(robust)
+#estat firststage, forcenonrobust
+estat_firststage(df6, :ldrugexp, :hi_empunion,
+                 [:ssiratio, :lowincome, :multlc, :firmsz], x2list);
+```
+
+### 6.4.6 More than one endogenous regressor
+
+### 6.4.7 Sensitivity to choice of instruments
+
+```{julia}
+#=
+* Compare 4 just-identified model estimates with different instruments
+quietly regress ldrugexp hi_empunion $x2list, vce(robust)
+estimates store OLS0
+quietly ivregress 2sls ldrugexp (hi_empunion=ssiratio) $x2list, vce(robust)
+estimates store IV_INST1
+quietly estat firststage, forcenonrobust
+scalar me1 = r(mineig)
+quietly ivregress 2sls ldrugexp (hi_empunion=lowincome) $x2list, vce(robust)
+estimates store IV_INST2
+quietly estat firststage, forcenonrobust
+scalar me2 = r(mineig)
+quietly ivregress 2sls ldrugexp (hi_empunion=multlc) $x2list, vce(robust) 
+estimates store IV_INST3
+quietly estat firststage, forcenonrobust
+scalar me3 = r(mineig)
+quietly ivregress 2sls ldrugexp (hi_empunion=firmsz) $x2list, vce(robust)
+estimates store IV_INST4
+quietly estat firststage, forcenonrobust
+scalar me4 = r(mineig)
+estimates table OLS0 IV_INST1 IV_INST2 IV_INST3 IV_INST4, b(%8.4f) se  
+display "Minimum eigenvalues are:     " me1 _s(2) me2 _s(2) me3 _s(2) me4
+=#
+# Compare four just-identified IV estimates with different instruments
+ols_compare = FixedEffectModels.reg(df6, @formula(ldrugexp ~ hi_empunion + totchr + age + female + blhisp + linc),
+                  Vcov.robust())
+
+iv_models = Dict()
+for inst in (:ssiratio, :lowincome, :multlc, :firmsz)
+    fmla = @eval @formula(ldrugexp ~ totchr + age + female + blhisp + linc +
+                                     (hi_empunion ~ $inst))
+    iv_models[inst] = FixedEffectModels.reg(df6, fmla, Vcov.robust())
+end
+
+# First-stage F for each instrument
+println("\n— First-stage F-stats —")
+for inst in (:ssiratio, :lowincome, :multlc, :firmsz)
+    df6c = dropmissing(df6, [:hi_empunion, inst, :totchr, :age, :female, :blhisp, :linc])
+    fmla = term(:hi_empunion) ~ term(inst) + term(:totchr) + term(:age) +
+                                 term(:female) + term(:blhisp) + term(:linc)
+    fs = FixedEffectModels.reg(df6c, fmla)
+    nm = StatsBase.coefnames(fs)
+    i  = findfirst(==(string(inst)), nm)
+    F  = (StatsBase.coef(fs)[i] / sqrt(StatsBase.vcov(fs)[i, i]))^2
+    β_iv = StatsBase.coef(iv_models[inst])[findfirst(==("hi_empunion"), StatsBase.coefnames(iv_models[inst]))]
+    @printf("%-12s  IV β=%8.4f   first-stage F=%8.3f\n", inst, β_iv, F)
+end
+```
+
+```{julia}
+#* Compare 4 just-identified model estimates with different instruments
+#quietly regress ldrugexp hi_empunion $x2list, vce(robust)
+#estimates store OLS0
+#quietly ivregress 2sls ldrugexp (hi_empunion=ssiratio) $x2list, vce(robust)
+#estimates store IV_INST1
+#quietly estat firststage, forcenonrobust
+#scalar me1 = r(mineig)
+#quietly ivregress 2sls ldrugexp (hi_empunion=lowincome) $x2list, vce(robust)
+#estimates store IV_INST2
+#quietly estat firststage, forcenonrobust
+#scalar me2 = r(mineig)
+#quietly ivregress 2sls ldrugexp (hi_empunion=multlc) $x2list, vce(robust)
+#estimates store IV_INST3
+#quietly estat firststage, forcenonrobust
+#scalar me3 = r(mineig)
+#quietly ivregress 2sls ldrugexp (hi_empunion=firmsz) $x2list, vce(robust)
+#estimates store IV_INST4
+#quietly estat firststage, forcenonrobust
+#scalar me4 = r(mineig)
+#estimates table OLS0 IV_INST1 IV_INST2 IV_INST3 IV_INST4, b(%8.4f) se
+#display "Minimum eigenvalues are:     " me1 _s(2) me2 _s(2) me3 _s(2) me4
+_wrap_fem(m) = (;
+    β         = StatsBase.coef(m),
+    V         = StatsBase.vcov(m),
+    se        = sqrt.(max.(LinearAlgebra.diag(StatsBase.vcov(m)), 0.0)),
+    coefnames = replace.(string.(StatsBase.coefnames(m)), "(Intercept)" => "_cons"),
+    n         = Int(StatsBase.nobs(m)),
+)
+# Classical first-stage F on the single excluded instrument = Stata's mineig.
+_mineig(df, endog, inst, exog) = begin
+    d = dropmissing(df, unique(vcat(Symbol(endog), Symbol(inst), exog)))
+    f = term(Symbol(endog)) ~ sum(term.(vcat(exog, Symbol(inst))))
+    m = FixedEffectModels.reg(d, f)
+    nm = string.(StatsBase.coefnames(m))
+    i  = findfirst(==(string(inst)), nm)
+    (StatsBase.coef(m)[i] / sqrt(StatsBase.vcov(m)[i, i]))^2
+end
+
+OLS0 = _wrap_fem(FixedEffectModels.reg(df6,
+        @formula(ldrugexp ~ hi_empunion + totchr + age + female + blhisp + linc),
+        Vcov.robust()))
+IV_INST1 = iv_gmm(df6, :ldrugexp, :hi_empunion, :ssiratio,  x2list;
+                  estimator=:twosls, wmatrix=:robust)
+IV_INST2 = iv_gmm(df6, :ldrugexp, :hi_empunion, :lowincome, x2list;
+                  estimator=:twosls, wmatrix=:robust)
+IV_INST3 = iv_gmm(df6, :ldrugexp, :hi_empunion, :multlc,    x2list;
+                  estimator=:twosls, wmatrix=:robust)
+IV_INST4 = iv_gmm(df6, :ldrugexp, :hi_empunion, :firmsz,    x2list;
+                  estimator=:twosls, wmatrix=:robust)
+
+me1 = _mineig(df6, :hi_empunion, :ssiratio,  x2list)
+me2 = _mineig(df6, :hi_empunion, :lowincome, x2list)
+me3 = _mineig(df6, :hi_empunion, :multlc,    x2list)
+me4 = _mineig(df6, :hi_empunion, :firmsz,    x2list)
+
+estimates_compare(
+    [OLS0, IV_INST1, IV_INST2, IV_INST3, IV_INST4],
+    ["OLS0", "IV_INST1", "IV_INST2", "IV_INST3", "IV_INST4"];
+    vars_order = ["hi_empunion", "totchr", "age", "female", "blhisp", "linc", "_cons"],
+    fmt        = "%8.4f")
+
+println("                                                         Legend: b/se")
+println()
+Printf.@printf("Minimum eigenvalues are:     %.8g  %.8g  %.8g  %.8g\n",
+               me1, me2, me3, me4)
+```
+
+
+## 6.5 Better inference with weak instruments
+
+### 6.5.1 Conditional tests and confidence intervals
+
+```{julia}
+#=
+* Conditional test and confidence intervals when weak instruments 
+*condivreg ldrugexp (hi_empunion = ssiratio) $x2list, lm ar 2sls test(0)
+=#
+# Anderson–Rubin (AR) test, weak-instrument robust:
+# regress y - β₀·x₁ on instruments (β₀ = 0 here)
+df6c = dropmissing(df6, [:ldrugexp, :ssiratio, :totchr, :age, :female, :blhisp, :linc])
+df6c.y_ar = df6c.ldrugexp                # β₀ = 0
+m_ar = FixedEffectModels.reg(df6c, @formula(y_ar ~ ssiratio + totchr + age + female + blhisp + linc))
+nm = StatsBase.coefnames(m_ar)
+i_ssi = findfirst(==("ssiratio"), nm)
+β = StatsBase.coef(m_ar)[i_ssi]; se = sqrt(StatsBase.vcov(m_ar)[i_ssi, i_ssi])
+F_ar = (β / se)^2
+@printf("AR F(1) = %.3f, p = %.4f\n",
+        F_ar, 1 - cdf(FDist(1, dof_residual(m_ar)), F_ar))
+```
+
+```{julia}
+#=
+* Use ivregress with weak instrument diagnostics
+ivregress 2sls ldrugexp (hi_empunion = ssiratio) $x2list
+estat firststage
+*estat overid
+=#
+# Default 2SLS with first-stage diagnostics (already shown above)
+reg(df6,
+    @formula(ldrugexp ~ totchr + age + female + blhisp + linc +
+                       (hi_empunion ~ ssiratio)))
+```
+
+```{julia}
+#* Conditional test and confidence intervals when weak instruments
+#*condivreg ldrugexp (hi_empunion = ssiratio) $x2list, lm ar 2sls test(0)
+#* Use ivregress with weak instrument diagnostics
+#ivregress 2sls ldrugexp (hi_empunion = ssiratio) $x2list
+#estat firststage
+#*estat overid
+ivregress_2sls(df6, :ldrugexp, :hi_empunion => :ssiratio, x2list;
+               robust=false, first=false)
+estat_firststage(df6, :ldrugexp, :hi_empunion, :ssiratio, x2list;
+                 robust=false);
+```
+
+### 6.5.2 LIML estimator
+
+### 6.5.3 Jackknife IV estimator
+
+### 6.5.4 Comparison of 2SLS, LIML, JIVE, and GMM
+
+```{julia}
+#=
+*ssc install st0108
+*ssc install ivreg2
+*ssc install ranktest
+* Variants of IV Estimators: 2SLS, LIML, JIVE, GMM_het, GMM-het using IVREG2
+global ivmodel "ldrugexp (hi_empunion = ssiratio lowincome multlc firmsz) $x2list"
+quietly ivregress 2sls $ivmodel, vce(robust)
+estimates store TWOSLS
+quietly ivregress liml $ivmodel, vce(robust)
+estimates store LIML
+quietly jive $ivmodel, robust
+estimates store JIVE
+quietly ivregress gmm $ivmodel, wmatrix(robust) 
+estimates store GMM_het
+quietly ivreg2 $ivmodel, gmm2s robust
+estimates store IVREG2
+estimates table TWOSLS LIML JIVE GMM_het IVREG2, b(%7.4f) se 
+=#
+# ivregress 2sls / liml comparison (4 instruments, 1 endogenous)
+df6iv = dropmissing(df6, vcat([:ldrugexp, :hi_empunion, :ssiratio,
+       :lowincome, :multlc, :firmsz], x2list))
+n = nrow(df6iv)
+
+# 2SLS
+twosls = FixedEffectModels.reg(df6iv,
+    @formula(ldrugexp ~ totchr + age + female + blhisp + linc +
+                       (hi_empunion ~ ssiratio + lowincome + multlc + firmsz)),
+    Vcov.robust())
+
+# LIML — manual implementation via smallest-eigenvalue approach
+# y = Xβ + u, X = [X_endog, X_exog], Z = [X_exog, Z_excl]
+# k-class: β̂_k = (X'(I - kM_Z)X)⁻¹ X'(I - kM_Z)y, LIML uses k = λ_min
+y_l  = Float64.(df6iv.ldrugexp)
+X_l  = hcat(Float64.(df6iv.hi_empunion), Float64.(df6iv.totchr), Float64.(df6iv.age),
+            Float64.(df6iv.female), Float64.(df6iv.blhisp), Float64.(df6iv.linc), ones(n))
+Z_l  = hcat(Float64.(df6iv.ssiratio), Float64.(df6iv.lowincome), Float64.(df6iv.multlc),
+            Float64.(df6iv.firmsz), Float64.(df6iv.totchr), Float64.(df6iv.age),
+            Float64.(df6iv.female), Float64.(df6iv.blhisp), Float64.(df6iv.linc), ones(n))
+P_Z  = Z_l * ((Z_l'Z_l) \ Z_l')
+M_Z  = LinearAlgebra.I(n) - P_Z
+# Smallest eigenvalue of (y X_endog)' M_Z (y X_endog) / (y X_endog)' M_exog (y X_endog)
+Y1 = hcat(y_l, Float64.(df6iv.hi_empunion))
+X_exog_only = hcat(Float64.(df6iv.totchr), Float64.(df6iv.age),
+                   Float64.(df6iv.female), Float64.(df6iv.blhisp),
+                   Float64.(df6iv.linc), ones(n))
+P_exog = X_exog_only * ((X_exog_only'X_exog_only) \ X_exog_only')
+M_exog = LinearAlgebra.I(n) - P_exog
+A = Y1' * M_Z * Y1;  B_mat = Y1' * M_exog * Y1
+λ_min = minimum(LinearAlgebra.eigvals(LinearAlgebra.Symmetric(B_mat) \
+                                       LinearAlgebra.Symmetric(A)))
+# k-class estimator with k = λ_min
+β_liml = ((X_l' * (LinearAlgebra.I(n) - λ_min*M_Z) * X_l) \
+          (X_l' * (LinearAlgebra.I(n) - λ_min*M_Z) * y_l))
+
+cn_iv = ["hi_empunion", "totchr", "age", "female", "blhisp", "linc", "_cons"]
+
+# JIVE — Jackknife IV estimator (Angrist, Imbens & Krueger 1999)
+# Uses leave-one-out first-stage fitted values to avoid finite-sample bias
+# x̂ᵢ_JIVE = (n·P_Z[i,:] * x - x̂ᵢ) / (n·h_ii - 1) , h_ii = diag(P_Z)
+x_endog = Float64.(df6iv.hi_empunion)
+x_hat   = P_Z * x_endog         # standard first-stage fitted values
+h_diag  = [P_Z[i,i] for i in 1:n]
+# Leave-one-out fitted values
+x_hat_jive = (n .* (P_Z * x_endog) .- x_hat) ./ (n .* h_diag .- 1.0)
+# Second stage: regress y on x̂_JIVE and exog
+X_jive = hcat(x_hat_jive, X_exog_only)
+β_jive = X_jive \ y_l
+
+# GMM with robust weight matrix (two-step efficient GMM)
+# Step 1: 2SLS residuals
+β_2sls = StatsBase.coef(twosls)
+u_2sls = y_l .- X_l * β_2sls
+# Step 2: optimal weight S = (1/n) Σ z_i z_i' û²
+Zu = Z_l .* u_2sls
+S  = (Zu' * Zu) / n
+Sinv = LinearAlgebra.inv(S)
+# GMM estimator: β = (X'Z S⁻¹ Z'X)⁻¹ X'Z S⁻¹ Z'y
+XZ = X_l' * Z_l
+β_gmm = (XZ * Sinv * XZ') \ (XZ * Sinv * (Z_l' * y_l))
+
+println("Comparison: 2SLS vs LIML vs JIVE vs GMM (4 instruments)")
+_pt_compat(
+    DataFrames.DataFrame(variable=cn_iv,
+        b_2SLS = β_2sls,
+        b_LIML = β_liml,
+        b_JIVE = vcat(β_jive[1], β_jive[2:end]),
+        b_GMM  = β_gmm);
+    formatters=PrettyTables.ft_printf("%.6f", 2:5))
+```
+
+```{julia}
+#=
+*ssc install st0108
+*ssc install ivreg2
+*ssc install ranktest
+* Variants of IV Estimators: 2SLS, LIML, JIVE, GMM_het, GMM-het using IVREG2
+global ivmodel "ldrugexp (hi_empunion = ssiratio lowincome multlc firmsz) $x2list"
+quietly ivregress 2sls $ivmodel, vce(robust)
+estimates store TWOSLS
+quietly ivregress liml $ivmodel, vce(robust)
+estimates store LIML
+quietly jive $ivmodel, robust
+estimates store JIVE
+quietly ivregress gmm $ivmodel, wmatrix(robust)
+estimates store GMM_het
+quietly ivreg2 $ivmodel, gmm2s robust
+estimates store IVREG2
+estimates table TWOSLS LIML JIVE GMM_het IVREG2, b(%7.4f) se
+=#
+ivlist = [:ssiratio, :lowincome, :multlc, :firmsz]
+
+TWOSLS  = iv_gmm(df6, :ldrugexp, :hi_empunion, ivlist, x2list;
+                 estimator=:twosls, wmatrix=:robust)
+LIML    = liml_fit(df6, :ldrugexp, :hi_empunion, ivlist, x2list; robust=true)
+JIVE    = jive_fit(df6, :ldrugexp, :hi_empunion, ivlist, x2list; robust=true)
+GMM_het = iv_gmm(df6, :ldrugexp, :hi_empunion, ivlist, x2list;
+                 estimator=:gmm,   wmatrix=:robust)
+IVREG2  = iv_gmm(df6, :ldrugexp, :hi_empunion, ivlist, x2list;
+                 estimator=:gmm,   wmatrix=:robust)   # same β as GMM_het
+
+estimates_compare(
+    [TWOSLS, LIML, JIVE, GMM_het, IVREG2],
+    ["TWOSLS", "LIML", "JIVE", "GMM_het", "IVREG2"];
+    vars_order = ["hi_empunion", "totchr", "age", "female", "blhisp", "linc", "_cons"],
+    fmt        = "%7.4f")
+```
+
+## 6.6 3SLS systems estimation
+
+```{julia}
+#=
+* 3SLS estimation requires errors to be homoskedastic
+reg3 (ldrugexp hi_empunion totchr age female blhisp linc) ///
+  (hi_empunion ldrugexp totchr female blhisp ssiratio)
+=#
+# 3SLS estimation
+# reg3 (ldrugexp hi_empunion totchr age female blhisp linc)
+#      (hi_empunion ldrugexp totchr female blhisp ssiratio)
+df6_3 = dropmissing(df6, [:ldrugexp, :hi_empunion, :totchr, :age, :female,
+                           :blhisp, :linc, :ssiratio])
+n3 = nrow(df6_3)
+
+# Eq 1: ldrugexp  = f(hi_empunion, totchr, age, female, blhisp, linc)
+# Eq 2: hi_empunion = f(ldrugexp, totchr, female, blhisp, ssiratio)
+# Full instrument set Z = union of all exogenous vars across both equations
+Z3 = hcat(ones(n3), Float64.(df6_3.totchr), Float64.(df6_3.age),
+          Float64.(df6_3.female), Float64.(df6_3.blhisp),
+          Float64.(df6_3.linc), Float64.(df6_3.ssiratio))
+P3 = Z3 * ((Z3'Z3) \ Z3')   # projection onto instrument space
+
+# Regressors for each equation (including endogenous)
+X3_1 = hcat(ones(n3), Float64.(df6_3.hi_empunion), Float64.(df6_3.totchr),
+            Float64.(df6_3.age), Float64.(df6_3.female),
+            Float64.(df6_3.blhisp), Float64.(df6_3.linc))
+X3_2 = hcat(ones(n3), Float64.(df6_3.ldrugexp), Float64.(df6_3.totchr),
+            Float64.(df6_3.female), Float64.(df6_3.blhisp),
+            Float64.(df6_3.ssiratio))
+y3_1 = Float64.(df6_3.ldrugexp)
+y3_2 = Float64.(df6_3.hi_empunion)
+
+cn3_1 = ["_cons", "hi_empunion", "totchr", "age", "female", "blhisp", "linc"]
+cn3_2 = ["_cons", "ldrugexp", "totchr", "female", "blhisp", "ssiratio"]
+
+# Step 1: 2SLS on each equation → get residuals for Σ̂
+X3_1h = P3 * X3_1;  β3_1 = (X3_1h'X3_1) \ (X3_1h'y3_1)
+X3_2h = P3 * X3_2;  β3_2 = (X3_2h'X3_2) \ (X3_2h'y3_2)
+e3_1 = y3_1 - X3_1 * β3_1;  e3_2 = y3_2 - X3_2 * β3_2
+
+# Step 2: cross-equation residual covariance
+Σ3 = [e3_1'e3_1 e3_1'e3_2; e3_2'e3_1 e3_2'e3_2] ./ n3
+Σ3inv = LinearAlgebra.inv(Σ3)
+
+# Step 3: FGLS on projected system  (Σ⁻¹ ⊗ P_Z)
+k1 = size(X3_1, 2); k2 = size(X3_2, 2)
+XWX = [Σ3inv[1,1]*(X3_1h'X3_1)      Σ3inv[1,2]*(X3_1h'X3_2);
+       Σ3inv[2,1]*(X3_2h'X3_1)      Σ3inv[2,2]*(X3_2h'X3_2)]
+XWY = [Σ3inv[1,1]*(X3_1h'y3_1) + Σ3inv[1,2]*(X3_1h'y3_2);
+       Σ3inv[2,1]*(X3_2h'y3_1) + Σ3inv[2,2]*(X3_2h'y3_2)]
+β_3sls = XWX \ XWY
+V_3sls = LinearAlgebra.inv(XWX)
+se_3sls = sqrt.(max.(LinearAlgebra.diag(V_3sls), 0.0))
+z_3sls  = β_3sls ./ se_3sls
+
+println("=== 3SLS Equation 1: ldrugexp ===")
+_pt_compat(
+    DataFrame(variable=cn3_1, Coef=β_3sls[1:k1], SE=se_3sls[1:k1], z=z_3sls[1:k1]);
+    formatters=PrettyTables.ft_printf("%.6f", 2:4))
+println("\n=== 3SLS Equation 2: hi_empunion ===")
+_pt_compat(
+    DataFrame(variable=cn3_2, Coef=β_3sls[k1+1:end], SE=se_3sls[k1+1:end], z=z_3sls[k1+1:end]);
+    formatters=PrettyTables.ft_printf("%.6f", 2:4))
+```
+
+```{julia}
+#* 3SLS estimation requires errors to be #homoskedastic
+#reg3 (ldrugexp hi_empunion totchr age female blhisp linc) ///
+#  (hi_empunion ldrugexp totchr female blhisp ssiratio)
+reg3(df6,
+     :ldrugexp    => [:hi_empunion, :totchr, :age, :female, :blhisp, :linc],
+     :hi_empunion => [:ldrugexp,    :totchr, :female, :blhisp, :ssiratio]);
+```
+
+## 6.7 Stata resources
+
+## 6.8 Exercises

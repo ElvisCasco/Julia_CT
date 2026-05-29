@@ -18,7 +18,7 @@ jupyter: julia-1.12
 
 [Stata Panel Data Models](https://paneldatastata-github-io.vercel.app/#stage1)
 
-# VAR and SVAR Models in Julia
+# Setup
 
 ```{julia}
 using Pkg
@@ -39,6 +39,8 @@ function show_plot(p)
     return p
 end
 ```
+
+# VAR and SVAR Models in Julia
 
 ```{julia}
 using MacroEconometricModels, Random
@@ -81,7 +83,7 @@ result = irf(model, 20; method=:cholesky, ci_type=:bootstrap, reps=50)
 
 ```{julia}
 show_plot(plot_result(result))
-plot_result(result; save_path="plot1.html")
+#show_plot(plot_result(result; save_path="plot1.html"))
 ```
 
 ### Recipe 4: Sign restrictions
@@ -598,6 +600,620 @@ report(fc_ce)
 # Step 7: Extract posterior mean VARModel for stationarity check
 mean_model_ce = posterior_mean_model(post_ce)
 stab_ce = is_stationary(mean_model_ce)
+```
+
+# Vector Error Correction Models
+
+```{julia}
+using MacroEconometricModels, Random
+Random.seed!(42)
+qd = load_example(:fred_qd)
+## Previous version (could leave NaNs in Y if the trailing quarter was
+## missing and the cell was re-run out of order, breaking johansen_test):
+## Y = log.(to_matrix(qd[:, ["GDPC1", "PCECC96", "GPDIC1"]]))
+## Y = Y[all.(isfinite, eachrow(Y)), :]
+##
+## Build a NaN-free, log-transformed TimeSeriesData first (ts_vecm) and
+## derive the matrix Y_vecm from it. Using distinct names avoids any
+## clash with the `Y` defined for the VAR section above.
+ts_vecm = MacroEconometricModels.dropna(qd[:, ["GDPC1", "PCECC96", "GPDIC1"]])
+ts_vecm.data .= log.(ts_vecm.data)
+Y_vecm = to_matrix(ts_vecm)
+@assert all(isfinite, Y_vecm) "Y_vecm still contains non-finite values"
+```
+
+## Quick Start
+
+### Recipe 1: Estimate with automatic rank selection
+
+```{julia}
+# Automatic rank via Johansen trace test
+vecm = estimate_vecm(Y_vecm, 2)
+report(vecm)
+```
+
+### Recipe 2: Explicit rank and deterministic specification
+
+```{julia}
+vecm = estimate_vecm(Y_vecm, 2; rank=1, deterministic=:constant)
+report(vecm)
+```
+
+### Recipe 3: Impulse responses via VAR conversion
+
+```{julia}
+vecm = estimate_vecm(Y_vecm, 2; rank=1)
+irfs = irf(vecm, 20; method=:cholesky)
+```
+
+```{julia}
+show_plot(plot_result(irfs))
+```
+
+### Recipe 4: Forecast with bootstrap confidence intervals
+
+```{julia}
+vecm = estimate_vecm(Y_vecm, 2; rank=1)
+fc = forecast(vecm, 10; ci_method=:bootstrap, reps=50, conf_level=0.95)
+report(fc)
+```
+
+### Recipe 5: Granger causality decomposition
+
+```{julia}
+vecm = estimate_vecm(Y_vecm, 2; rank=1)
+g = granger_causality_vecm(vecm, 1, 2)  # GDP -> Consumption
+report(g)
+```
+
+### Recipe 6: TimeSeriesData dispatch
+
+```{julia}
+## Previous version (failed: raw series contained NaNs and were not logged,
+## so johansen_test hit a non-finite cross-product matrix):
+## ts = qd[:, ["GDPC1", "PCECC96", "GPDIC1"]]
+## vecm = estimate_vecm(ts, 2; rank=1)
+
+# Pass TimeSeriesData directly --- variable names propagate.
+# Reuse the cleaned/logged TimeSeriesData built in the setup chunk.
+vecm = estimate_vecm(ts_vecm, 2; rank=1)
+report(vecm)
+```
+
+## Model Specification
+
+### The Cointegrating Relationship
+
+## Estimation
+
+### Johansen Maximum Likelihood
+
+```{julia}
+# Automatic rank selection via Johansen trace test
+vecm = estimate_vecm(Y, 2)
+report(vecm)
+
+# Explicit rank specification
+vecm = estimate_vecm(Y, 2; rank=1)
+
+# Different deterministic specifications
+vecm_none = estimate_vecm(Y, 2; rank=1, deterministic=:none)      # No deterministic terms
+vecm_const = estimate_vecm(Y, 2; rank=1, deterministic=:constant)  # Constant (default)
+vecm_trend = estimate_vecm(Y, 2; rank=1, deterministic=:trend)     # Linear trend
+```
+
+### Rank Selection
+
+```{julia}
+r_trace = select_vecm_rank(Y, 2; criterion=:trace, significance=0.05)
+r_max = select_vecm_rank(Y, 2; criterion=:max_eigen)
+```
+
+### Engle-Granger Two-Step
+
+```{julia}
+vecm_eg = estimate_vecm(Y, 2; method=:engle_granger, rank=1)
+report(vecm_eg)
+```
+
+## VAR Conversion
+
+```{julia}
+vecm = estimate_vecm(Y, 2; rank=1)
+var_model = to_var(vecm)
+report(var_model)
+```
+
+## Innovation Accounting
+
+```{julia}
+vecm = estimate_vecm(Y, 2; rank=1)
+
+# Impulse response functions (Cholesky identification)
+irfs = irf(vecm, 20; method=:cholesky)
+
+# Forecast error variance decomposition
+decomp = fevd(vecm, 20)
+
+# Historical decomposition
+T_eff = effective_nobs(to_var(vecm))
+hd = historical_decomposition(vecm, T_eff)
+```
+
+```{julia}
+show_plot(plot_result(irfs))
+show_plot(plot_result(decomp))
+show_plot(plot_result(hd))
+```
+
+## Forecasting
+
+```{julia}
+vecm = estimate_vecm(Y, 2; rank=1)
+
+# Point forecast
+fc = forecast(vecm, 10)
+report(fc)
+
+# Bootstrap confidence intervals
+fc = forecast(vecm, 10; ci_method=:bootstrap, reps=50, conf_level=0.95)
+report(fc)
+
+# Simulation-based confidence intervals
+fc = forecast(vecm, 10; ci_method=:simulation, reps=50)
+report(fc)
+```
+
+```{julia}
+show_plot(plot_result(fc))
+```
+
+## Granger Causality
+
+```{julia}
+vecm = estimate_vecm(Y, 2; rank=1)
+
+# Test: does GDP (var 1) Granger-cause Consumption (var 2)?
+g = granger_causality_vecm(vecm, 1, 2)
+report(g)
+```
+
+## Complete Example
+
+```{julia}
+# Step 1: Test for cointegration
+joh = johansen_test(Y, 2)
+report(joh)
+
+# Step 2: Estimate VECM with rank 1
+vecm = estimate_vecm(Y, 2; rank=1)
+report(vecm)
+
+# Step 3: Impulse responses (Cholesky identification)
+irfs = irf(vecm, 20; method=:cholesky)
+
+# Step 4: Forecast with bootstrap CIs
+fc = forecast(vecm, 10; ci_method=:bootstrap, reps=50)
+report(fc)
+
+# Step 5: Granger causality --- does GDP Granger-cause Consumption?
+g = granger_causality_vecm(vecm, 1, 2)
+report(g)
+
+# Step 6: Convert to VAR for FEVD
+var_model = to_var(vecm)
+decomp = fevd(var_model, 20)
+```
+
+```{julia}
+show_plot(plot_result(irfs))
+show_plot(plot_result(fc))
+show_plot(plot_result(decomp))
+```
+
+## Common Pitfalls
+
+## References
+
+# Local Projections
+
+```{julia}
+using MacroEconometricModels, Random, Statistics
+Random.seed!(42)
+fred = load_example(:fred_md)
+Y = to_matrix(apply_tcode(fred[:, ["INDPRO", "CPIAUCSL", "FEDFUNDS"]]))
+Y = Y[all.(isfinite, eachrow(Y)), :]
+Y = Y[end-59:end, :]
+```
+
+## Quick Start
+
+### Recipe 1: Standard LP with HAC standard errors
+
+```{julia}
+# LP-IRF of a federal funds rate shock up to horizon 20
+lp = estimate_lp(Y, 3, 20; lags=4, cov_type=:newey_west)
+result = lp_irf(lp; conf_level=0.95)
+report(result)
+```
+
+### Recipe 2: LP-IV with external instruments
+
+```{julia}
+# Instrument FFR with its own lagged changes
+Z = reshape([zeros(1); diff(Y[:, 3])], :, 1)
+lpiv = estimate_lp_iv(Y, 3, Z, 20; lags=4, cov_type=:newey_west)
+report(lpiv)
+```
+
+### Recipe 3: Smooth LP with B-splines
+
+```{julia}
+slp = estimate_smooth_lp(Y, 3, 20; lambda=1.0, n_knots=4, lags=4)
+report(slp)
+```
+
+### Recipe 4: Structural LP with Cholesky identification
+
+```{julia}
+# Cholesky ordering: output -> prices -> monetary policy
+slp = structural_lp(Y, 20; method=:cholesky, lags=4)
+```
+
+```{julia}
+show_plot(plot_result(slp))
+```
+
+### Recipe 5: State-dependent LP (recession vs. expansion)
+
+```{julia}
+# 7-month MA of IP growth as state variable
+ip_growth = Y[:, 1]
+state_var = [mean(ip_growth[max(1, t-6):t]) for t in 1:length(ip_growth)]
+state_var = Float64.((state_var .- mean(state_var)) ./ std(state_var))
+
+slm = estimate_state_lp(Y, 3, state_var, 20; gamma=:estimate, threshold=:estimate, lags=4)
+report(slm)
+```
+
+### Recipe 6: LP-FEVD with bias correction
+
+```{julia}
+slp = structural_lp(Y, 20; method=:cholesky, lags=4)
+lfevd = lp_fevd(slp, 20; method=:r2, bias_correct=true, n_boot=50)
+```
+
+```{julia}
+show_plot(plot_result(lfevd))
+```
+
+## Standard Local Projections
+
+### HAC Standard Errors
+
+```{julia}
+# Estimate LP-IRF of a federal funds rate shock up to horizon 20
+lp_model = estimate_lp(Y, 3, 20;       # shock_var=3 (FEDFUNDS)
+    lags = 4,                           # Control lags
+    cov_type = :newey_west,             # HAC standard errors
+    bandwidth = 0                       # 0 = automatic bandwidth
+)
+
+# Extract IRF with confidence intervals
+irf_result = lp_irf(lp_model; conf_level=0.95)
+report(irf_result)
+```
+
+```{julia}
+show_plot(plot_result(irf_result))
+```
+
+## LP with Instrumental Variables
+
+### Instrument Relevance
+
+```{julia}
+# Construct instrument: lagged changes in the federal funds rate
+Z = reshape([zeros(1); diff(Y[:, 3])], :, 1)
+
+# LP-IV: instrument FFR with its own lagged changes
+lpiv_model = estimate_lp_iv(Y, 3, Z, 20;    # shock_var=3 (FEDFUNDS)
+    lags = 4,
+    cov_type = :newey_west
+)
+
+# Check first-stage strength
+weak_test = weak_instrument_test(lpiv_model; threshold=10.0)
+report(lpiv_model)
+```
+
+## Smooth Local Projections
+
+### Penalized Estimation
+
+```{julia}
+# Smooth LP with cubic splines
+smooth_model = estimate_smooth_lp(Y, 3, 20;   # shock_var=3 (FEDFUNDS)
+    degree = 3,           # Cubic splines
+    n_knots = 4,          # Interior knots
+    lambda = 1.0,         # Smoothing penalty
+    lags = 4
+)
+report(smooth_model)
+
+# Automatic lambda selection via cross-validation
+optimal_lambda = cross_validate_lambda(Y, 3, 20;
+    lambda_grid = 10.0 .^ (-4:0.5:2),
+    k_folds = 5
+)
+
+# Compare smooth vs standard LP
+comparison = compare_smooth_lp(Y, 3, 20; lambda=optimal_lambda)
+```
+
+## State-Dependent Local Projections
+
+### Logistic Transition Function
+
+### Regime Difference Test
+
+```{julia}
+# Construct state variable: 7-month MA of industrial production growth
+ip_growth = Y[:, 1]
+state_var = [mean(ip_growth[max(1, t-6):t]) for t in 1:length(ip_growth)]
+state_var = Float64.((state_var .- mean(state_var)) ./ std(state_var))
+
+# Estimate state-dependent LP: FFR shock with IP growth as state
+state_model = estimate_state_lp(Y, 3, state_var, 20;
+    gamma = :estimate,
+    threshold = :estimate,
+    lags = 4
+)
+report(state_model)
+
+# Extract regime-specific IRFs
+irf_expansion = state_irf(state_model; regime=:expansion)
+irf_recession = state_irf(state_model; regime=:recession)
+
+# Test for regime differences at each horizon
+diff_test = test_regime_difference(state_model)
+```
+
+## Propensity Score Local Projections
+
+### IPW Estimator
+
+### Doubly Robust Estimator
+
+```{julia}
+# Construct binary treatment: large absolute FFR changes (top quartile)
+ffr_changes = abs.(diff(Y[:, 3]))
+treatment = Bool.(ffr_changes .> quantile(ffr_changes, 0.75))
+Y_trim = Y[2:end, :]
+covariates = Y_trim[:, 1:2]
+
+# IPW estimation
+ipw_model = estimate_propensity_lp(Y_trim, treatment, covariates, 20;
+    ps_method = :logit,
+    trimming = (0.01, 0.99),
+    lags = 4
+)
+
+# Doubly robust estimation
+dr_model = doubly_robust_lp(Y_trim, treatment, covariates, 20;
+    ps_method = :logit,
+    trimming = (0.01, 0.99),
+    lags = 4
+)
+
+# Extract ATE impulse responses
+ate_irf = propensity_irf(ipw_model)
+dr_irf = propensity_irf(dr_model)
+report(dr_model)
+
+# Diagnostics: overlap and covariate balance
+diagnostics = propensity_diagnostics(ipw_model)
+```
+
+## Structural Local Projections
+
+```{julia}
+# Structural LP with Cholesky identification
+slp = structural_lp(Y, 20; method=:cholesky, lags=4)
+report(slp)
+```
+
+```{julia}
+show_plot(plot_result(slp))
+```
+
+```{julia}
+# With bootstrap confidence intervals
+slp_ci = structural_lp(Y, 20; method=:cholesky, ci_type=:bootstrap, reps=50)
+
+# With sign restrictions: positive supply shock raises output and lowers prices
+check_fn(irf) = irf[1, 1, 1] > 0 && irf[1, 2, 1] < 0
+slp_sign = structural_lp(Y, 20; method=:sign, check_func=check_fn)
+
+# Dispatch to FEVD and historical decomposition
+decomp = fevd(slp, 20)
+hd = historical_decomposition(slp)
+```
+
+## LP Forecasting
+
+```{julia}
+# Estimate LP model
+lp = estimate_lp(Y, 3, 20; lags=4, cov_type=:newey_west)
+
+# Forecast with a unit shock path
+shock_path = ones(20)
+fc = forecast(lp, shock_path; ci_method=:analytical, conf_level=0.95)
+report(fc)
+```
+
+```{julia}
+show_plot(plot_result(fc))
+```
+
+```{julia}
+# Structural LP forecast with monetary policy shock
+slp = structural_lp(Y, 20; method=:cholesky)
+fc_struct = forecast(slp, 3, shock_path;  # shock_idx=3 (monetary policy)
+                     ci_method=:bootstrap, n_boot=50)
+report(fc_struct)
+```
+
+## LP-Based FEVD
+
+### The R² Estimator
+
+### Alternative Estimators
+
+### Bias Correction
+
+```{julia}
+# Structural LP with Cholesky ordering [INDPRO, CPI, FFR]
+slp = structural_lp(Y, 20; method=:cholesky, lags=4)
+
+# R²-based LP-FEVD with bias correction
+lfevd = lp_fevd(slp, 20; method=:r2, bias_correct=true, n_boot=50)
+report(lfevd)
+```
+
+```{julia}
+show_plot(plot_result(lfevd))
+```
+
+## LP vs. VAR
+
+## Complete Example
+
+```{julia}
+# Step 1: Standard LP-IRF with Newey-West standard errors
+lp = estimate_lp(Y, 3, 20; lags=4, cov_type=:newey_west)
+irf_result = lp_irf(lp; conf_level=0.95)
+report(irf_result)
+
+# Step 2: Structural LP with Cholesky identification
+slp = structural_lp(Y, 20; method=:cholesky, lags=4)
+report(slp)
+
+# Step 3: LP-FEVD with bias correction
+lfevd = lp_fevd(slp, 20; method=:r2, bias_correct=true, n_boot=50)
+report(lfevd)
+
+# Step 4: Direct multi-step forecast
+shock_path = zeros(20); shock_path[1] = 1.0  # unit impulse
+fc = forecast(lp, shock_path; ci_method=:analytical, conf_level=0.95)
+report(fc)
+```
+
+```{julia}
+show_plot(plot_result(irf_result))
+show_plot(plot_result(slp))
+show_plot(plot_result(lfevd))
+show_plot(plot_result(fc))
+```
+
+## Common Pitfalls
+
+## References
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
+```
+
+```{julia}
+
 ```
 
 ```{julia}

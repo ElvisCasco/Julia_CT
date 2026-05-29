@@ -1,0 +1,2394 @@
+---
+title: "Microeconometrics Using Stata"
+Authors:
+- Colin Cameron
+- Pravin Trivedi
+format:
+  html:
+    toc: true
+    toc-depth: 5
+    toc-expand: true
+    toc-title: Contents
+    toc-location: left
+execute:
+  enabled: true
+jupyter: julia-1.12
+---
+
+[Microeconometrics with R](https://ycroissant.github.io/micsr_book/)
+
+[UCLA](https://stats.oarc.ucla.edu/stata/modules/)
+
+[Github](https://github.com/thousandoaks?tab=repositories)
+
+# Julia setup
+
+
+```{julia}
+using CairoMakie
+CairoMakie.activate!(type = "png")
+using CategoricalArrays
+using CSV
+using Chain
+using DataFrames
+using Downloads
+using FixedEffectModels
+using Gadfly
+using GLM
+using HypothesisTests
+using Makie
+using PrettyTables
+using ReadStatTables
+using RegressionTables
+using Statistics
+
+using DataFrames, ReadStatTables, CSV, CairoMakie, PrettyTables
+using Statistics, StatsBase, GLM, FixedEffectModels
+using CategoricalArrays, LinearAlgebra
+using RegressionTables
+using KernelDensity, Loess
+using RDatasets, Random, Printf
+using Optim, Distributions, SpecialFunctions, HypothesisTests
+using MixedModels   # panel RE (xtreg, re  effectively)
+using Combinatorics # for FE logit (conditional MLE subset enumeration)
+using ForwardDiff   # explicit gradients for Optim (autodiff kwarg pipeline broken in current Optim)
+
+# PrettyTables v3 compatibility shim. v3 dropped `ft_printf` (now
+# `fmt__printf`) and requires the `formatters` keyword to be a Vector.
+# All call sites in this document use the v2 form
+# `formatters = PrettyTables.ft_printf(fmt, cols)`; re-create
+# `ft_printf` so it returns a single-element Vector wrapping the new
+# `fmt__printf`, accepting either an Int column index or a range.
+if !isdefined(PrettyTables, :ft_printf)
+    @eval PrettyTables begin
+        ft_printf(fmt, cols) =
+            [fmt__printf(fmt, collect(cols isa Integer ? (cols:cols) : cols))]
+        ft_printf(fmt) = [fmt__printf(fmt)]   # apply to all columns (v2 single-arg)
+    end
+end
+
+# PrettyTables v3 also renamed the `header` keyword to `column_labels`
+# (which must be an `AbstractVector` — a flat vector for one header row,
+# or a vector of row-vectors for stacked headers; a Tuple is rejected).
+# `_pt_compat` wraps `pretty_table` so the document's v2-style calls keep
+# working: it maps `header` → `column_labels` (Tuple → Vector), and
+# normalises `formatters` to a flat Vector. All `PrettyTables.pretty_table`
+# call sites in the document route through this wrapper. `_PT_REAL` holds
+# the real function (no trailing `(`, so the route-through rewrite leaves
+# it untouched — no recursion).
+const _PT_REAL = PrettyTables.pretty_table
+function _pt_compat(data; header = nothing, formatters = nothing,
+                    body_hlines = nothing, kwargs...)
+    kw = Dict{Symbol,Any}(kwargs)
+    if header !== nothing
+        kw[:column_labels] = header isa Tuple ? collect(header) : header
+    end
+    if formatters !== nothing
+        kw[:formatters] =
+            formatters isa Function ? [formatters] :
+            formatters isa Tuple ?
+                collect(Iterators.flatten(
+                    x isa Union{AbstractVector,Tuple} ? x : (x,) for x in formatters)) :
+                formatters
+    end
+    # `body_hlines` (v2) has no v3 equivalent — it only drew cosmetic
+    # horizontal rules after given rows. Captured here and dropped so the
+    # table still renders (without the extra separators). `alignment` and
+    # `row_labels` are unchanged in v3 and pass straight through.
+    return _PT_REAL(data; kw...)
+end
+
+# Optim autodiff compat shim. The installed Optim's `autodiff` kwarg
+# rejects the Symbol form `:forward` (it now expects an ADTypes type),
+# and even the ADTypes path trips a DifferentiationInterface bug in
+# this version. The fix: don't use Optim's autodiff plumbing at all —
+# wrap `f` with an explicit ForwardDiff-computed gradient and call the
+# 5-arg `optimize(f, g!, x0, method, opts)` form, which doesn't go
+# through autodiff. `_optimize_compat` routes every Optim.optimize call
+# in the document through this translation; 4-arg calls with
+# `autodiff = :forward` are rewritten to the 5-arg gradient form, all
+# other shapes pass through. `_OPT_REAL` holds the real function (no
+# trailing `(`, so the route-through rewrite leaves it untouched).
+const _OPT_REAL = Optim.optimize
+function _optimize_compat(args...; kwargs...)
+    kw = Dict{Symbol,Any}(kwargs)
+    ad = pop!(kw, :autodiff, nothing)
+    # If `autodiff = :forward` is requested, build the gradient via
+    # ForwardDiff and use the explicit-gradient path. Handles any arg
+    # shape where args[1]=f, args[2]=x0 (method/options follow): 3-arg
+    # `(f, x0, method)`, 4-arg `(f, x0, method, opts)`, etc.
+    if ad isa Symbol && (ad === :forward || ad === :forwarddiff) && length(args) >= 2
+        f, x0 = args[1], args[2]
+        g!(g, x) = ForwardDiff.gradient!(g, f, x)
+        return _OPT_REAL(f, g!, x0, args[3:end]...; kw...)
+    end
+    return ad === nothing ? _OPT_REAL(args...; kw...) :
+                            _OPT_REAL(args...; autodiff = ad, kw...)
+end
+```
+
+```{julia}
+_rawval(x) = hasproperty(x, :value) ? x.value : x  # unwrap ReadStatTables.LabeledValue
+
+function _numeric_vec(col)
+    vals = collect(skipmissing(col))
+    isempty(vals) && return Float64[]
+    T = Base.nonmissingtype(eltype(col))
+    T <: Real && return convert(Vector{Float64}, vals)
+    try
+        return Float64[Float64(_rawval(v)) for v in vals]
+    catch
+        return nothing  # non-numeric (strings, etc.)
+    end
+end
+
+"""
+Expand a Stata-style varlist pattern against DataFrame columns. Supports:
+  * `t*`, `*t`, `*mpg*`, `t?`   — glob wildcards
+  * `price-weight`              — range of columns (inclusive, by column order)
+  * exact names, Symbols, vectors, and the literal "_all"
+"""
+function _expand_varlist(df, vars)
+    cols = string.(DataFrames.names(df))
+    patterns = vars isa Union{Symbol,AbstractString} ? [string(vars)] :
+               vars isa AbstractVector ? [string(v) for v in vars] :
+               [string(v) for v in collect(vars)]
+
+    out = String[]
+    for p in patterns
+        if p == "_all"
+            append!(out, cols)
+        elseif occursin('*', p) || occursin('?', p)
+            rx = Regex("^" * replace(p, "*" => ".*", "?" => ".") * "\$")
+            for c in cols
+                occursin(rx, c) && push!(out, c)
+            end
+        elseif occursin('-', p) && !startswith(p, "-") && !(p in cols)
+            parts = split(p, '-', limit=2)
+            i = findfirst(==(String(parts[1])), cols)
+            j = findfirst(==(String(parts[2])), cols)
+            (i === nothing || j === nothing) && error("Unknown variable in range '$p'")
+            i, j = minmax(i, j)
+            append!(out, cols[i:j])
+        else
+            push!(out, p)
+        end
+    end
+
+    seen = Set{String}(); uniq = String[]
+    for v in out
+        v in seen || (push!(seen, v); push!(uniq, v))
+    end
+    return Symbol.(uniq)
+end
+
+function summarize_stata(df::DataFrames.AbstractDataFrame, vars=nothing; detail::Bool=false)
+    if vars === nothing
+        varlist = Symbol[]
+        for n in DataFrames.names(df)
+            _numeric_vec(df[!, n]) === nothing || push!(varlist, Symbol(n))
+        end
+    else
+        varlist = _expand_varlist(df, vars)
+    end
+
+    rows = []
+    for v in varlist
+        xraw = _numeric_vec(df[!, v])
+        x = xraw === nothing ? Float64[] : xraw
+        n = length(x)
+        if n == 0
+            push!(rows, (; Variable=string(v), Obs=0, Mean=missing,
+                           Std=missing, Min=missing, Max=missing))
+            continue
+        end
+        μ  = Statistics.mean(x)
+        σ  = n > 1 ? Statistics.std(x) : missing
+        base = (; Variable=string(v), Obs=n, Mean=μ, Std=σ,
+                  Min=minimum(x), Max=maximum(x))
+        if detail
+            qs = Statistics.quantile(x, [0.01,0.05,0.10,0.25,0.50,0.75,0.90,0.95,0.99])
+            # Stata uses biased moments for skewness/kurtosis
+            m2 = Statistics.mean((x .- μ).^2)
+            m3 = Statistics.mean((x .- μ).^3)
+            m4 = Statistics.mean((x .- μ).^4)
+            skew = m2 > 0 ? m3 / m2^(3/2) : missing
+            kurt = m2 > 0 ? m4 / m2^2     : missing
+            push!(rows, merge(base,
+                (; p1=qs[1], p5=qs[2], p10=qs[3], p25=qs[4], p50=qs[5],
+                   p75=qs[6], p90=qs[7], p95=qs[8], p99=qs[9],
+                   Variance = ismissing(σ) ? missing : σ^2,
+                   Skewness = skew, Kurtosis = kurt)))
+        else
+            push!(rows, base)
+        end
+    end
+
+    # Stata's `summarize, detail` block — one per requested variable.
+    if detail
+        _g9d(x; w::Int = 9, mx::Int = 7) = begin
+            (ismissing(x) || !isfinite(x)) && return "."
+            sig = mx
+            s = Printf.@sprintf("%.*g", sig, x)
+            while length(s) > w && sig > 1
+                sig -= 1; s = Printf.@sprintf("%.*g", sig, x)
+            end
+            0 < abs(x) < 1 ? replace(s, r"^(-?)0\." => s"\1.") : s
+        end
+        _comma_d(n::Integer) = replace(string(n), r"(\d)(?=(\d{3})+$)" => s"\1,")
+        for r in rows
+            v = r.Variable
+            x = _numeric_vec(df[!, Symbol(v)])
+            x === nothing && (println("$v: not numeric"); continue)
+            n = length(x); ssorted = sort(x)
+            small4 = ssorted[1:min(4, n)]
+            large4 = ssorted[max(1, n - 3):n]    # ascending; Stata also shows ascending here
+            println()
+            println(lpad(v, 36))
+            println("-"^61)
+            println(lpad("Percentiles", 26),  lpad("Smallest", 16))
+            pct = [0.01, 0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95, 0.99]
+            qs  = Statistics.quantile(x, pct)
+            sml = [get(small4, i, missing) for i in 1:4]
+            lrg = [get(large4, i, missing) for i in 1:4]
+            # Row 1: 1% / small[1]
+            Printf.@printf("%3s%12s%16s\n", "1%",
+                           _g9d(qs[1]), _g9d(sml[1]))
+            # Row 2: 5% / small[2]
+            Printf.@printf("%3s%12s%16s\n", "5%",
+                           _g9d(qs[2]), _g9d(sml[2]))
+            # Row 3: 10% / small[3]                Obs <N>
+            Printf.@printf("%3s%12s%16s%14s %s\n", "10%",
+                           _g9d(qs[3]), _g9d(sml[3]),
+                           "Obs", _comma_d(n))
+            # Row 4: 25% / small[4]                Sum of wgt.
+            Printf.@printf("%3s%12s%16s%14s %s\n", "25%",
+                           _g9d(qs[4]), _g9d(sml[4]),
+                           "Sum of wgt.", _comma_d(n))
+            println()
+            # Row 5: 50% / blank          Mean
+            Printf.@printf("%3s%12s%16s%14s %s\n", "50%",
+                           _g9d(qs[5]), "", "Mean", _g9d(r.Mean))
+            Printf.@printf("%3s%12s%16s%14s %s\n",
+                           "", "", "Largest",
+                           "Std. dev.", _g9d(r.Std))
+            # Row 6: 75% / large[1]
+            Printf.@printf("%3s%12s%16s\n", "75%",
+                           _g9d(qs[6]), _g9d(lrg[1]))
+            println()
+            # Row 7: 90% / large[2]                Variance
+            Printf.@printf("%3s%12s%16s%14s %s\n", "90%",
+                           _g9d(qs[7]), _g9d(lrg[2]),
+                           "Variance", _g9d(r.Variance))
+            # Row 8: 95% / large[3]                Skewness
+            Printf.@printf("%3s%12s%16s%14s %s\n", "95%",
+                           _g9d(qs[8]), _g9d(lrg[3]),
+                           "Skewness", _g9d(r.Skewness))
+            # Row 9: 99% / large[4]                Kurtosis
+            Printf.@printf("%3s%12s%16s%14s %s\n", "99%",
+                           _g9d(qs[9]), _g9d(lrg[4]),
+                           "Kurtosis", _g9d(r.Kurtosis))
+        end
+        return
+    end
+
+    # Stata %9.0g: up to 7 sig figs, capped at 9 chars total (so leading "0."
+    # for |x|<1 fits), then leading "0" stripped from |x|<1.
+    _g9(x; w::Int=9, mx::Int=7) = begin
+        (ismissing(x) || !isfinite(x)) && return "."
+        sig = mx
+        s = Printf.@sprintf("%.*g", sig, x)
+        while length(s) > w && sig > 1
+            sig -= 1
+            s = Printf.@sprintf("%.*g", sig, x)
+        end
+        0 < abs(x) < 1 ? replace(s, r"^(-?)0\." => s"\1.") : s
+    end
+    _comma(num::Integer) = begin
+        s = string(abs(num)); parts = String[]; i = length(s)
+        while i >= 1; push!(parts, s[max(1, i-2):i]); i -= 3; end
+        (num < 0 ? "-" : "") * join(reverse(parts), ",")
+    end
+
+    println("    Variable |        Obs        Mean    Std. dev.       Min        Max")
+    println("-"^13, "+", "-"^57)
+    for r in rows
+        Printf.@printf("%12s |  %9s   %9s   %9s  %9s  %9s\n",
+                       r.Variable, _comma(r.Obs),
+                       _g9(r.Mean), _g9(r.Std),
+                       _g9(r.Min),  _g9(r.Max))
+    end
+end
+
+"""
+    regress_stata(model; level=0.95)
+
+Stata-style `regress` output — prints the ANOVA table, overall F-statistic,
+R², adjusted R², Root MSE, and the coefficient table with t-statistics,
+p-values, and confidence intervals, matching the format of Stata's
+`regress` command. The intercept is relabelled `_cons`.
+
+Works with any `StatsBase`-compatible OLS model, e.g. the output of
+`FixedEffectModels.reg(df, @formula(y ~ x2 + x3))`.
+"""
+function regress_stata(model; level::Float64=0.95, noheader::Bool=false)
+    β      = StatsBase.coef(model)
+    V      = StatsBase.vcov(model)
+    se     = sqrt.(max.(LinearAlgebra.diag(V), 0.0))
+    nm_raw = string.(StatsBase.coefnames(model))
+    nm     = replace.(nm_raw, "(Intercept)" => "_cons")
+    has_int = any(==("_cons"), nm)
+
+    n      = Int(StatsBase.nobs(model))
+    rss    = StatsBase.deviance(model)
+    r2     = StatsBase.r2(model)
+    ar2    = StatsBase.adjr2(model)
+    dof_r  = Int(StatsBase.dof_residual(model))
+    k      = length(β) - (has_int ? 1 : 0)
+    tss    = rss / max(1 - r2, eps())
+    mss    = tss - rss
+    rmse   = sqrt(rss / dof_r)
+    Fstat  = (mss / k) / (rss / dof_r)
+    pF     = 1 - Distributions.cdf(Distributions.FDist(k, dof_r), Fstat)
+
+    yname = try
+        string(StatsBase.responsename(model))
+    catch
+        hasproperty(model, :yname) ? string(model.yname) : "y"
+    end
+
+    t_stat = β ./ se
+    tcrit  = Distributions.quantile(Distributions.TDist(dof_r), 1 - (1-level)/2)
+    p_val  = 2 .* (1 .- Distributions.cdf.(Distributions.TDist(dof_r), abs.(t_stat)))
+    ci_lo  = β .- tcrit .* se
+    ci_hi  = β .+ tcrit .* se
+
+    # Stata %10.0g-style: `sig` significant digits, strip leading 0 for |x|<1,
+    # right-aligned in width `w`.
+    function _g(x, w; sig=7)
+        (ismissing(x) || !isfinite(x)) && return Printf.@sprintf("%*s", w, ".")
+        s = Printf.@sprintf("%.*g", sig, x)
+        if 0 < abs(x) < 1
+            s = replace(s, r"^(-?)0\." => s"\1.")
+        end
+        return Printf.@sprintf("%*s", w, s)
+    end
+
+    # ── ANOVA table + summary-stats block (skipped when `noheader=true`,
+    # matching Stata's `regress y x, noheader` option)
+    if !noheader
+        println()
+        Printf.@printf("%12s | %10s %10s %10s    %-13s = %10d\n",
+                       "Source", "SS", "df", "MS", "Number of obs", n)
+        println("-"^13, "+", "-"^34, "   ",
+                Printf.@sprintf("%-13s = %10.2f", "F($k, $dof_r)", Fstat))
+        Printf.@printf("%12s | %s %10d %s    %-13s = %10.4f\n",
+                       "Model", _g(mss, 10), k, _g(mss/k, 10), "Prob > F", pF)
+        Printf.@printf("%12s | %s %10d %s    %-13s = %10.4f\n",
+                       "Residual", _g(rss, 10), dof_r, _g(rss/dof_r, 10),
+                       "R-squared", r2)
+        println("-"^13, "+", "-"^34, "   ",
+                Printf.@sprintf("%-13s = %10.4f", "Adj R-squared", ar2))
+        Printf.@printf("%12s | %s %10d %s    %-13s = %10.4f\n",
+                       "Total", _g(tss, 10), n-1, _g(tss/(n-1), 10),
+                       "Root MSE", rmse)
+    end
+    println()
+
+    # ── Coefficient table
+    println("-"^78)
+    Printf.@printf("%12s | %10s  %9s  %6s  %5s     [%d%% conf. interval]\n",
+                   yname, "Coefficient", "Std. err.", "t", "P>|t|",
+                   round(Int, 100*level))
+    println("-"^13, "+", "-"^64)
+    for i in eachindex(β)
+        Printf.@printf("%12s | %s  %s  %6.2f  %5.3f  %s  %s\n",
+                       nm[i],
+                       _g(β[i], 10),
+                       _g(se[i], 9),
+                       t_stat[i],
+                       p_val[i],
+                       _g(ci_lo[i], 11),
+                       _g(ci_hi[i], 11))
+    end
+    println("-"^78)
+    return nothing
+end
+
+"""
+    regress_stata(df, y, xs; level=0.95, vcov=nothing)
+
+Convenience method: fit `y ~ xs…` on `df` with `FixedEffectModels.reg` and
+print the Stata-style `regress` output. `y` is the dependent variable (Symbol
+or String); `xs` is a Symbol, String, or vector of regressor names. Pass
+`vcov=Vcov.robust()` (or similar) for non-default standard errors.
+
+Example:
+
+    regress_stata(df5, :y, [:x2, :x3])
+    regress_stata(df5, :y, [:x2, :x3]; vcov=Vcov.robust())
+"""
+function regress_stata(df::DataFrames.AbstractDataFrame, y, xs;
+                       level::Float64=0.95, vcov=nothing, weights=nothing,
+                       noheader::Bool=false)
+    ys  = Symbol(y)
+    xsv = xs isa Union{Symbol,AbstractString} ? [Symbol(xs)] :
+          [Symbol(v) for v in xs]
+    f = term(ys) ~ sum(term.(xsv))
+    kw = weights === nothing ? (;) : (; weights=Symbol(weights))
+    m = vcov === nothing ?
+        FixedEffectModels.reg(df, f; kw...) :
+        FixedEffectModels.reg(df, f, vcov; kw...)
+    regress_stata(m; level=level, noheader=noheader)
+    return nothing
+end
+
+"""
+    sureg_fit(df, eqs::Pair...; reps=0, seed=nothing)
+
+Silent companion to `sureg`: runs the same FGLS SUR (with optional bootstrap
+vcov) and returns a `NamedTuple` of results — no printing. Use this before
+`test_sureg` to run cross-equation Wald tests on the stored fit.
+
+Fields: `β`, `V`, `coefnames` (as `"[eqname]var"`), `eqnames`, `cns`, `ks`,
+`offsets`, `N`, `Σ̂`, `β_eq`, `V_eq`, `se_eq`, `rmse`, `r2s`, `chi2s`,
+`pvals`, `reps`.
+"""
+function sureg_fit(df::DataFrames.AbstractDataFrame, eqs::Pair...;
+                   reps::Int=0, seed::Union{Int,Nothing}=nothing,
+                   constraints::AbstractVector=String[])
+    M = length(eqs)
+    all_vars = Symbol[]
+    for (y, xs) in eqs
+        push!(all_vars, Symbol(y))
+        xsv = xs isa Union{Symbol,AbstractString} ? [Symbol(xs)] :
+              [Symbol(v) for v in xs]
+        append!(all_vars, xsv)
+    end
+    d = DataFrames.dropmissing(df, unique(all_vars))
+    N = DataFrames.nrow(d)
+
+    Xs      = Vector{Matrix{Float64}}(undef, M)
+    Ys      = Vector{Vector{Float64}}(undef, M)
+    cns     = Vector{Vector{String}}(undef, M)
+    eqnames = Vector{String}(undef, M)
+    for (j, (y, xs)) in enumerate(eqs)
+        ys  = Symbol(y)
+        xsv = xs isa Union{Symbol,AbstractString} ? [Symbol(xs)] :
+              [Symbol(v) for v in xs]
+        Xs[j] = hcat(ones(N), [Float64.(_rawval.(d[!, v])) for v in xsv]...)
+        Ys[j] = Float64.(_rawval.(d[!, ys]))
+        cns[j] = vcat("_cons", string.(xsv))  # intercept at column 1
+        eqnames[j] = string(ys)
+    end
+    ks      = [size(X, 2) for X in Xs]
+    kt      = sum(ks)
+    offsets = vcat(0, cumsum(ks))
+
+    # Full coefnames used for constraint parsing and reporting.
+    coefnames_full = String[]
+    for j in 1:M, i in 1:ks[j]
+        push!(coefnames_full, "[$(eqnames[j])]$(cns[j][i])")
+    end
+
+    # Parse constraint strings into (R, r) — same grammar as `test_sureg`.
+    R_con = zeros(0, kt); r_con = Float64[]; con_labels = String[]
+    if !isempty(constraints)
+        function _resolve(token::AbstractString)
+            tok = String(strip(token))
+            num = tryparse(Float64, tok)
+            num !== nothing && return (Int[], num)
+            if startswith(tok, "[") && occursin(']', tok)
+                k = findfirst(==(tok), coefnames_full)
+                k === nothing && error("Coefficient not found: $tok")
+                return ([k], 0.0)
+            end
+            idx = Int[]
+            for (k, cn) in enumerate(coefnames_full)
+                m = match(r"^\[(.+)\](.+)$", cn)
+                (m === nothing || m.captures[2] != tok) && continue
+                push!(idx, k)
+            end
+            isempty(idx) && error("Coefficient not found in any equation: $tok")
+            return (idx, 0.0)
+        end
+        R_rows = Vector{Vector{Float64}}()
+        for c in constraints
+            cs = strip(string(c))
+            occursin('=', cs) ||
+                error("Constraint must contain '=': got '$cs'")
+            lhs_s, rhs_s = split(cs, '='; limit=2)
+            lhs_idx, lhs_c = _resolve(lhs_s)
+            rhs_idx, rhs_c = _resolve(rhs_s)
+            (length(lhs_idx) > 1 || length(rhs_idx) > 1) &&
+                error("Ambiguous short name in '$cs' — use [eq]name")
+            row = zeros(kt)
+            for k in lhs_idx; row[k] += 1.0; end
+            for k in rhs_idx; row[k] -= 1.0; end
+            push!(R_rows, row); push!(r_con, rhs_c - lhs_c)
+            push!(con_labels,
+                  !isempty(lhs_idx) && !isempty(rhs_idx) ?
+                      "$(coefnames_full[lhs_idx[1]]) = $(coefnames_full[rhs_idx[1]])" :
+                  !isempty(lhs_idx) ?
+                      "$(coefnames_full[lhs_idx[1]]) = $(rhs_c)" :
+                      "$(coefnames_full[rhs_idx[1]]) = $(lhs_c)")
+        end
+        R_con = reduce(vcat, permutedims.(R_rows))
+    end
+    has_con = !isempty(con_labels)
+
+    # Projection of (β_u, V_u) onto Rβ = r.
+    function _constrain(β_u, V_u)
+        has_con || return (β_u, V_u)
+        RVR   = R_con * V_u * R_con'
+        VRT   = V_u * R_con'
+        β_c   = β_u .- VRT * (RVR \ (R_con * β_u .- r_con))
+        V_c   = V_u .- VRT * LinearAlgebra.inv(RVR) * R_con * V_u
+        return (β_c, V_c)
+    end
+
+    # Step 1: OLS residuals → Σ̂
+    β_ols = [Xs[j] \ Ys[j] for j in 1:M]
+    e_ols = [Ys[j] - Xs[j] * β_ols[j] for j in 1:M]
+    Σ̂ = [LinearAlgebra.dot(e_ols[i], e_ols[j]) / N for i in 1:M, j in 1:M]
+
+    # Step 2: FGLS via blocked (Σ⁻¹ ⊗ I) sandwich
+    Σinv = LinearAlgebra.inv(Σ̂)
+    XWX  = zeros(kt, kt)
+    XWY  = zeros(kt)
+    for i in 1:M, j in 1:M
+        ri = (offsets[i]+1):offsets[i+1]
+        rj = (offsets[j]+1):offsets[j+1]
+        XWX[ri, rj] .= Σinv[i, j] .* (Xs[i]' * Xs[j])
+        XWY[ri]    .+= Σinv[i, j] .* (Xs[i]' * Ys[j])
+    end
+    β_u_full = XWX \ XWY
+    V_u_full = LinearAlgebra.inv(XWX)
+    β_sur, V_sur = _constrain(β_u_full, V_u_full)
+
+    β_eq  = [β_sur[(offsets[j]+1):offsets[j+1]]                              for j in 1:M]
+    V_eq  = [V_sur[(offsets[j]+1):offsets[j+1], (offsets[j]+1):offsets[j+1]] for j in 1:M]
+    se_eq = [sqrt.(max.(LinearAlgebra.diag(V), 0.0)) for V in V_eq]
+    e_sur = [Ys[j] - Xs[j] * β_eq[j] for j in 1:M]
+
+    rmse  = [sqrt(LinearAlgebra.dot(e_sur[j], e_sur[j]) / N) for j in 1:M]
+    r2s   = Float64[]; chi2s = Float64[]; pvals = Float64[]
+    for j in 1:M
+        rss = LinearAlgebra.dot(e_sur[j], e_sur[j])
+        tss = sum((Ys[j] .- Statistics.mean(Ys[j])).^2)
+        push!(r2s, 1 - rss / tss)
+        slope = 2:ks[j]     # exclude intercept (column 1)
+        βs = β_eq[j][slope]; Vs = V_eq[j][slope, slope]
+        # pinv handles rank-deficient V_s when constraints bind on this block.
+        χ2 = βs' * LinearAlgebra.pinv(Vs) * βs
+        push!(chi2s, χ2)
+        push!(pvals, 1 - Distributions.cdf(Distributions.Chisq(length(slope)), χ2))
+    end
+
+    # ── Bootstrap vcov (replaces V̂_SUR for the coefficient table SEs/CIs;
+    #     summary-block χ² is unchanged and still uses the analytical V̂_SUR).
+    if reps > 0
+        seed !== nothing && Random.seed!(seed)
+        β_boot = Matrix{Float64}(undef, reps, kt)
+        for b in 1:reps
+            idx  = StatsBase.sample(1:N, N; replace=true)
+            Xs_b = [X[idx, :]   for X in Xs]
+            Ys_b = [Y[idx]      for Y in Ys]
+            β_ols_b = [Xs_b[j] \ Ys_b[j] for j in 1:M]
+            e_b     = [Ys_b[j] - Xs_b[j] * β_ols_b[j] for j in 1:M]
+            Σ_b     = [LinearAlgebra.dot(e_b[i], e_b[j]) / N for i in 1:M, j in 1:M]
+            Σinv_b  = LinearAlgebra.inv(Σ_b)
+            XWX_b = zeros(kt, kt); XWY_b = zeros(kt)
+            for i in 1:M, j in 1:M
+                ri = (offsets[i]+1):offsets[i+1]
+                rj = (offsets[j]+1):offsets[j+1]
+                XWX_b[ri, rj] .= Σinv_b[i, j] .* (Xs_b[i]' * Xs_b[j])
+                XWY_b[ri]    .+= Σinv_b[i, j] .* (Xs_b[i]' * Ys_b[j])
+            end
+            β_ub = XWX_b \ XWY_b
+            if has_con
+                V_ub = LinearAlgebra.inv(XWX_b)
+                β_ub, _ = _constrain(β_ub, V_ub)
+            end
+            β_boot[b, :] = β_ub
+        end
+        V_sur = Statistics.cov(β_boot)
+        V_eq  = [V_sur[(offsets[j]+1):offsets[j+1], (offsets[j]+1):offsets[j+1]] for j in 1:M]
+        se_eq = [sqrt.(max.(LinearAlgebra.diag(V), 0.0)) for V in V_eq]
+    end
+
+    return (; β=β_sur, V=V_sur, coefnames=coefnames_full,
+              eqnames, cns, ks, offsets, N, Σ̂,
+              β_eq, V_eq, se_eq,
+              rmse, r2s, chi2s, pvals, reps,
+              constraints=con_labels)
+end
+
+"""
+    sureg(df, (y1 => [x1s…]), (y2 => [x2s…]), …;
+          level=0.95, reps=0, seed=nothing)
+
+Stata-style `sureg` — seemingly unrelated regression (FGLS). Each pair
+`y => xs` becomes an equation `y ~ 1 + xs…`. Prints Stata's `sureg` summary
+block (Obs, Params, RMSE, R², χ², P>χ²), the pooled coefficient table with
+z-statistics, the residual correlation matrix, and the Breusch–Pagan test
+of independence against a diagonal Σ.
+
+Algorithm: equation-by-equation OLS gives Σ̂ = (eᵢ′eⱼ)/N; a single FGLS
+step with W = Σ̂⁻¹ ⊗ Iₙ recovers β̂_SUR and V̂_SUR. The correlation matrix
+and BP test use the OLS-step Σ̂ (matching Stata's default non-iterated
+`sureg`).
+
+Pass `reps=400, seed=10101` to mimic Stata's `bootstrap, reps(400) seed(10101): sureg …` —
+β̂_SUR is kept as the observed coefficient, but V̂_SUR is replaced by the
+sample covariance of B bootstrap replications (each a full SUR on a
+resampled dataset). The coefficient table header changes to
+"Observed coefficient | Bootstrap std. err. | Normal-based CI". The summary
+block's χ² still uses the analytical V̂_SUR to match Stata.
+
+Examples:
+
+    sureg(df_sur,
+          :ldrugexp => [:age, :age2, :actlim, :totchr, :medicaid, :private],
+          :ltotothr => [:age, :age2, :educyr, :actlim, :totchr, :private])
+
+    sureg(df_sur,
+          :ldrugexp => [:age, :age2, :actlim, :totchr, :medicaid, :private],
+          :ltotothr => [:age, :age2, :educyr, :actlim, :totchr, :private];
+          reps=400, seed=10101)
+"""
+function sureg(df::DataFrames.AbstractDataFrame, eqs::Pair...;
+               level::Float64=0.95, reps::Int=0,
+               seed::Union{Int,Nothing}=nothing,
+               constraints::AbstractVector=String[])
+    fit = sureg_fit(df, eqs...; reps=reps, seed=seed, constraints=constraints)
+    if !isempty(fit.constraints)
+        println("Constraints imposed:")
+        for (i, c) in enumerate(fit.constraints)
+            Printf.@printf(" ( %d)  %s\n", i, c)
+        end
+        println()
+    end
+    M       = length(fit.eqnames)
+    eqnames = fit.eqnames
+    cns     = fit.cns
+    ks      = fit.ks
+    N       = fit.N
+    β_eq    = fit.β_eq
+    se_eq   = fit.se_eq
+    rmse    = fit.rmse
+    r2s     = fit.r2s
+    chi2s   = fit.chi2s
+    pvals   = fit.pvals
+    Σ̂       = fit.Σ̂
+
+    # ── Summary table (PrettyTables)
+    println("Seemingly unrelated regression\n")
+    summary_df = DataFrames.DataFrame(
+        Equation    = eqnames,
+        Obs         = fill(N, M),
+        Params      = [k - 1 for k in ks],
+        RMSE        = rmse,
+        R_squared   = r2s,
+        chi2        = chi2s,
+        P_chi2      = pvals,
+    )
+    _pt_compat(summary_df;
+        header     = ["Equation", "Obs", "Params", "RMSE", "R-squared",
+                      "chi2", "P>chi2"],
+        formatters = vcat(
+            PrettyTables.ft_printf("%.6f", [4]),
+            PrettyTables.ft_printf("%.4f", [5, 7]),
+            PrettyTables.ft_printf("%.2f", [6]),
+        ),
+        alignment  = [:l, :r, :r, :r, :r, :r, :r],
+    )
+
+    # ── Coefficient table (PrettyTables), slopes first then intercept
+    zcrit = Distributions.quantile(Distributions.Normal(), 1 - (1-level)/2)
+    eqn_col  = String[]; var_col = String[]
+    β_col    = Float64[]; se_col  = Float64[]
+    z_col    = Float64[]; p_col   = Float64[]
+    lo_col   = Float64[]; hi_col  = Float64[]
+    hline_at = Int[]
+    nrows    = 0
+    for j in 1:M
+        order = vcat(collect(2:ks[j]), 1)
+        first_row = true
+        for i in order
+            β_i  = β_eq[j][i]
+            se_i = se_eq[j][i]
+            z_i  = β_i / se_i
+            p_i  = 2 * (1 - Distributions.cdf(Distributions.Normal(), abs(z_i)))
+            push!(eqn_col, first_row ? eqnames[j] : "")
+            push!(var_col, cns[j][i])
+            push!(β_col, β_i);   push!(se_col, se_i)
+            push!(z_col, z_i);   push!(p_col, p_i)
+            push!(lo_col, β_i - zcrit * se_i)
+            push!(hi_col, β_i + zcrit * se_i)
+            first_row = false
+            nrows += 1
+        end
+        j < M && push!(hline_at, nrows)
+    end
+    coef_df = DataFrames.DataFrame(
+        Equation     = eqn_col,
+        Variable     = var_col,
+        Coefficient  = β_col,
+        StdErr       = se_col,
+        z            = z_col,
+        p            = p_col,
+        CI_low       = lo_col,
+        CI_high      = hi_col,
+    )
+    lvl = round(Int, 100 * level)
+    println()
+    coef_header = reps > 0 ?
+        (["", "", "Observed", "Bootstrap", "", "", "Normal-based", ""],
+         ["Equation", "Variable", "coefficient", "std. err.",
+          "z", "P>|z|", "[$(lvl)% CI low]", "[$(lvl)% CI high]"]) :
+        ["Equation", "Variable", "Coefficient", "Std. err.",
+         "z", "P>|z|", "[$(lvl)% CI low]", "[$(lvl)% CI high]"]
+    _pt_compat(coef_df;
+        header     = coef_header,
+        formatters = vcat(
+            PrettyTables.ft_printf("%.7f", [3, 4, 7, 8]),
+            PrettyTables.ft_printf("%.2f",  [5]),
+            PrettyTables.ft_printf("%.3f",  [6]),
+        ),
+        body_hlines = hline_at,
+        alignment   = [:l, :l, :r, :r, :r, :r, :r, :r],
+    )
+    reps > 0 && Printf.@printf("  (bootstrap replications = %d)\n", reps)
+
+    # ── Residual correlation matrix (from OLS-step Σ̂)
+    Rmat = [Σ̂[i, j] / sqrt(Σ̂[i, i] * Σ̂[j, j]) for i in 1:M, j in 1:M]
+    corr_strs = [j <= i ? Printf.@sprintf("%.4f", Rmat[i, j]) : ""
+                 for i in 1:M, j in 1:M]
+    println("\nCorrelation matrix of residuals:\n")
+    _pt_compat(corr_strs;
+        header     = eqnames,
+        row_labels = eqnames,
+        alignment  = fill(:r, M),
+    )
+
+    # ── Breusch–Pagan test of independence
+    bp = 0.0
+    for i in 1:M-1, j in (i+1):M
+        bp += Rmat[i, j]^2
+    end
+    bp *= N
+    df_bp = M * (M - 1) ÷ 2
+    p_bp  = 1 - Distributions.cdf(Distributions.Chisq(df_bp), bp)
+    Printf.@printf("\nBreusch–Pagan test of independence: chi2(%d) = %.3f, Pr = %.4f\n",
+                   df_bp, bp, p_bp)
+    return nothing
+end
+
+"""
+    test_sureg(fit, vars)
+
+Stata-style `test <varlist>` after `sureg`/`sureg_fit`. Jointly tests that
+every coefficient whose short name matches any of `vars` is zero **in every
+equation where it appears** — exactly what Stata's `test age age2` does
+after `sureg`. Uses the stored joint vcov from `fit`, so cross-equation
+covariances are respected (and the bootstrap vcov is used if the fit was
+made with `reps>0`).
+
+Output mirrors Stata's:
+
+    ( 1)  [eq1]v1 = 0
+    ( 2)  [eq2]v1 = 0
+    ...
+            chi2(q) =   W
+          Prob > chi2 =  p
+
+Example:
+
+    fit = sureg_fit(df_sur,
+                    :ldrugexp => [:age, :age2, :actlim, :totchr, :medicaid, :private],
+                    :ltotothr => [:age, :age2, :educyr, :actlim, :totchr, :private])
+    test_sureg(fit, [:age, :age2])
+"""
+function test_sureg(fit, vars::AbstractVector;
+                    df_F::Union{Integer,Nothing}=nothing)
+    coefnames = fit.coefnames
+    K         = length(coefnames)
+
+    # Resolve a single token to either (idx=Int[], number) or
+    # (coef_idx_list, 0.0). Short names may match >1 equation; `[eq]var` must
+    # match exactly one.
+    function _resolve(token::AbstractString)
+        tok = String(strip(token))
+        num = tryparse(Float64, tok)
+        num !== nothing && return (Int[], num)
+        if startswith(tok, "[") && occursin(']', tok)
+            k = findfirst(==(tok), coefnames)
+            k === nothing && error("Coefficient not found: $tok")
+            return ([k], 0.0)
+        end
+        idx = Int[]
+        for (k, cn) in enumerate(coefnames)
+            m = match(r"^\[(.+)\](.+)$", cn)
+            (m === nothing || m.captures[2] != tok) && continue
+            push!(idx, k)
+        end
+        isempty(idx) && error("Coefficient not found in any equation: $tok")
+        return (idx, 0.0)
+    end
+
+    R_rows = Vector{Vector{Float64}}()
+    r_vals = Float64[]
+    labels = String[]
+
+    for v in vars
+        vs = strip(string(v))
+        if occursin('=', vs)
+            # Equality restriction → one row.
+            lhs_s, rhs_s = split(vs, '='; limit=2)
+            lhs_idx, lhs_c = _resolve(lhs_s)
+            rhs_idx, rhs_c = _resolve(rhs_s)
+            length(lhs_idx) > 1 &&
+                error("Ambiguous short name on lhs of '$vs' — use [eq]name")
+            length(rhs_idx) > 1 &&
+                error("Ambiguous short name on rhs of '$vs' — use [eq]name")
+            row = zeros(K)
+            for k in lhs_idx; row[k] += 1.0; end
+            for k in rhs_idx; row[k] -= 1.0; end
+            push!(R_rows, row)
+            push!(r_vals, rhs_c - lhs_c)
+            if !isempty(lhs_idx) && !isempty(rhs_idx)
+                push!(labels,
+                      "$(coefnames[lhs_idx[1]]) - $(coefnames[rhs_idx[1]]) = 0")
+            elseif !isempty(lhs_idx)
+                push!(labels, "$(coefnames[lhs_idx[1]]) = $(rhs_c)")
+            else
+                push!(labels, "$(coefnames[rhs_idx[1]]) = $(lhs_c)")
+            end
+        else
+            # Bare token → one zero-restriction per matching coef.
+            idx_all, _ = _resolve(vs)
+            for k in idx_all
+                row = zeros(K); row[k] = 1.0
+                push!(R_rows, row)
+                push!(r_vals, 0.0)
+                push!(labels, "$(coefnames[k]) = 0")
+            end
+        end
+    end
+    isempty(R_rows) && error("No restrictions parsed from: $(vars)")
+
+    R = reduce(vcat, permutedims.(R_rows))          # q × K
+    r = r_vals
+    d = R * fit.β .- r
+    W = d' * LinearAlgebra.inv(R * fit.V * R') * d
+    q = length(r)
+
+    for (i, lbl) in enumerate(labels)
+        Printf.@printf(" ( %d)  %s\n", i, lbl)
+    end
+    println()
+
+    # F-form if df_F supplied (e.g. after `sqreg_stata`), else χ².
+    if df_F === nothing
+        p_chi = 1 - Distributions.cdf(Distributions.Chisq(q), W)
+        Printf.@printf("           chi2(%3d) = %7.2f\n", q, W)
+        Printf.@printf("         Prob > chi2 = %7.4f\n", p_chi)
+        return (; chi2=W, df=q, p=p_chi, restrictions=labels, R, r)
+    else
+        Fs  = W / q
+        p_F = 1 - Distributions.cdf(Distributions.FDist(q, df_F), Fs)
+        Printf.@printf("       F(%3d, %5d) = %7.2f\n", q, df_F, Fs)
+        Printf.@printf("            Prob > F = %7.4f\n", p_F)
+        return (; F=Fs, df1=q, df2=df_F, p=p_F,
+                  chi2=W, restrictions=labels, R, r)
+    end
+end
+
+"""
+    qreg_stata(df, y, xs; τ=0.5, level=0.95)
+
+Stata-style `qreg y xs…[, quantile(τ)]` — quantile regression by
+minimizing the asymmetric "check" loss
+`ρ_τ(u) = u · (τ − 1{u < 0})`. Slopes are listed first in the coefficient
+table and `_cons` is last, matching Stata's display order.
+
+Standard errors use the classical **iid** Koenker-Bassett formula
+`V̂ = s(τ)² · (X'X)⁻¹`, with sparsity `ω = (û_{τ+h} − û_{τ−h})/(2h)` and
+Hall-Sheather bandwidth `h = n^{-1/3} · z_{α/2}^{2/3} ·
+(1.5φ(Φ⁻¹(τ))²/(2Φ⁻¹(τ)²+1))^{1/3}`. `s(τ) = √(τ(1−τ)) · ω`. Inference
+is t-based on `n − k` df.
+
+Pseudo R² (Koenker–Machado): `1 − MSD/RSD`, where MSD is the minimized
+check-loss and RSD is the check-loss of the constant-only model (its
+fit is the τ-th quantile of y).
+"""
+function qreg_stata(df, y, xs::AbstractVector; τ::Float64=0.5,
+                    level::Float64=0.95,
+                    max_iter::Int=5000, tol::Float64=1e-12,
+                    quiet::Bool=false)
+    ys   = Symbol(y)
+    xsv  = [Symbol(v) for v in xs]
+    d    = DataFrames.dropmissing(df, unique(vcat(ys, xsv)))
+    n    = DataFrames.nrow(d)
+    Y    = Float64.(_rawval.(d[!, ys]))
+    Xmat = hcat([Float64.(_rawval.(d[!, v])) for v in xsv]..., ones(n))  # slopes, _cons
+    k    = size(Xmat, 2)
+
+    # ── IRLS (majorize-minimize on |u|) — robust for the non-smooth check loss.
+    # Majorization: |u| ≤ u²/(2|u*|) + |u*|/2; minimizing the upper bound on
+    # Σ ρ_τ(eᵢ) yields  β̂ = (X'WX)⁻¹ [X'W y + (2τ−1) · X'1],  with
+    # weights wᵢ = 1/max(|eᵢ*|, δ).  δ is shrunk as iterations progress.
+    β   = Xmat \ Y
+    one = ones(n)
+    δ   = 1e-2
+    for iter in 1:max_iter
+        e    = Y .- Xmat * β
+        δ    = max(min(δ, 0.5 * Statistics.median(abs.(e)) + 1e-12), 1e-10)
+        w    = 1.0 ./ max.(abs.(e), δ)
+        rhs  = Xmat' * (w .* Y) .+ (2τ - 1) .* (Xmat' * one)
+        XtWX = Xmat' * (w .* Xmat)
+        β_nw = XtWX \ rhs
+        dif  = sqrt(sum((β_nw .- β).^2)) / max(1.0, sqrt(sum(β.^2)))
+        β    = β_nw
+        dif < tol && break
+    end
+    û  = Y .- Xmat * β
+
+    _rho(u, τ) = u >= 0 ? τ * u : (τ - 1) * u
+    MSD   = sum(_rho(û[i], τ) for i in 1:n)
+    q_y   = Statistics.quantile(Y, τ)
+    RSD   = sum(_rho(Y[i] - q_y, τ) for i in 1:n)
+    R²_ps = 1 - MSD / RSD
+
+    # Hall-Sheather bandwidth and Koenker–Bassett (iid) sparsity
+    α     = 1 - level
+    z_α   = Distributions.quantile(Distributions.Normal(), 1 - α/2)
+    Φinv  = Distributions.quantile(Distributions.Normal(), τ)
+    φ_τ   = Distributions.pdf(Distributions.Normal(), Φinv)
+    h     = n^(-1/3) * z_α^(2/3) *
+            ((1.5 * φ_τ^2) / (2 * Φinv^2 + 1))^(1/3)
+    p_up  = min(τ + h, 1 - 1/n)
+    p_dn  = max(τ - h, 1/n)
+    ω     = (Statistics.quantile(û, p_up) -
+             Statistics.quantile(û, p_dn)) / (p_up - p_dn)
+    s_τ   = sqrt(τ * (1 - τ)) * ω
+
+    V     = s_τ^2 .* LinearAlgebra.inv(Xmat' * Xmat)
+    se    = sqrt.(max.(LinearAlgebra.diag(V), 0.0))
+
+    dofv  = n - k
+    t_st  = β ./ se
+    tcrit = Distributions.quantile(Distributions.TDist(dofv), 1 - α/2)
+    pvals = 2 .* (1 .- Distributions.cdf.(Distributions.TDist(dofv), abs.(t_st)))
+    ci_lo = β .- tcrit .* se
+    ci_hi = β .+ tcrit .* se
+
+    nms  = vcat(string.(xsv), "_cons")
+    if !quiet
+        _fmtn(x) = replace(string(x), r"(\d)(?=(\d{3})+$)" => s"\1,")
+        title = τ == 0.5 ? "Median regression" :
+                            Printf.@sprintf("Quantile regression (τ = %.2f)", τ)
+        println()
+        header_tail = Printf.@sprintf("Number of obs = %10s", _fmtn(n))
+        println(title, " "^max(0, 52 - length(title)), header_tail)
+        Printf.@printf("  Raw sum of deviations %.2f (about %g)\n", RSD, q_y)
+        left3 = Printf.@sprintf("  Min sum of deviations %.3f", MSD)
+        tail3 = Printf.@sprintf("Pseudo R2     = %10.4f", R²_ps)
+        println(left3, " "^max(0, 52 - length(left3)), tail3)
+        println()
+
+        lvl  = round(Int, 100 * level)
+        coef_df = DataFrames.DataFrame(
+            Variable    = nms,
+            Coefficient = β,
+            StdErr      = se,
+            t           = t_st,
+            p           = pvals,
+            CI_low      = ci_lo,
+            CI_high     = ci_hi,
+        )
+        _pt_compat(coef_df;
+            header = [string(ys), "Coefficient", "Std. err.",
+                      "t", "P>|t|", "[$(lvl)% CI low]", "[$(lvl)% CI high]"],
+            formatters = vcat(
+                PrettyTables.ft_printf("%.7f", [2, 3, 6, 7]),
+                PrettyTables.ft_printf("%.2f",  [4]),
+                PrettyTables.ft_printf("%.3f",  [5]),
+            ),
+            alignment = [:l, :r, :r, :r, :r, :r, :r],
+        )
+    end
+
+    return (; β, V, se, t=t_st, p=pvals, ci_lo, ci_hi,
+              coefnames=nms, n, MSD, RSD, pseudo_R2=R²_ps, τ)
+end
+
+"""
+    sqreg_stata(df, y, xs; τs=[0.25, 0.5, 0.75], reps=400,
+                seed=nothing, level=0.95)
+
+Stata-style `sqreg y xs…, q(τ₁ τ₂ …) reps(B)` — **simultaneous** quantile
+regression at several τ values with **bootstrap** standard errors. Each
+bootstrap replicate resamples rows once and re-fits every quantile on
+the same sample, so covariance across quantiles is preserved (this is
+what distinguishes `sqreg` from running `bsqreg` separately at each τ).
+
+Prints the Stata header (`Number of obs`, a line per quantile with its
+Pseudo R²) followed by a grouped coefficient table — one block per
+quantile — with Bootstrap std. err. and t-based CIs on `n − k` df.
+"""
+function sqreg_stata(df, y, xs::AbstractVector;
+                     τs::AbstractVector{<:Real}=[0.25, 0.50, 0.75],
+                     reps::Int=400, seed::Union{Int,Nothing}=nothing,
+                     level::Float64=0.95)
+    ys  = Symbol(y)
+    xsv = [Symbol(v) for v in xs]
+    d   = DataFrames.dropmissing(df, unique(vcat(ys, xsv)))
+    n   = DataFrames.nrow(d)
+    k   = length(xsv) + 1
+    Q   = length(τs)
+
+    # Point estimates at each τ (silent).
+    fits = [qreg_stata(d, ys, xsv; τ=Float64(τ), quiet=true) for τ in τs]
+    β0   = [f.β for f in fits]
+
+    # Paired bootstrap — resample rows once per rep, refit every τ.
+    seed !== nothing && Random.seed!(seed)
+    β_boot = [Matrix{Float64}(undef, reps, k) for _ in 1:Q]
+    for b in 1:reps
+        idx = StatsBase.sample(1:n, n; replace=true)
+        db  = d[idx, :]
+        for (j, τ) in enumerate(τs)
+            β_boot[j][b, :] = qreg_stata(db, ys, xsv; τ=Float64(τ), quiet=true).β
+        end
+    end
+    se = [vec(Statistics.std(β_boot[j]; dims=1)) for j in 1:Q]
+
+    # Inference (t on n − k df)
+    α     = 1 - level
+    dofv  = n - k
+    tcrit = Distributions.quantile(Distributions.TDist(dofv), 1 - α/2)
+    t_q   = [β0[j] ./ se[j] for j in 1:Q]
+    p_q   = [2 .* (1 .- Distributions.cdf.(Distributions.TDist(dofv), abs.(t_q[j])))
+             for j in 1:Q]
+    lo_q  = [β0[j] .- tcrit .* se[j] for j in 1:Q]
+    hi_q  = [β0[j] .+ tcrit .* se[j] for j in 1:Q]
+
+    _fmtn(x) = replace(string(x), r"(\d)(?=(\d{3})+$)" => s"\1,")
+    nms  = vcat(string.(xsv), "_cons")
+
+    # ─── Header block
+    println()
+    title = "Simultaneous quantile regression"
+    Printf.@printf("%s%*sNumber of obs = %10s\n",
+                   title, max(0, 52 - length(title)), "", _fmtn(n))
+    left_boot = Printf.@sprintf("  bootstrap(%d) SEs", reps)
+    Printf.@printf("%s%*s.%02d Pseudo R2 = %10.4f\n",
+                   left_boot, max(0, 52 - length(left_boot)), "",
+                   round(Int, 100*τs[1]), fits[1].pseudo_R2)
+    for j in 2:Q
+        Printf.@printf("%52s.%02d Pseudo R2 = %10.4f\n",
+                       "", round(Int, 100*τs[j]), fits[j].pseudo_R2)
+    end
+    println()
+
+    # ─── Grouped coefficient table in Stata's exact 78-col layout
+    _g(x, w; sig=7) = begin
+        (ismissing(x) || !isfinite(x)) && return Printf.@sprintf("%*s", w, ".")
+        s = Printf.@sprintf("%.*g", sig, x)
+        0 < abs(x) < 1 && (s = replace(s, r"^(-?)0\." => s"\1."))
+        Printf.@sprintf("%*s", w, s)
+    end
+    lvl = round(Int, 100 * level)
+    println("-"^78)
+    Printf.@printf("%12s | %22s\n", "", "Bootstrap")
+    Printf.@printf("%12s | %10s  %9s  %6s  %5s     [%d%% conf. interval]\n",
+                   string(ys), "Coefficient", "std. err.", "t", "P>|t|", lvl)
+    println("-"^13, "+", "-"^64)
+    for j in 1:Q
+        qlabel = Printf.@sprintf("q%02d", round(Int, 100*τs[j]))
+        Printf.@printf("%-12s |\n", qlabel)
+        for i in 1:k
+            Printf.@printf("%12s | %s  %s  %7.2f  %6.3f  %s  %s\n",
+                           nms[i],
+                           _g(β0[j][i], 10),
+                           _g(se[j][i], 9),
+                           t_q[j][i], p_q[j][i],
+                           _g(lo_q[j][i], 11),
+                           _g(hi_q[j][i], 10))
+        end
+        j < Q && println("-"^13, "+", "-"^64)
+    end
+    println("-"^78)
+
+    # Joint (stacked) β, V, coefnames in `[qXX]var` format — enables
+    # post-estimation tests across quantiles via `test_sureg`.
+    β_joint = reduce(vcat, β0)
+    boot_stack = reduce(hcat, β_boot)              # B × (Q·k)
+    V_joint = Statistics.cov(boot_stack)
+    coefnames_joint = String[]
+    for τ in τs, v in nms
+        push!(coefnames_joint,
+              "[" * Printf.@sprintf("q%02d", round(Int, 100*τ)) * "]" * v)
+    end
+
+    return (; β = β_joint, V = V_joint, coefnames = coefnames_joint,
+              β_by_q = β0, se, t = t_q, p = p_q,
+              ci_lo = lo_q, ci_hi = hi_q,
+              pseudo_R2 = [f.pseudo_R2 for f in fits],
+              varnames = nms, τs, n, reps, df_resid = dofv)
+end
+
+"""
+    svy_mean(df, var; stratum, psu, weight, level=0.95)
+
+Stata-style `svy: mean <var>` — Horvitz–Thompson weighted mean of a single
+variable with Taylor-linearized standard errors under a stratified single-
+stage cluster design. Prints the Stata summary header (Number of strata,
+PSUs, obs, Population size, Design df) followed by a `PrettyTables` block
+with Mean / Linearized std. err. / confidence interval.
+
+Variance formula: Var(ȳ) ≈ V̂(Σᵢ zᵢ) with zᵢ = wᵢ(yᵢ − ȳ)/Σwᵢ; for each
+stratum `h` with `nₕ` PSUs, `V̂ = Σₕ (nₕ/(nₕ−1)) Σⱼ (uₕⱼ − ūₕ)²` where
+`uₕⱼ = Σᵢ∈PSUⱼ zᵢ`. Equivalent to Stata's default `svyset ..., ` (with-
+replacement PSU sampling, so no FPC is applied). Degrees of freedom =
+`#PSUs − #strata`, used for the t-based CI.
+
+Example:
+
+    svy_mean(df_nh, :hgb; stratum=:strata, psu=:psu, weight=:finalwgt)
+"""
+function svy_mean(df, var; stratum::Symbol, psu::Symbol, weight::Symbol,
+                  level::Float64=0.95)
+    d = DataFrames.dropmissing(df, [Symbol(var), stratum, psu, weight])
+    y = Float64.(_rawval.(d[!, Symbol(var)]))
+    w = Float64.(_rawval.(d[!, weight]))
+    h = _rawval.(d[!, stratum])
+    c = _rawval.(d[!, psu])
+
+    n    = length(y)
+    W    = sum(w)
+    ybar = sum(w .* y) / W
+    z    = w .* (y .- ybar) ./ W               # Taylor-linearized score
+
+    V = 0.0
+    strata  = unique(h)
+    n_psu   = 0
+    for hv in strata
+        in_h   = h .== hv
+        psus_h = c[in_h]
+        z_h    = z[in_h]
+        ups    = unique(psus_h)
+        nh     = length(ups)
+        n_psu += nh
+        nh < 2 && continue
+        u = [sum(z_h[psus_h .== p]) for p in ups]
+        ū = Statistics.mean(u)
+        V += (nh / (nh - 1)) * sum((u .- ū).^2)
+    end
+    se    = sqrt(V)
+    n_str = length(strata)
+    dfree = n_psu - n_str
+    tcrit = Distributions.quantile(Distributions.TDist(dfree), 1 - (1-level)/2)
+    ci_lo = ybar - tcrit * se
+    ci_hi = ybar + tcrit * se
+
+    _fmtn(x) = replace(string(x), r"(\d)(?=(\d{3})+$)" => s"\1,")
+
+    println("Survey: Mean estimation\n")
+    Printf.@printf("Number of strata = %-13d Number of obs   = %11s\n",
+                   n_str, _fmtn(n))
+    Printf.@printf("Number of PSUs   = %-13d Population size = %11s\n",
+                   n_psu, _fmtn(Int(round(W))))
+    Printf.@printf("%33s Design df       = %11d\n", "", dfree)
+    println()
+
+    lvl = round(Int, 100 * level)
+    result = DataFrames.DataFrame(
+        Variable = [string(var)],
+        Mean     = [ybar],
+        StdErr   = [se],
+        CI_low   = [ci_lo],
+        CI_high  = [ci_hi],
+    )
+    _pt_compat(result;
+        header     = (["",         "",     "Linearized", "",                "" ],
+                      ["Variable", "Mean", "std. err.",
+                       "[$(lvl)% CI low]", "[$(lvl)% CI high]"]),
+        formatters = PrettyTables.ft_printf("%.5f", 2:5),
+        alignment  = [:l, :r, :r, :r, :r],
+    )
+    return (; mean=ybar, se=se, ci=(ci_lo, ci_hi), df=dfree,
+              n_obs=n, n_strata=n_str, n_psu, popsize=W)
+end
+
+"""
+    mean_stata(df, var; level=0.95)
+
+Stata-style `mean <var>` — plain sample mean with SE = `s/√n` and a
+t-based CI on df = n − 1. No weights, no clustering. Prints the compact
+Stata "Mean estimation" header and a `PrettyTables` block with
+Mean / Std. err. / CI.
+
+Example:
+
+    mean_stata(df_nh, :hgb)
+"""
+function mean_stata(df, var; level::Float64=0.95)
+    vs = Symbol(var)
+    d  = DataFrames.dropmissing(df, [vs])
+    y  = Float64.(_rawval.(d[!, vs]))
+    n  = length(y)
+    μ  = Statistics.mean(y)
+    s  = Statistics.std(y)           # sample std, ddof = 1
+    se = s / sqrt(n)
+    dfree = n - 1
+    tcrit = Distributions.quantile(Distributions.TDist(dfree), 1 - (1-level)/2)
+    ci_lo = μ - tcrit * se
+    ci_hi = μ + tcrit * se
+
+    _fmtn(x) = replace(string(x), r"(\d)(?=(\d{3})+$)" => s"\1,")
+    Printf.@printf("Mean estimation                          Number of obs = %s\n\n",
+                   _fmtn(n))
+
+    lvl = round(Int, 100 * level)
+    result = DataFrames.DataFrame(
+        Variable = [string(var)],
+        Mean     = [μ],
+        StdErr   = [se],
+        CI_low   = [ci_lo],
+        CI_high  = [ci_hi],
+    )
+    _pt_compat(result;
+        header     = ["Variable", "Mean", "Std. err.",
+                      "[$(lvl)% CI low]", "[$(lvl)% CI high]"],
+        formatters = PrettyTables.ft_printf("%.5f", 2:5),
+        alignment  = [:l, :r, :r, :r, :r],
+    )
+    return (; mean=μ, se=se, ci=(ci_lo, ci_hi), df=dfree, n_obs=n)
+end
+
+"""
+    svy_regress(df, y, xs; stratum, psu, weight, level=0.95)
+
+Stata-style `svy: regress <y> <xs…>` — weighted OLS with Taylor-linearized
+(Horvitz–Thompson) cluster-robust standard errors under a stratified
+single-stage cluster design. Prints the Stata header block (strata, PSUs,
+obs, popsize, design df, model F, Prob > F, R²) followed by a
+`PrettyTables` coefficient table with slopes first and `_cons` last.
+
+Variance: `V̂(β̂) = A⁻¹ · V̂(Σ uᵢ) · A⁻¹` where `A = X'WX`, scores
+`uᵢ = wᵢ xᵢ eᵢ`, and `V̂(Σ uᵢ) = Σₕ nₕ/(nₕ−1) · Σⱼ (Sₕⱼ − S̄ₕ)(Sₕⱼ − S̄ₕ)'`
+with `Sₕⱼ = Σᵢ∈PSUⱼ uᵢ`. Degrees of freedom = #PSUs − #strata. The model
+F uses Stata's first-order-corrected denominator df `= design_df − q + 1`.
+
+Example:
+
+    svy_regress(df_nh, :hgb, [:age, :female];
+                stratum=:strata, psu=:psu, weight=:finalwgt)
+"""
+function svy_regress(df, y, xs::AbstractVector; stratum::Symbol, psu::Symbol,
+                     weight::Symbol, level::Float64=0.95)
+    ys   = Symbol(y)
+    xsv  = [Symbol(v) for v in xs]
+    d    = DataFrames.dropmissing(df, unique([ys, xsv..., stratum, psu, weight]))
+    Y    = Float64.(_rawval.(d[!, ys]))
+    w    = Float64.(_rawval.(d[!, weight]))
+    h    = _rawval.(d[!, stratum])
+    c    = _rawval.(d[!, psu])
+    Xcols = [Float64.(_rawval.(d[!, v])) for v in xsv]
+    X    = hcat(ones(length(Y)), Xcols...)
+    cn   = vcat("_cons", string.(xsv))   # index 1 is intercept
+
+    n    = length(Y)
+    k    = size(X, 2)
+    q    = k - 1                         # slopes (exclude intercept)
+
+    # β̂ from weighted LS
+    XW   = X .* w
+    A    = XW' * X
+    β    = A \ (XW' * Y)
+    e    = Y .- X * β
+    U    = XW .* e                       # n × k  (uᵢ = wᵢ xᵢ eᵢ)
+
+    # Cluster/stratum aggregation
+    strata = unique(h)
+    V_meat = zeros(k, k)
+    n_psu  = 0
+    for hv in strata
+        in_h = h .== hv
+        psus = c[in_h]
+        U_h  = U[in_h, :]
+        ups  = unique(psus)
+        nh   = length(ups)
+        n_psu += nh
+        nh < 2 && continue
+        S = reduce(vcat, [sum(U_h[psus .== p, :]; dims=1) for p in ups])  # nh × k
+        S̄ = Statistics.mean(S; dims=1)
+        centered = S .- S̄
+        V_meat .+= (nh / (nh - 1)) .* (centered' * centered)
+    end
+    A_inv = LinearAlgebra.inv(A)
+    V     = A_inv * V_meat * A_inv
+    se    = sqrt.(max.(LinearAlgebra.diag(V), 0.0))
+
+    n_str = length(strata)
+    dfree = n_psu - n_str
+
+    t_stat = β ./ se
+    tcrit  = Distributions.quantile(Distributions.TDist(dfree), 1 - (1-level)/2)
+    pvals  = 2 .* (1 .- Distributions.cdf.(Distributions.TDist(dfree), abs.(t_stat)))
+    ci_lo  = β .- tcrit .* se
+    ci_hi  = β .+ tcrit .* se
+
+    # Model F (slopes = 0), first-order corrected df
+    slope  = 2:k
+    Wstat  = β[slope]' * (V[slope, slope] \ β[slope])
+    Fstat  = Wstat / q
+    df2    = dfree - q + 1
+    pF     = 1 - Distributions.cdf(Distributions.FDist(q, df2), Fstat)
+
+    # Weighted R²
+    ybar_w = sum(w .* Y) / sum(w)
+    rss_w  = sum(w .* e.^2)
+    tss_w  = sum(w .* (Y .- ybar_w).^2)
+    r2     = 1 - rss_w / tss_w
+    W_tot  = sum(w)
+
+    _fmtn(x) = replace(string(x), r"(\d)(?=(\d{3})+$)" => s"\1,")
+
+    println("Survey: Linear regression\n")
+    Printf.@printf("Number of strata = %-30dNumber of obs   = %11s\n",
+                   n_str, _fmtn(n))
+    Printf.@printf("Number of PSUs   = %-30dPopulation size = %11s\n",
+                   n_psu, _fmtn(Int(round(W_tot))))
+    Printf.@printf("%-49sDesign df       = %11d\n", "", dfree)
+    Printf.@printf("%-49s%-16s= %11.2f\n", "", "F($q, $df2)",  Fstat)
+    Printf.@printf("%-49s%-16s= %11.4f\n", "", "Prob > F",      pF)
+    Printf.@printf("%-49s%-16s= %11.4f\n", "", "R-squared",     r2)
+    println()
+
+    # Coefficient table (slopes first, _cons last)
+    order = vcat(collect(slope), 1)
+    lvl   = round(Int, 100 * level)
+    coef_df = DataFrames.DataFrame(
+        Variable    = cn[order],
+        Coefficient = β[order],
+        StdErr      = se[order],
+        t           = t_stat[order],
+        p           = pvals[order],
+        CI_low      = ci_lo[order],
+        CI_high     = ci_hi[order],
+    )
+    _pt_compat(coef_df;
+        header = (["",          "",            "Linearized", "",  "",      "",                "" ],
+                  [string(ys),  "Coefficient", "std. err.",  "t", "P>|t|",
+                   "[$(lvl)% CI low]", "[$(lvl)% CI high]"]),
+        formatters = vcat(
+            PrettyTables.ft_printf("%.7f", [2, 3, 6, 7]),
+            PrettyTables.ft_printf("%.2f", [4]),
+            PrettyTables.ft_printf("%.3f", [5]),
+        ),
+        alignment  = [:l, :r, :r, :r, :r, :r, :r],
+    )
+
+    return (; β, V, se, t=t_stat, p=pvals, ci_lo, ci_hi,
+              coefnames=cn, n_obs=n, n_strata=n_str, n_psu,
+              popsize=W_tot, df=dfree,
+              F=Fstat, df1=q, df2, pF, r2)
+end
+
+"""
+    regress_cluster(df, y, xs; cluster, weight=nothing, level=0.95)
+
+Stata-style `regress y xs [pweight=w], vce(cluster id)` — weighted OLS
+with one-way cluster-robust standard errors. Uses Stata's hc1-flavoured
+adjustment `(M/(M−1)) · (N−1)/(N−k)` on the meat matrix, t-tests on
+`M − 1` degrees of freedom, model F distributed `F(q, M−1)`, and the
+familiar "(Std. err. adjusted for M clusters in <id>)" banner.
+
+`cluster` is the cluster variable (Symbol); `weight=nothing` runs plain
+OLS, otherwise treats the weights as pweights. Root MSE uses pweights
+normalized to sum to N.
+
+Example:
+
+    df_nh.uniqpsu = 2 .* df_nh.strata .+ df_nh.psu
+    regress_cluster(df_nh, :hgb, [:age, :female];
+                    cluster=:uniqpsu, weight=:finalwgt)
+"""
+function regress_cluster(df, y, xs::AbstractVector; cluster::Symbol,
+                         weight::Union{Symbol,Nothing}=nothing,
+                         level::Float64=0.95)
+    ys     = Symbol(y)
+    xsv    = [Symbol(v) for v in xs]
+    needed = unique(vcat(ys, xsv, cluster))
+    weight !== nothing && push!(needed, weight)
+    d = DataFrames.dropmissing(df, needed)
+    Y = Float64.(_rawval.(d[!, ys]))
+    Xcols = [Float64.(_rawval.(d[!, v])) for v in xsv]
+    X  = hcat(ones(length(Y)), Xcols...)
+    c  = _rawval.(d[!, cluster])
+    w  = weight === nothing ? ones(length(Y)) :
+         Float64.(_rawval.(d[!, weight]))
+    cn = vcat("_cons", string.(xsv))
+
+    n = length(Y); k = size(X, 2); q = k - 1
+
+    XW = X .* w
+    A  = XW' * X
+    β  = A \ (XW' * Y)
+    e  = Y .- X * β
+    U  = XW .* e                          # scores uᵢ = wᵢ xᵢ eᵢ
+
+    clusters = unique(c)
+    M    = length(clusters)
+    meat = zeros(k, k)
+    for cl in clusters
+        sel = c .== cl
+        s   = sum(U[sel, :]; dims=1)       # 1 × k
+        meat .+= s' * s
+    end
+    adj   = (M / (M - 1)) * ((n - 1) / (n - k))
+    A_inv = LinearAlgebra.inv(A)
+    V     = adj .* (A_inv * meat * A_inv)
+    se    = sqrt.(max.(LinearAlgebra.diag(V), 0.0))
+
+    dfree  = M - 1
+    t_stat = β ./ se
+    tcrit  = Distributions.quantile(Distributions.TDist(dfree), 1 - (1-level)/2)
+    pvals  = 2 .* (1 .- Distributions.cdf.(Distributions.TDist(dfree), abs.(t_stat)))
+    ci_lo  = β .- tcrit .* se
+    ci_hi  = β .+ tcrit .* se
+
+    slope = 2:k
+    Wstat = β[slope]' * (V[slope, slope] \ β[slope])
+    Fstat = Wstat / q
+    pF    = 1 - Distributions.cdf(Distributions.FDist(q, dfree), Fstat)
+
+    # Weighted R² (sums weighted by w)
+    ybar_w = sum(w .* Y) / sum(w)
+    rss_w  = sum(w .* e.^2)
+    tss_w  = sum(w .* (Y .- ybar_w).^2)
+    r2     = 1 - rss_w / tss_w
+
+    # Root MSE: normalize pweights to sum to N (Stata convention for pweights).
+    w_norm = w .* (n / sum(w))
+    rmse   = sqrt(sum(w_norm .* e.^2) / (n - k))
+
+    _fmtn(x) = replace(string(x), r"(\d)(?=(\d{3})+$)" => s"\1,")
+
+    Printf.@printf("%-48s%-18s= %10s\n",  "Linear regression", "Number of obs", _fmtn(n))
+    Printf.@printf("%-48s%-18s= %10.2f\n", "", "F($q, $dfree)",  Fstat)
+    Printf.@printf("%-48s%-18s= %10.4f\n", "", "Prob > F",       pF)
+    Printf.@printf("%-48s%-18s= %10.4f\n", "", "R-squared",      r2)
+    Printf.@printf("%-48s%-18s= %10.4f\n", "", "Root MSE",       rmse)
+    println()
+    Printf.@printf("%78s\n", "(Std. err. adjusted for $M clusters in $cluster)")
+
+    order  = vcat(collect(slope), 1)
+    lvl    = round(Int, 100 * level)
+    coef_df = DataFrames.DataFrame(
+        Variable    = cn[order],
+        Coefficient = β[order],
+        StdErr      = se[order],
+        t           = t_stat[order],
+        p           = pvals[order],
+        CI_low      = ci_lo[order],
+        CI_high     = ci_hi[order],
+    )
+    _pt_compat(coef_df;
+        header = (["",          "",            "Robust",     "",  "",      "",                "" ],
+                  [string(ys),  "Coefficient", "std. err.",  "t", "P>|t|",
+                   "[$(lvl)% CI low]", "[$(lvl)% CI high]"]),
+        formatters = vcat(
+            PrettyTables.ft_printf("%.7f", [2, 3, 6, 7]),
+            PrettyTables.ft_printf("%.2f", [4]),
+            PrettyTables.ft_printf("%.3f", [5]),
+        ),
+        alignment = [:l, :r, :r, :r, :r, :r, :r],
+    )
+    return (; β, V, se, t=t_stat, p=pvals, ci_lo, ci_hi, coefnames=cn,
+              n_obs=n, M, df=dfree, F=Fstat, df1=q, df2=dfree, pF, r2, rmse)
+end
+
+"""
+    estat_hettest(model, df; vars=nothing, iid=false, mtest=false)
+
+Breusch-Pagan / Cook-Weisberg test for heteroskedasticity.
+Replicates Stata's `estat hettest [varlist] [, iid] [, mtest]`.
+
+- No `vars`:  test against fitted values (1 df).
+- With `vars`: test against the listed variables (joint + individual).
+- `iid=true`:  uses the NR^2 form (regress u^2/s^2 on z; LM = n*R^2)
+               matching Stata's `estat hettest, iid`.
+- `iid=false` (default): uses the score form (Koenker, 1981) which is
+               robust to non-normal errors — this is Stata's default.
+- `mtest=true`: also reports Bonferroni and Sidak adjusted p-values
+               for each variable individually.
+"""
+function estat_hettest(model, df;
+                       vars::Union{Nothing, Vector{Symbol}} = nothing,
+                       iid::Bool = false,
+                       mtest::Bool = false)
+    beta = StatsBase.coef(model)
+    nm   = StatsBase.coefnames(model)
+    n    = Int(StatsBase.nobs(model))
+
+    # Get fitted values and residuals
+    # Build yhat from coefficients and data
+    yhat = zeros(n)
+    uhat = zeros(n)
+
+    # Use dropmissing on needed columns
+    needed = Symbol[]
+    for name in nm
+        name == "(Intercept)" && continue
+        s = Symbol(strip(split(name, ":")[1]))
+        hasproperty(df, s) && push!(needed, s)
+    end
+    resp = Symbol(split(string(FixedEffectModels.formula(model).lhs), "(")[end] |>
+                  s -> replace(s, ")" => ""))
+    push!(needed, resp)
+    unique!(needed)
+    dfc = dropmissing(df, needed)
+
+    # Predict using FixedEffectModels
+    yhat = FixedEffectModels.predict(model, dfc)
+    uhat = Float64.(dfc[!, resp]) .- yhat
+
+    sigma2 = sum(uhat.^2) / n     # MLE variance (divide by n)
+
+    if vars === nothing
+        z = hcat(ones(n), yhat)
+        varnames = ["Fitted values"]
+        q = 1
+    else
+        z = hcat(ones(n), [Float64.([_rawval(x) for x in dfc[!, v]]) for v in vars]...)
+        varnames = string.(vars)
+        q = length(vars)
+    end
+
+    # Helper: compute BP chi2 for given dep variable and regressors
+    function _bp_chi2(dep, z, is_iid)
+        b = z \ dep
+        fitted = z * b
+        if is_iid
+            # Koenker (iid) form: n * R^2 of e^2 on z
+            ss_tot = sum((dep .- mean(dep)).^2)
+            ss_res = sum((dep .- fitted).^2)
+            return ss_tot > 0 ? n * (1 - ss_res / ss_tot) : 0.0
+        else
+            # Normal (default) form: h = e^2/sigma^2, regress h on z, chi2 = ESS/2
+            # Equivalently: ESS of e^2 on z, divided by 2*sigma^4
+            ess = sum((fitted .- mean(dep)).^2)
+            return ess / (2 * sigma2^2)
+        end
+    end
+
+    chi2 = _bp_chi2(uhat.^2, z, iid)
+    pval = 1 - cdf(Chisq(q), chi2)
+
+    # Print Stata-style output
+    form = iid ? "i.i.d." : "Normal"
+    if mtest && vars !== nothing && length(vars) > 1
+        # mtest format: individual + simultaneous table
+        println("\nBreusch-Pagan / Cook-Weisberg test for heteroskedasticity")
+        @printf("Assumption: %s error terms\n", form)
+        println("H0: Constant variance\n")
+        println("-"^38)
+        @printf("    Variable |      chi2   df        p\n")
+        println("-"^13, "+", "-"^24)
+
+        dep_sq = uhat.^2
+        for v in vars
+            zj = hcat(ones(n), Float64.([_rawval(x) for x in dfc[!, v]]))
+            chi2_j = _bp_chi2(dep_sq, zj, iid)
+            p_j = 1 - cdf(Chisq(1), chi2_j)
+            @printf("%12s | %9.2f    1   %.4f*\n", v, chi2_j, p_j)
+        end
+        println("-"^13, "+", "-"^24)
+        @printf("Simultaneous | %9.2f    %d   %.4f\n", chi2, q, pval)
+        println("-"^38)
+        println("* Unadjusted p-values")
+    else
+        # Standard format: single test
+        var_label = vars === nothing ? "Fitted values of $(resp)" : join(varnames, ", ")
+        println("\nBreusch-Pagan / Cook-Weisberg test for heteroskedasticity")
+        @printf("Assumption: %s error terms\n", form)
+        println("Variable: $(var_label)")
+        println("\nH0: Constant variance\n")
+        @printf("    chi2(%d) = %6.2f\n", q, chi2)
+        @printf("Prob > chi2 = %.4f\n", pval)
+    end
+
+    return (; chi2, df = q, p = pval)
+end
+```
+
+# 5 GLS regression
+
+## 5.1 Introduction
+
+## 5.2 GLS and FGLS regression
+
+### 5.2.1 GLS for heteroskedastic errors
+
+### 5.2.2 GLS and FGLS
+
+### 5.2.3 Weighted least squares and robust standard errors
+
+### 5.2.4 Leading examples
+
+## 5.3 Modeling heteroskedastic data
+
+### 5.3.1 Simulated dataset
+
+The DGP is: `y = 1 + 1·x2 + 1·x3 + u` where `u = sqrt(exp(-1 + 0.2·x2))·e`, with `x2, x3, e ~ N(0, 5²)`. Errors are heteroskedastic with `V[u|x] = exp(-1 + 0.2·x2)`.
+
+```{julia}
+#=
+* This uses generated data
+* Model is  y = 1 + 1*x2 + 1*x3 + u
+* where     u = sqrt(exp(-1+0.2*x2))*e
+*           x1 ~ N(0, 5^2)
+*           x2 ~ N(0, 5^2)
+*           e ~ N(0, 5^2)
+* Errors are conditionally heteroskedastic with V[u|x]=exp(-1+1*x2)
+=#
+# Generated data for heteroskedasticity example
+# Read from CSV exported by Stata (ensures identical data across both notebooks)
+df5 = CSV.read("musr/5_3_1.csv", DataFrame)
+for c in names(df5)
+    df5[!, c] = Float64.(df5[!, c])
+end
+DataFrames.describe(df5)
+```
+
+```{julia}
+#=
+clear all
+* Generated data for heteroskedasticity example
+set seed 10101
+quietly set obs 500
+generate double x2 = 5*rnormal(0)
+generate double x3 = 5*rnormal(0)
+generate double e  = 5*rnormal(0)
+generate double u  = sqrt(exp(-1+0.2*x2))*e
+generate double y  = 1 + 1*x2 + 1*x3 + u
+summarize
+export delimited using "musr/5_3_1.csv", replace
+=#
+summarize_stata(df5)
+```
+
+### 5.3.2 OLS estimation
+
+```{julia}
+#=
+* OLS regression with default standard errors
+regress y x2 x3
+=#
+# OLS with default SE
+ols5 = FixedEffectModels.reg(df5, @formula(y ~ x2 + x3))
+```
+
+```{julia}
+#=
+* OLS regression with heteroskedasticity-robust standard errors
+regress y x2 x3, vce(robust) 
+=#
+#* OLS regression with default standard errors
+#regress y x2 x3
+regress_stata(df5, :y, [:x2, :x3])
+```
+
+```{julia}
+# OLS with heteroskedasticity-robust SE
+ols5r = FixedEffectModels.reg(df5, @formula(y ~ x2 + x3), Vcov.robust())
+```
+
+```{julia}
+#* OLS regression with heteroskedasticity-robust standard errors
+#regress y x2 x3, vce(robust) 
+regress_stata(df5, :y, [:x2, :x3]; vcov=Vcov.robust())
+```
+
+### 5.3.3 Detecting heteroskedasticity
+
+```{julia}
+#=
+* Heteroskedasticity diagnostic scatterplot
+quietly regress y x2 x3
+predict double uhat, resid
+generate double absu = abs(uhat)
+quietly twoway (scatter absu x2) (lowess absu x2, bw(0.4) lw(thick)), ///
+  scale(1.2) xscale(titleg(*5)) yscale(titleg(*5))                    ///
+  plotr(style(none)) name(gls1)
+quietly twoway (scatter absu x3) (lowess absu x3, bw(0.4) lw(thick)), ///
+  scale(1.2) xscale(titleg(*5)) yscale(titleg(*5))                    ///
+  plotr(style(none)) name(gls2)
+graph combine gls1 gls2
+=#
+# Heteroskedasticity diagnostic scatterplots
+yhat5 = FixedEffectModels.predict(ols5, df5)
+df5.uhat = df5.y .- yhat5
+df5.absu = abs.(df5.uhat)
+
+# Lowess smoother via Loess.jl
+lo2 = Loess.loess(df5.x2, df5.absu; span = 0.4)
+lo3 = Loess.loess(df5.x3, df5.absu; span = 0.4)
+
+fig5 = Figure(size = (900, 400))
+ax1 = Axis(fig5[1, 1], xlabel = "x2", ylabel = "|uhat|")
+scatter!(ax1, df5.x2, df5.absu, markersize = 4)
+xs2 = sort(df5.x2)
+lines!(ax1, xs2, Loess.predict(lo2, xs2), color = :red, linewidth = 2)
+
+ax2 = Axis(fig5[1, 2], xlabel = "x3", ylabel = "|uhat|")
+scatter!(ax2, df5.x3, df5.absu, markersize = 4)
+xs3 = sort(df5.x3)
+lines!(ax2, xs3, Loess.predict(lo3, xs3), color = :red, linewidth = 2)
+fig5
+```
+
+```{julia}
+#=
+graph export musr/mus05gls_fig1.eps, replace
+drop uhat
+=#
+# Breusch–Pagan test of heteroskedasticity (regress uhat² on regressors)
+df5.uhat2 = df5.uhat.^2
+m_bp5 = FixedEffectModels.reg(df5, @formula(uhat2 ~ x2 + x3))
+LM = nrow(df5) * StatsBase.r2(m_bp5)
+@printf("BP LM(2) = %.4f, p = %.4f\n", LM, 1 - cdf(Chisq(2), LM))
+```
+
+```{julia}
+#=
+* Test heteroskedasticity depending on x2, x3, and x2 and x3
+estat hettest x2 x3, mtest
+=#
+# estat hettest x2 x3, mtest  (individual + joint tests with Bonferroni/Sidak corrections)
+p_individual = Float64[]
+for v in (:x2, :x3)
+    m = FixedEffectModels.reg(df5, term(:uhat2) ~ term(v))
+    LM = nrow(df5) * StatsBase.r2(m)
+    p = 1 - cdf(Chisq(1), LM)
+    push!(p_individual, p)
+    @printf("BP test on %s only: LM(1) = %.4f, p = %.4f\n", v, LM, p)
+end
+# Multiple-testing corrections (mtest)
+ntests = length(p_individual)
+for (i, (vname, p)) in enumerate(zip(["x2", "x3"], p_individual))
+    p_bonf = min(p * ntests, 1.0)
+    p_sidak = 1 - (1 - p)^ntests
+    @printf("  %s: Bonferroni p = %.4f, Šidák p = %.4f\n", vname, p_bonf, p_sidak)
+end
+# Joint test
+m_joint = FixedEffectModels.reg(df5, @formula(uhat2 ~ x2 + x3))
+LM_joint = nrow(df5) * StatsBase.r2(m_joint)
+@printf("BP joint test on x2 x3: LM(2) = %.4f, p = %.4f\n",
+        LM_joint, 1 - cdf(Chisq(2), LM_joint))
+```
+
+```{julia}
+#=
+* Not included in book
+* Separate tests of heteroskedasticity using iid version of hettest
+estat hettest x2, iid
+estat hettest x3, iid
+estat hettest x2 x3, iid
+=#
+# estat hettest x2 x3, mtest
+estat_hettest(ols5, df5; vars=[:x2, :x3], mtest=true)
+```
+
+```{julia}
+# Not included in book
+# Separate tests of heteroskedasticity using iid version of hettest
+estat_hettest(ols5, df5; vars=[:x2], iid=true)
+estat_hettest(ols5, df5; vars=[:x3], iid=true)
+estat_hettest(ols5, df5; vars=[:x2, :x3], iid=true)
+```
+
+### 5.3.4 FGLS estimation
+
+```{julia}
+#=
+clear all
+* Generated data for heteroskedasticity example
+set seed 10101
+quietly set obs 500
+generate double x2 = 5*rnormal(0)
+generate double x3 = 5*rnormal(0)
+generate double e  = 5*rnormal(0)
+generate double u  = sqrt(exp(-1+0.2*x2))*e
+generate double y  = 1 + 1*x2 + 1*x3 + u
+export delimited using "musr/5_3_1.csv", replace
+
+* FGLS: First step get estimate of skedasticity function
+quietly regress y x2 x3                  // get bols
+predict double uhat, resid
+generate double uhatsq = uhat^2          // get squared residual 
+generate double one = 1 
+* NLS of uhatsq on exp(z'a)                      
+capture nl (uhatsq = exp({xb: x2 one})), nolog   
+=#
+# FGLS step 1: estimate skedasticity function via NLS:  σ²(x) = exp(α0 + α1·x2)
+function neg_lik(α, x, y)
+    pred = exp.(α[1] .+ α[2] .* x)
+    sum((y .- pred).^2)
+end
+res_α = optimize(α -> neg_lik(α, df5.x2, df5.uhat2), [0.0, 0.0])
+α_hat = Optim.minimizer(res_α)
+df5.varu = exp.(α_hat[1] .+ α_hat[2] .* df5.x2)
+@printf("α̂ = (%.4f, %.4f)\n", α_hat[1], α_hat[2])
+```
+
+```{julia}
+#=
+*get sigmahat^2
+predict double varu, yhat               
+=#
+# FGLS step 2: weighted regression with weights 1/varu
+df5.w_fgls = 1 ./ df5.varu
+fgls5 = FixedEffectModels.reg(df5, @formula(y ~ x2 + x3), weights = :w_fgls)
+```
+
+```{julia}
+#=
+* FGLS: Second step get estimate of skedasticity function
+regress y x2 x3 [aweight=1/varu] 
+=#
+# FGLS step 2: weighted regression with weights 1/varu
+regress_stata(df5, :y, [:x2, :x3]; weights = :w_fgls)
+```
+
+### 5.3.5 WLS estimation
+
+```{julia}
+#=
+* WLS estimator is FGLS with robust estimate of VCE
+regress y x2 x3 [aweight=1/varu], vce(robust)
+=#
+# WLS = FGLS with robust SE
+wls5 = FixedEffectModels.reg(df5, @formula(y ~ x2 + x3), Vcov.robust(), weights = :w_fgls)
+```
+
+```{julia}
+#=
+* FGLS: First step get estimate of skedasticity function
+quietly regress y x2 x3 if _n < 451
+quietly predict double yhat1
+quietly regress y x2 x3 [aweight=1/varu] if _n < 451
+quietly predict double yhat2
+generate double perr1 = y - yhat1
+generate double perr2 = y - yhat2
+summarize y yhat1 yhat2 perr1 perr2 if _n > 450
+=#
+# WLS = FGLS with robust SE
+wls5 = regress_stata(df5, :y, [:x2, :x3]; weights = :w_fgls, vcov=Vcov.robust())
+```
+
+```{julia}
+# Prediction comparison: OLS vs WLS on first 450 obs, evaluate on last 50
+df_train = df5[1:450, :]
+ols_sub  = FixedEffectModels.reg(df_train, @formula(y ~ x2 + x3))
+wls_sub  = FixedEffectModels.reg(df_train, @formula(y ~ x2 + x3), weights = :w_fgls)
+
+yhat1 = StatsBase.coef(ols_sub)[1] .+ StatsBase.coef(ols_sub)[2] .* df5.x2 .+ StatsBase.coef(ols_sub)[3] .* df5.x3
+yhat2 = StatsBase.coef(wls_sub)[1] .+ StatsBase.coef(wls_sub)[2] .* df5.x2 .+ StatsBase.coef(wls_sub)[3] .* df5.x3
+perr1 = df5.y .- yhat1
+perr2 = df5.y .- yhat2
+
+test_df = DataFrame(y = df5.y[451:end],
+                    yhat_ols = yhat1[451:end], yhat_wls = yhat2[451:end],
+                    err_ols  = perr1[451:end], err_wls  = perr2[451:end])
+DataFrames.describe(test_df)
+```
+
+```{julia}
+summarize_stata(test_df)
+```
+
+## 5.4 System of linear regressions
+
+### 5.4.1 SUR model
+
+### 5.4.2 The sureg command
+
+### 5.4.3 Application to two categories of expenditures
+
+```{julia}
+#=
+* Summary statistics for seemingly unrelated regressions example
+clear all
+use musr/mus05surdata.dta
+summarize ldrugexp ltotothr age age2 educyr actlim totchr medicaid private
+=#
+# Summary statistics for seemingly unrelated regressions example
+df_sur = DataFrames.DataFrame(ReadStatTables.readstat("musr/mus05surdata.dta"))
+DataFrames.describe(df_sur[:, [:ldrugexp, :ltotothr, :age, :age2, :educyr, :actlim, :totchr, :medicaid, :private]])
+```
+
+```{julia}
+#=
+* Not included in book
+summarize ldrugexp if ldrugexp!=. & ltotothr!=.
+=#
+summarize_stata(df_sur, [:ldrugexp, :ltotothr, :age, :age2, :educyr, :actlim, :totchr, :medicaid, :private])
+```
+
+```{julia}
+#=
+* SUR estimation of a seemingly unrelated regressions model
+sureg (ldrugexp age age2 actlim totchr medicaid private) ///
+  (ltotothr age age2 educyr actlim totchr private), corr
+=#
+# Not included in book
+sub = dropmissing(df_sur, [:ldrugexp, :ltotothr])
+DataFrames.describe(sub[:, [:ldrugexp]])
+```
+
+```{julia}
+summarize_stata(sub, [:ldrugexp])
+```
+
+```{julia}
+# Not included in book
+summarize_stata(sub)
+```
+
+
+```{julia}
+# SUR estimation (FGLS) — sureg (ldrugexp ...) (ltotothr ...), corr
+# Step 1: equation-by-equation OLS to get Σ̂; Step 2: FGLS using Σ⁻¹ ⊗ I_N
+sur_data = dropmissing(df_sur, [:ldrugexp, :ltotothr, :age, :age2, :educyr, :actlim, :totchr, :medicaid, :private])
+Ns = nrow(sur_data)
+
+# Design matrices (equation-specific regressors)
+X1 = hcat(ones(Ns), sur_data.age, sur_data.age2, sur_data.actlim,
+          sur_data.totchr, sur_data.medicaid, sur_data.private)
+X2 = hcat(ones(Ns), sur_data.age, sur_data.age2, sur_data.educyr,
+          sur_data.actlim, sur_data.totchr, sur_data.private)
+Y1 = Float64.(sur_data.ldrugexp)
+Y2 = Float64.(sur_data.ltotothr)
+cn1 = ["_cons", "age", "age2", "actlim", "totchr", "medicaid", "private"]
+cn2 = ["_cons", "age", "age2", "educyr", "actlim", "totchr", "private"]
+
+# Step 1: OLS residuals
+β1_ols = X1 \ Y1;  e1 = Y1 - X1 * β1_ols
+β2_ols = X2 \ Y2;  e2 = Y2 - X2 * β2_ols
+Σ̂ = [e1'e1 e1'e2; e2'e1 e2'e2] ./ Ns
+
+# Step 2: FGLS (SUR)
+Σinv = LinearAlgebra.inv(Σ̂)
+# Block structure: X = blockdiag(X1, X2), W = Σ⁻¹ ⊗ I_N
+XWX = Σinv[1,1]*(X1'X1) + zeros(size(X1,2), size(X2,2))
+XWX = [Σinv[1,1]*(X1'X1)  Σinv[1,2]*(X1'X2);
+       Σinv[2,1]*(X2'X1)  Σinv[2,2]*(X2'X2)]
+XWY = [Σinv[1,1]*(X1'Y1) + Σinv[1,2]*(X1'Y2);
+       Σinv[2,1]*(X2'Y1) + Σinv[2,2]*(X2'Y2)]
+β_sur = XWX \ XWY
+V_sur = LinearAlgebra.inv(XWX)
+se_sur = sqrt.(max.(LinearAlgebra.diag(V_sur), 0.0))
+
+k1 = size(X1, 2); k2 = size(X2, 2)
+println("=== SUR (FGLS) Equation 1: ldrugexp ===")
+_pt_compat(
+    DataFrame(variable=cn1, Coef=β_sur[1:k1], SE=se_sur[1:k1],
+              z=β_sur[1:k1]./se_sur[1:k1]);
+    formatters=PrettyTables.ft_printf("%.6f", 2:4))
+println("\n=== SUR (FGLS) Equation 2: ltotothr ===")
+_pt_compat(
+    DataFrame(variable=cn2, Coef=β_sur[k1+1:end], SE=se_sur[k1+1:end],
+              z=β_sur[k1+1:end]./se_sur[k1+1:end]);
+    formatters=PrettyTables.ft_printf("%.6f", 2:4))
+
+# Cross-equation residual correlation (corr option)
+rho = Σ̂[1,2] / sqrt(Σ̂[1,1] * Σ̂[2,2])
+@printf("\nCorrelation matrix of residuals:\n  ldrugexp  ltotothr\n  1.0000    %.4f\n  %.4f    1.0000\n", rho, rho)
+@printf("Breusch-Pagan test of independence: chi2(1) = %.3f, Pr = %.4f\n",
+        Ns * rho^2, 1 - cdf(Chisq(1), Ns * rho^2))
+
+# Save OLS-based models for later use (bootstrap, testparm)
+eq1 = FixedEffectModels.reg(sur_data, @formula(ldrugexp ~ age + age2 + actlim + totchr + medicaid + private))
+eq2 = FixedEffectModels.reg(sur_data, @formula(ltotothr ~ age + age2 + educyr + actlim + totchr + private))
+```
+
+```{julia}
+#* SUR estimation of a seemingly unrelated regressions model
+#sureg (ldrugexp age age2 actlim totchr medicaid private) ///
+#  (ltotothr age age2 educyr actlim totchr private), corr
+sureg(df_sur,
+      :ldrugexp => [:age, :age2, :actlim, :totchr, :medicaid, :private],
+      :ltotothr => [:age, :age2, :educyr, :actlim, :totchr, :private])
+```
+
+### 5.4.4 Robust standard errors
+
+```{julia}
+#=
+* Bootstrap to get heteroskedasticity-robust SEs for SUR estimator 
+bootstrap, reps(400) seed(10101) nodots: sureg        ///
+  (ldrugexp age age2 actlim totchr medicaid private)  ///
+  (ltotothr age age2 educyr actlim totchr private) 
+=#
+# Bootstrap to obtain SEs for the two SUR equations (B = 400)
+Random.seed!(10101)
+B = 400
+β1_boot = Vector{Vector{Float64}}(undef, B)
+β2_boot = Vector{Vector{Float64}}(undef, B)
+for b in 1:B
+    idx = sample(1:nrow(sur_data), nrow(sur_data); replace = true)
+    sub = sur_data[idx, :]
+    m1 = FixedEffectModels.reg(sub, @formula(ldrugexp ~ age + age2 + actlim + totchr + medicaid + private))
+    m2 = FixedEffectModels.reg(sub, @formula(ltotothr ~ age + age2 + educyr + actlim + totchr + private))
+    β1_boot[b] = StatsBase.coef(m1)
+    β2_boot[b] = StatsBase.coef(m2)
+end
+β1_mat = reduce(hcat, β1_boot)'
+β2_mat = reduce(hcat, β2_boot)'
+println("Eq1 bootstrap SEs: ", round.(std(β1_mat, dims = 1), digits = 4))
+println("Eq2 bootstrap SEs: ", round.(std(β2_mat, dims = 1), digits = 4))
+```
+
+```{julia}
+#* Bootstrap to get heteroskedasticity-robust SEs for SUR estimator
+#bootstrap, reps(400) seed(10101) nodots: sureg        ///
+#  (ldrugexp age age2 actlim totchr medicaid private)  ///
+#  (ltotothr age age2 educyr actlim totchr private)
+sureg(df_sur,
+      :ldrugexp => [:age, :age2, :actlim, :totchr, :medicaid, :private],
+      :ltotothr => [:age, :age2, :educyr, :actlim, :totchr, :private];
+      reps=400, seed=10101)
+```
+
+### 5.4.5 Testing cross-equation constraints
+
+```{julia}
+#=
+* Test of variables in both equations
+quietly sureg (ldrugexp age age2 actlim totchr medicaid private) ///
+   (ltotothr age age2 educyr actlim totchr private)
+test age age2
+=#
+# Joint Wald test of age and age2 in equation 1
+nm = StatsBase.coefnames(eq1)
+idx = [findfirst(==(n), nm) for n in ("age", "age2")]
+βt  = StatsBase.coef(eq1)[idx]; Vt = StatsBase.vcov(eq1)[idx, idx]
+W = try
+    βt' * LinearAlgebra.inv(Vt) * βt
+catch
+    NaN
+end
+@printf("W(2) = %.4f, p = %.4f\n", W, 1 - cdf(Chisq(2), W))
+```
+
+```{julia}
+#=
+* Test of variables in just the first equation
+test [ldrugexp]age [ldrugexp]age2
+=#
+# Test of age and age2 in equation 1 only (same as above)
+println("Same Wald test on equation 1; see above.")
+```
+
+```{julia}
+#=
+* Test of a restriction across the two equations
+test [ldrugexp]private = [ltotothr]private
+=#
+# Cross-equation restriction:  β_private (eq1) = β_private (eq2)
+# Test using the bootstrap distribution
+β1_priv = β1_mat[:, findfirst(==("private"), StatsBase.coefnames(eq1))]
+β2_priv = β2_mat[:, findfirst(==("private"), StatsBase.coefnames(eq2))]
+diff_b  = β1_priv .- β2_priv
+@printf("mean(diff) = %.4f  bootstrap SE = %.4f  z = %.3f\n",
+        mean(diff_b), std(diff_b), mean(diff_b) / std(diff_b))
+```
+
+```{julia}
+# sureg (ldrugexp age age2 actlim totchr medicaid private) ///
+#       (ltotothr age age2 educyr actlim totchr private)
+# test age age2
+#
+# Joint test of age and age2 across BOTH equations (4 restrictions).
+# Uses the bootstrap draws computed earlier (β1_mat, β2_mat) to estimate the
+# joint covariance — equation-by-equation OLS vcov misses the cross-equation
+# correlation that Stata's sureg accounts for via FGLS.
+i1 = [findfirst(==(n), StatsBase.coefnames(eq1)) for n in ("age", "age2")]
+i2 = [findfirst(==(n), StatsBase.coefnames(eq2)) for n in ("age", "age2")]
+
+β_joint = vcat(StatsBase.coef(eq1)[i1], StatsBase.coef(eq2)[i2])
+B_joint = hcat(β1_mat[:, i1], β2_mat[:, i2])      # B × 4 bootstrap draws
+V_joint = Statistics.cov(B_joint)
+
+W = β_joint' * (V_joint \ β_joint)
+q = length(β_joint)
+p = 1 - Distributions.cdf(Distributions.Chisq(q), W)
+Printf.@printf("Joint Wald test: H0 : age = age2 = 0 in both equations\n")
+Printf.@printf("  chi2(%d) = %.4f   p = %.4f\n", q, W, p)
+```
+
+```{julia}
+#* Test of variables in both equations
+#quietly sureg (ldrugexp age age2 actlim totchr medicaid private) ///
+#   (ltotothr age age2 educyr actlim totchr private)
+#test age age2
+fit_sur = sureg_fit(df_sur,
+                    :ldrugexp => [:age, :age2, :actlim, :totchr, :medicaid, :private],
+                    :ltotothr => [:age, :age2, :educyr, :actlim, :totchr, :private])
+test_sureg(fit_sur, [:age, :age2]);
+```
+
+```{julia}
+#* Test of variables in just the first equation
+#test [ldrugexp]age [ldrugexp]age2
+test_sureg(fit_sur, ["[ldrugexp]age", "[ldrugexp]age2"]);
+```
+
+```{julia}
+#* Test of a restriction across the two equations
+#test [ldrugexp]private = [ltotothr]private
+test_sureg(fit_sur, ["[ldrugexp]private = [ltotothr]private"]);
+```
+
+### 5.4.6 Imposing cross-equation constraints
+
+```{julia}
+#=
+* Specify a restriction across the two equations
+constraint 1 [ldrugexp]private = [ltotothr]private
+=#
+# constraint 1 [ldrugexp]private = [ltotothr]private
+# sureg (ldrugexp age age2 actlim totchr medicaid private) ///
+#       (ltotothr age age2 educyr actlim totchr private), constraints(1)
+#
+# Strategy: stack the two equations into a single regression where `private`
+# appears as ONE shared regressor (its coefficient is the constrained value).
+# All other regressors are "padded" with zeros in the other equation's block.
+# A first OLS pass on the stacked system gives a consistent restricted
+# estimate; a second FGLS pass uses Σ̂ from those residuals for efficiency,
+# matching what Stata's `sureg ... , constraints()` does.
+
+N = DataFrames.nrow(sur_data)
+pad1(v) = vcat(Float64.(v), zeros(N))
+pad2(v) = vcat(zeros(N), Float64.(v))
+
+Y  = vcat(Float64.(sur_data.ldrugexp), Float64.(sur_data.ltotothr))
+X  = hcat(
+    pad1(ones(N)),              # ldrugexp: intercept
+    pad1(sur_data.age),
+    pad1(sur_data.age2),
+    pad1(sur_data.actlim),
+    pad1(sur_data.totchr),
+    pad1(sur_data.medicaid),
+    pad2(ones(N)),              # ltotothr: intercept
+    pad2(sur_data.age),
+    pad2(sur_data.age2),
+    pad2(sur_data.educyr),
+    pad2(sur_data.actlim),
+    pad2(sur_data.totchr),
+    vcat(Float64.(sur_data.private), Float64.(sur_data.private))   # SHARED
+)
+cnames = ["eq1:_cons", "eq1:age", "eq1:age2", "eq1:actlim", "eq1:totchr", "eq1:medicaid",
+          "eq2:_cons", "eq2:age", "eq2:age2", "eq2:educyr", "eq2:actlim", "eq2:totchr",
+          "private (shared)"]
+k = size(X, 2)
+
+# --- First pass: OLS on the stacked system (restricted) ---
+β_ols = X \ Y
+e     = reshape(Y - X*β_ols, N, 2)            # per-observation residuals for the 2 equations
+
+# --- Second pass: FGLS using Σ̂ from first-pass residuals ---
+Σ̂    = (e' * e) / N                            # 2×2 cross-equation covariance
+Σinv = LinearAlgebra.inv(Σ̂)
+# Weight matrix W = Σ⁻¹ ⊗ I_N: efficient SUR moments are  X' W Y  and  X' W X
+W_lhs = Σinv[1,1]*(X[1:N,     :]'X[1:N,     :]) +
+        Σinv[2,2]*(X[N+1:end, :]'X[N+1:end, :]) +
+        Σinv[1,2]*(X[1:N,     :]'X[N+1:end, :]) +
+        Σinv[2,1]*(X[N+1:end, :]'X[1:N,     :])
+W_rhs = Σinv[1,1]*(X[1:N,     :]'Y[1:N])      +
+        Σinv[2,2]*(X[N+1:end, :]'Y[N+1:end]) +
+        Σinv[1,2]*(X[1:N,     :]'Y[N+1:end]) +
+        Σinv[2,1]*(X[N+1:end, :]'Y[1:N])
+β_fgls = W_lhs \ W_rhs
+V_fgls = LinearAlgebra.inv(W_lhs)              # joint FGLS vcov
+se     = sqrt.(max.(LinearAlgebra.diag(V_fgls), 0.0))
+z      = β_fgls ./ se
+pval   = 2 .* (1 .- Distributions.cdf.(Distributions.Normal(), abs.(z)))
+
+println("FGLS (SUR) with cross-equation constraint  [ldrugexp]private = [ltotothr]private")
+println("Residual cov matrix Σ̂ =")
+_pt_compat(Σ̂; header=["ldrugexp","ltotothr"], row_labels=["ldrugexp","ltotothr"])
+println("\nCoefficients:")
+_pt_compat(
+    DataFrames.DataFrame(variable=cnames, estimate=β_fgls, stderr=se, z=z, p=pval);
+    formatters = PrettyTables.ft_printf("%.6f", 2:5))
+```
+
+```{julia}
+#=
+* Estimate subject to the cross-equation constraint
+sureg (ldrugexp age age2 actlim totchr medicaid private)        ///
+  (ltotothr age age2 educyr actlim totchr private), constraints(1)
+=#
+#* Specify a restriction across the two equations
+#constraint 1 [ldrugexp]private = [ltotothr]private
+
+#* Estimate subject to the cross-equation constraint
+#sureg (ldrugexp age age2 actlim totchr medicaid private)        ///
+#  (ltotothr age age2 educyr actlim totchr private), constraints(1)
+sureg(df_sur,
+      :ldrugexp => [:age, :age2, :actlim, :totchr, :medicaid, :private],
+      :ltotothr => [:age, :age2, :educyr, :actlim, :totchr, :private];
+      constraints = ["[ldrugexp]private = [ltotothr]private"])
+```
+
+## 5.5 Survey data: Weighting, clustering, and stratification
+
+### 5.5.1 Survey design
+
+```{julia}
+#=
+* Data from http://www.stata-press.com/data/r10/nhanes2.dta
+
+* Survey data example: NHANES II data
+clear all
+use musr/mus05nhanes2.dta
+quietly keep if age >= 21 & age <= 65
+describe sampl finalwgt strata psu
+summarize sampl finalwgt strata psu
+=#
+# NHANES II data
+df_nh = DataFrame(ReadStatTables.readstat("musr/mus05nhanes2.dta"))
+df_nh = filter(r -> 21 <= r.age <= 65, df_nh)
+@printf("N = %d\n", nrow(df_nh))
+DataFrames.describe(df_nh[:, [:sampl, :finalwgt, :strata, :psu]])
+```
+
+
+```{julia}
+#=
+* Declare survey design
+svyset psu [pweight=finalwgt], strata(strata)
+=#
+summarize_stata(df_nh[:, [:sampl, :finalwgt, :strata, :psu]])
+```
+
+```{julia}
+#=
+* Describe the survey design
+svydescribe
+=#
+# Stata's svyset is descriptive — record the design columns for later use
+println("Survey design: PSU = :psu, strata = :strata, weight = :finalwgt")
+```
+
+```{julia}
+# Describe the survey design (counts of strata and PSUs)
+@printf("Number of strata = %d\n", length(unique(df_nh.strata)))
+@printf("Number of PSUs   = %d\n",
+        length(unique(zip(df_nh.strata, df_nh.psu) |> collect)))
+```
+
+### 5.5.2 Survey mean estimation
+
+```{julia}
+#=
+* Estimate the population mean using svy:
+svy: mean hgb
+=#
+# Population mean of hgb using sampling weights
+let df = dropmissing(df_nh[:, [:hgb, :finalwgt]])
+    @printf("Weighted mean of hgb = %.4f\n",
+            sum(df.hgb .* df.finalwgt) / sum(df.finalwgt))
+end
+```
+
+```{julia}
+#=
+* Estimate the population mean using no weights and no cluster
+mean hgb
+=#
+# Unweighted mean of hgb
+@printf("Unweighted mean of hgb = %.4f\n",
+        mean(skipmissing(df_nh.hgb)))
+```
+
+
+```{julia}
+#* Estimate the population mean using svy:
+#svy: mean hgb
+svy_mean(df_nh, :hgb; stratum=:strata, psu=:psu, weight=:finalwgt);
+```
+
+```{julia}
+#* Estimate the population mean using no weights and no cluster
+#mean hgb
+mean_stata(df_nh, :hgb);
+```
+
+### 5.5.3 Survey linear regression
+
+```{julia}
+#=
+* Regression using svy:
+svy: regress hgb age female
+=#
+# Regression with weights (no cluster correction)
+m_svy = FixedEffectModels.reg(df_nh, @formula(hgb ~ age + female),
+            weights = :finalwgt)
+```
+
+```{julia}
+#=
+* Regression using weights and cluster on PSU
+generate uniqpsu = 2*strata + psu  // make unique identifier for each psu
+regress hgb age female [pweight=finalwgt], vce(cluster uniqpsu)
+=#
+# Regression with weights + clustering on unique PSU = 2·strata + psu
+df_nh.uniqpsu = 2 .* df_nh.strata .+ df_nh.psu
+reg(df_nh, @formula(hgb ~ age + female),
+    weights = :finalwgt, Vcov.cluster(:uniqpsu))
+```
+
+```{julia}
+#=
+* Regression using no weights and no cluster
+regress hgb age female
+=#
+# Regression with no weights, no cluster
+reg(df_nh, @formula(hgb ~ age + female))
+```
+
+
+```{julia}
+#* Regression using svy:
+#svy: regress hgb age female
+svy_regress(df_nh, :hgb, [:age, :female];
+            stratum=:strata, psu=:psu, weight=:finalwgt);
+```
+
+
+```{julia}
+#* Regression using weights and cluster on PSU
+#generate uniqpsu = 2*strata + psu  // make unique identifier for each psu
+#regress hgb age female [pweight=finalwgt], vce(cluster uniqpsu)
+df_nh.uniqpsu = 2 .* df_nh.strata .+ df_nh.psu
+regress_cluster(df_nh, :hgb, [:age, :female];
+                cluster=:uniqpsu, weight=:finalwgt);
+```
+
+```{julia}
+#* Regression using no weights and no cluster
+#regress hgb age female
+regress_stata(df_nh, :hgb, [:age, :female]);
+```
+
+## 5.6 Stata resources
+
+## 5.7 Exercises

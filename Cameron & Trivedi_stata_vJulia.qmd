@@ -48,8 +48,9 @@ using RegressionTables
 using KernelDensity, Loess
 using RDatasets, Random, Printf
 using Optim, Distributions, SpecialFunctions, HypothesisTests
-using MixedModels   # panel RE (xtreg, re  equivalent)
+using MixedModels   # panel RE (xtreg, re  effectively)
 using Combinatorics # for FE logit (conditional MLE subset enumeration)
+using ForwardDiff   # explicit gradients for Optim (autodiff kwarg pipeline broken in current Optim)
 
 # PrettyTables v3 compatibility shim. v3 dropped `ft_printf` (now
 # `fmt__printf`) and requires the `formatters` keyword to be a Vector.
@@ -58,8 +59,70 @@ using Combinatorics # for FE logit (conditional MLE subset enumeration)
 # `ft_printf` so it returns a single-element Vector wrapping the new
 # `fmt__printf`, accepting either an Int column index or a range.
 if !isdefined(PrettyTables, :ft_printf)
-    @eval PrettyTables ft_printf(fmt, cols) =
-        [fmt__printf(fmt, collect(cols isa Integer ? (cols:cols) : cols))]
+    @eval PrettyTables begin
+        ft_printf(fmt, cols) =
+            [fmt__printf(fmt, collect(cols isa Integer ? (cols:cols) : cols))]
+        ft_printf(fmt) = [fmt__printf(fmt)]   # apply to all columns (v2 single-arg)
+    end
+end
+
+# PrettyTables v3 also renamed the `header` keyword to `column_labels`
+# (which must be an `AbstractVector` — a flat vector for one header row,
+# or a vector of row-vectors for stacked headers; a Tuple is rejected).
+# `_pt_compat` wraps `pretty_table` so the document's v2-style calls keep
+# working: it maps `header` → `column_labels` (Tuple → Vector), and
+# normalises `formatters` to a flat Vector. All `PrettyTables.pretty_table`
+# call sites in the document route through this wrapper. `_PT_REAL` holds
+# the real function (no trailing `(`, so the route-through rewrite leaves
+# it untouched — no recursion).
+const _PT_REAL = PrettyTables.pretty_table
+function _pt_compat(data; header = nothing, formatters = nothing,
+                    body_hlines = nothing, kwargs...)
+    kw = Dict{Symbol,Any}(kwargs)
+    if header !== nothing
+        kw[:column_labels] = header isa Tuple ? collect(header) : header
+    end
+    if formatters !== nothing
+        kw[:formatters] =
+            formatters isa Function ? [formatters] :
+            formatters isa Tuple ?
+                collect(Iterators.flatten(
+                    x isa Union{AbstractVector,Tuple} ? x : (x,) for x in formatters)) :
+                formatters
+    end
+    # `body_hlines` (v2) has no v3 equivalent — it only drew cosmetic
+    # horizontal rules after given rows. Captured here and dropped so the
+    # table still renders (without the extra separators). `alignment` and
+    # `row_labels` are unchanged in v3 and pass straight through.
+    return _PT_REAL(data; kw...)
+end
+
+# Optim autodiff compat shim. The installed Optim's `autodiff` kwarg
+# rejects the Symbol form `:forward` (it now expects an ADTypes type),
+# and even the ADTypes path trips a DifferentiationInterface bug in
+# this version. The fix: don't use Optim's autodiff plumbing at all —
+# wrap `f` with an explicit ForwardDiff-computed gradient and call the
+# 5-arg `optimize(f, g!, x0, method, opts)` form, which doesn't go
+# through autodiff. `_optimize_compat` routes every Optim.optimize call
+# in the document through this translation; 4-arg calls with
+# `autodiff = :forward` are rewritten to the 5-arg gradient form, all
+# other shapes pass through. `_OPT_REAL` holds the real function (no
+# trailing `(`, so the route-through rewrite leaves it untouched).
+const _OPT_REAL = Optim.optimize
+function _optimize_compat(args...; kwargs...)
+    kw = Dict{Symbol,Any}(kwargs)
+    ad = pop!(kw, :autodiff, nothing)
+    # If `autodiff = :forward` is requested, build the gradient via
+    # ForwardDiff and use the explicit-gradient path. Handles any arg
+    # shape where args[1]=f, args[2]=x0 (method/options follow): 3-arg
+    # `(f, x0, method)`, 4-arg `(f, x0, method, opts)`, etc.
+    if ad isa Symbol && (ad === :forward || ad === :forwarddiff) && length(args) >= 2
+        f, x0 = args[1], args[2]
+        g!(g, x) = ForwardDiff.gradient!(g, f, x)
+        return _OPT_REAL(f, g!, x0, args[3:end]...; kw...)
+    end
+    return ad === nothing ? _OPT_REAL(args...; kw...) :
+                            _OPT_REAL(args...; autodiff = ad, kw...)
 end
 ```
 
@@ -762,12 +825,12 @@ function ereturn_list(m)
     if !ismissing(b)
         names_ = try StatsBase.coefnames(m) catch; ["x$i" for i in eachindex(b)] end
         println("  e(b)  : 1 x $(length(b))")
-        PrettyTables.pretty_table(reshape(b, 1, :); header = names_)
+        _pt_compat(reshape(b, 1, :); header = names_)
     end
     if !ismissing(V)
         println("  e(V)  : $(size(V,1)) x $(size(V,2))")
         names_ = try StatsBase.coefnames(m) catch; ["x$i" for i in 1:size(V,1)] end
-        PrettyTables.pretty_table(V; header = names_, row_labels = names_)
+        _pt_compat(V; header = names_, row_labels = names_)
     end
     return (; scalars, macros, b, V)
 end
@@ -810,7 +873,7 @@ function ttest_by(df, yvar::Symbol, byvar::Symbol; level::Float64=0.95, unequal:
 
     println(unequal ? "Two-sample t test with unequal variances" :
                       "Two-sample t test with equal variances")
-    PrettyTables.pretty_table(DataFrames.DataFrame(rows))
+    _pt_compat(DataFrames.DataFrame(rows))
 
     Printf.@printf("\ndiff = mean(%s) - mean(%s)    t  = %.4f\n",
                    levs[1], levs[2], tt.t)
@@ -2773,10 +2836,10 @@ function margins_count(model, df;
             "Number of obs = $n_obs")
     println()
     lvl = round(Int, 100 * level)
-    PrettyTables.pretty_table(mfx_df;
-        header = (["",         "",      "Delta-method", "",  "",      "",            ""],
+    _pt_compat(mfx_df;
+        column_labels = [["",         "",      "Delta-method", "",  "",      "",            ""],
                   ["Variable", "dy/dx", "std. err.",    "z", "P>|z|",
-                   "[$(lvl)% CI low]", "[$(lvl)% CI high]"]),
+                   "[$(lvl)% CI low]", "[$(lvl)% CI high]"]],
         formatters = vcat(
             PrettyTables.ft_printf("%.7f", [2, 3, 6, 7]),
             PrettyTables.ft_printf("%.2f",  [4]),
@@ -2884,7 +2947,7 @@ function margins_eyex(model, df, varname::Symbol; level::Float64=0.95)
     header = ["ey/ex", "Std. err.", "z", "P>|z|",
               "$(round(Int, 100*level))% CI low", "$(round(Int, 100*level))% CI high"]
     row = permutedims([ela, se, z, pval, lo, hi])
-    PrettyTables.pretty_table(row; header=header)
+    _pt_compat(row; header=header)
     return (; elasticity=ela, se, z, p=pval, ci=(lo, hi), used_classical_vcov=used_classical)
 end
 
@@ -3511,7 +3574,7 @@ function nlogit_stata(df_long::DataFrames.AbstractDataFrame;
 
     # Warm start: zeros for β / α / γ; η_τ = 0 → τ = 0.5.
     θ0 = zeros(nparam)
-    res = Optim.optimize(negll, θ0, Optim.LBFGS(),
+    res = _optimize_compat(negll, θ0, Optim.LBFGS(),
                          Optim.Options(g_tol = 1e-8, iterations = 4000);
                          autodiff = :forward)
     θ̂  = Optim.minimizer(res)
@@ -4090,7 +4153,7 @@ function xttab(df, var::Symbol, idvar::Union{Symbol,Nothing}=nothing)
         total = sum(counts.Freq)
         counts.Percent = 100 .* counts.Freq ./ total
         counts.Cum     = cumsum(counts.Percent)
-        PrettyTables.pretty_table(counts;
+        _pt_compat(counts;
             formatters = PrettyTables.ft_printf("%8.2f", 3:4))
         return counts
     end
@@ -4133,7 +4196,7 @@ function xttab(df, var::Symbol, idvar::Union{Symbol,Nothing}=nothing)
         :Percent_within => pct_w,
     ])
     println("xttab  —  $(var)   (N panels = $N_panels, total obs = $n_total)")
-    PrettyTables.pretty_table(out;
+    _pt_compat(out;
         formatters = PrettyTables.ft_printf("%8.2f", 3:6))
     return out
 end
@@ -4511,7 +4574,7 @@ function estimates_table(models::AbstractVector; labels=nothing, vars=nothing, s
     end
 
     println("estimates table — coefficients (SE below)")
-    PrettyTables.pretty_table(out)
+    _pt_compat(out)
     return out
 end
 
@@ -4808,7 +4871,7 @@ function nl_exp_stata(df::DataFrames.AbstractDataFrame, depvar::Symbol,
     β_start = β0 === nothing ?
               vcat(zeros(k - 1), log(max(Statistics.mean(y), eps()))) :
               collect(β0)
-    res = Optim.optimize(obj, β_start, Optim.LBFGS(),
+    res = _optimize_compat(obj, β_start, Optim.LBFGS(),
                          Optim.Options(g_tol = 1e-8, iterations = 500);
                          autodiff = :forward)
     β̂  = Optim.minimizer(res)
@@ -4969,7 +5032,7 @@ function heckman_stata(df::DataFrames.AbstractDataFrame;
     σw       = Statistics.std(yp .- Xp * βw)
     γw       = zeros(k_z)
     θ0       = vcat(βw, γw, log(σw), atanh(0.3))
-    res = Optim.optimize(negll, θ0, Optim.LBFGS(),
+    res = _optimize_compat(negll, θ0, Optim.LBFGS(),
                          Optim.Options(g_tol = 1e-8, iterations = 8000);
                          autodiff = :forward)
     θ̂  = Optim.minimizer(res)
@@ -5411,7 +5474,7 @@ function sureg(df::DataFrames.AbstractDataFrame, eqs::Pair...;
         chi2        = chi2s,
         P_chi2      = pvals,
     )
-    PrettyTables.pretty_table(summary_df;
+    _pt_compat(summary_df;
         header     = ["Equation", "Obs", "Params", "RMSE", "R-squared",
                       "chi2", "P>chi2"],
         formatters = vcat(
@@ -5467,7 +5530,7 @@ function sureg(df::DataFrames.AbstractDataFrame, eqs::Pair...;
           "z", "P>|z|", "[$(lvl)% CI low]", "[$(lvl)% CI high]"]) :
         ["Equation", "Variable", "Coefficient", "Std. err.",
          "z", "P>|z|", "[$(lvl)% CI low]", "[$(lvl)% CI high]"]
-    PrettyTables.pretty_table(coef_df;
+    _pt_compat(coef_df;
         header     = coef_header,
         formatters = vcat(
             PrettyTables.ft_printf("%.7f", [3, 4, 7, 8]),
@@ -5484,7 +5547,7 @@ function sureg(df::DataFrames.AbstractDataFrame, eqs::Pair...;
     corr_strs = [j <= i ? Printf.@sprintf("%.4f", Rmat[i, j]) : ""
                  for i in 1:M, j in 1:M]
     println("\nCorrelation matrix of residuals:\n")
-    PrettyTables.pretty_table(corr_strs;
+    _pt_compat(corr_strs;
         header     = eqnames,
         row_labels = eqnames,
         alignment  = fill(:r, M),
@@ -5746,7 +5809,7 @@ function reg3(df::DataFrames.AbstractDataFrame, eqs::Pair...;
         chi2       = chi2s,
         P_chi2     = pvals,
     )
-    PrettyTables.pretty_table(summary_df;
+    _pt_compat(summary_df;
         header     = ["Equation", "Obs", "Params", "RMSE", "R-squared",
                       "chi2", "P>chi2"],
         formatters = vcat(
@@ -5794,7 +5857,7 @@ function reg3(df::DataFrames.AbstractDataFrame, eqs::Pair...;
     )
     lvl = round(Int, 100 * level)
     println()
-    PrettyTables.pretty_table(coef_df;
+    _pt_compat(coef_df;
         header = ["Equation", "Variable", "Coefficient", "Std. err.",
                   "z", "P>|z|", "[$(lvl)% CI low]", "[$(lvl)% CI high]"],
         formatters = vcat(
@@ -5923,7 +5986,7 @@ function qreg_stata(df, y, xs::AbstractVector; τ::Float64=0.5,
             CI_low      = ci_lo,
             CI_high     = ci_hi,
         )
-        PrettyTables.pretty_table(coef_df;
+        _pt_compat(coef_df;
             header = [string(ys), "Coefficient", "Std. err.",
                       "t", "P>|t|", "[$(lvl)% CI low]", "[$(lvl)% CI high]"],
             formatters = vcat(
@@ -6231,7 +6294,7 @@ function svy_mean(df, var; stratum::Symbol, psu::Symbol, weight::Symbol,
         CI_low   = [ci_lo],
         CI_high  = [ci_hi],
     )
-    PrettyTables.pretty_table(result;
+    _pt_compat(result;
         header     = (["",         "",     "Linearized", "",                "" ],
                       ["Variable", "Mean", "std. err.",
                        "[$(lvl)% CI low]", "[$(lvl)% CI high]"]),
@@ -6279,7 +6342,7 @@ function mean_stata(df, var; level::Float64=0.95)
         CI_low   = [ci_lo],
         CI_high  = [ci_hi],
     )
-    PrettyTables.pretty_table(result;
+    _pt_compat(result;
         header     = ["Variable", "Mean", "Std. err.",
                       "[$(lvl)% CI low]", "[$(lvl)% CI high]"],
         formatters = PrettyTables.ft_printf("%.5f", 2:5),
@@ -6400,7 +6463,7 @@ function svy_regress(df, y, xs::AbstractVector; stratum::Symbol, psu::Symbol,
         CI_low      = ci_lo[order],
         CI_high     = ci_hi[order],
     )
-    PrettyTables.pretty_table(coef_df;
+    _pt_compat(coef_df;
         header = (["",          "",            "Linearized", "",  "",      "",                "" ],
                   [string(ys),  "Coefficient", "std. err.",  "t", "P>|t|",
                    "[$(lvl)% CI low]", "[$(lvl)% CI high]"]),
@@ -6517,7 +6580,7 @@ function regress_cluster(df, y, xs::AbstractVector; cluster::Symbol,
         CI_low      = ci_lo[order],
         CI_high     = ci_hi[order],
     )
-    PrettyTables.pretty_table(coef_df;
+    _pt_compat(coef_df;
         header = (["",          "",            "Robust",     "",  "",      "",                "" ],
                   [string(ys),  "Coefficient", "std. err.",  "t", "P>|t|",
                    "[$(lvl)% CI low]", "[$(lvl)% CI high]"]),
@@ -6768,7 +6831,7 @@ function ivregress_2sls(df, y, endog_iv::Pair, exog=Symbol[];
                 CI_low      = ci_lo[order],
                 CI_high     = ci_hi[order],
             )
-            PrettyTables.pretty_table(coef_df;
+            _pt_compat(coef_df;
                 header = (["",         "",            "Robust",    "",  "",      "",                "" ],
                           [depname,    "Coefficient", "std. err.", "t", "P>|t|",
                            "[$(lvl)% CI low]", "[$(lvl)% CI high]"]),
@@ -6820,7 +6883,7 @@ function ivregress_2sls(df, y, endog_iv::Pair, exog=Symbol[];
                 CI_low      = ci_lo[order],
                 CI_high     = ci_hi[order],
             )
-            PrettyTables.pretty_table(coef_df;
+            _pt_compat(coef_df;
                 header = (["",         "",            "Robust",    "",  "",      "",                "" ],
                           [depname,    "Coefficient", "std. err.", "z", "P>|z|",
                            "[$(lvl)% CI low]", "[$(lvl)% CI high]"]),
@@ -7659,13 +7722,13 @@ function treatreg(df, y, exog::AbstractVector, treat, treat_exog::AbstractVector
     σ0   = sqrt(mean(ε0 .^ 2))
     θ0   = vcat(β0, γ0, 0.0, log(σ0))
 
-    res  = Optim.optimize(nll, θ0, Optim.LBFGS(),
+    res  = _optimize_compat(nll, θ0, Optim.LBFGS(),
                           Optim.Options(iterations = max_iter,
                                         show_trace = show_trace);
                           autodiff = :forward)
     θ̂    = Optim.minimizer(res)
     logL = -Optim.minimum(res)
-    H    = Optim.hessian!(Optim.TwiceDifferentiable(nll, θ̂; autodiff = :forward), θ̂)
+    H    = ForwardDiff.hessian(nll, θ̂)   # Optim's TwiceDifferentiable autodiff plumbing is broken in this Optim version
     V    = LinearAlgebra.inv(H)
     se   = sqrt.(max.(LinearAlgebra.diag(V), 0.0))
 
@@ -7944,14 +8007,14 @@ function xtreg_pa(df, y::Symbol, xvars::AbstractVector{Symbol},
     Printf.@printf("  N obs    = %d\n  N panels = %d\n  T (max)  = %d\n  σ̂²     = %.6f\n",
                    N_obs, N_panels, Tmax, σ2)
     Printf.@printf("  correlation = %s\n", corrlabel)
-    PrettyTables.pretty_table(
+    _pt_compat(
         DataFrames.DataFrame(variable = cnames, estimate = β,
                              stderr = se, z = z, p = pv);
         formatters = PrettyTables.ft_printf("%.6f", 2:5))
     # Report R matrix (Stata's `matrix list e(R)`)
     R_eR = build_R(ρ_full, Tmax)
     println("\ne(R) — estimated working correlation matrix:")
-    PrettyTables.pretty_table(R_eR;
+    _pt_compat(R_eR;
         header = ["t=$i" for i in 1:Tmax],
         formatters = PrettyTables.ft_printf("%7.4f"))
     return (; β, V, se, coefnames = cnames, σ2, ρ = ρ_full, R = R_eR,
@@ -8830,7 +8893,7 @@ function xtnbreg_re_stata(df; depvar::Symbol,
     end
 
     θ0 = vcat(β0, log(2.0), log(2.0))
-    res = Optim.optimize(negll, θ0, Optim.NelderMead(),
+    res = _optimize_compat(negll, θ0, Optim.NelderMead(),
                          Optim.Options(g_tol = 1e-9,
                                        x_abstol = 1e-9,
                                        f_reltol = 1e-12,
@@ -9077,7 +9140,7 @@ function xtnbreg_fe_stata(df; depvar::Symbol,
         return -ll
     end
 
-    res = Optim.optimize(negll, β0, Optim.NelderMead(),
+    res = _optimize_compat(negll, β0, Optim.NelderMead(),
                          Optim.Options(g_tol = 1e-9,
                                        x_abstol = 1e-9,
                                        f_reltol = 1e-12,
@@ -9280,7 +9343,7 @@ function xtpoisson_re_stata(df; depvar::Symbol,
     end
 
     θ0 = vcat(β0, log(1.0))
-    res = Optim.optimize(negll, θ0, Optim.LBFGS(),
+    res = _optimize_compat(negll, θ0, Optim.LBFGS(),
                          Optim.Options(g_tol = 1e-8, iterations = 2000);
                          autodiff = :forward)
     θ̂  = Optim.minimizer(res)
@@ -9529,7 +9592,7 @@ function xtpoisson_re_normal_stata(df; depvar::Symbol,
     end
 
     θ0 = vcat(β0, log(0.5))
-    res = Optim.optimize(negll, θ0, Optim.LBFGS(),
+    res = _optimize_compat(negll, θ0, Optim.LBFGS(),
                          Optim.Options(g_tol = 1e-7, iterations = 2000);
                          autodiff = :forward)
     θ̂   = Optim.minimizer(res)
@@ -9787,7 +9850,7 @@ function xtlogit_re_stata(df; depvar::Symbol,
     end
 
     θ0 = vcat(β0, log(0.5))
-    res = Optim.optimize(negll, θ0, Optim.LBFGS(),
+    res = _optimize_compat(negll, θ0, Optim.LBFGS(),
                          Optim.Options(g_tol = 1e-7, iterations = 2000);
                          autodiff = :forward)
     θ̂  = Optim.minimizer(res)
@@ -10088,7 +10151,7 @@ function xtlogit_fe_stata(df; depvar::Symbol,
 
     β0 = zeros(k)
     if k > 0
-        res = Optim.optimize(negll, β0, Optim.LBFGS(),
+        res = _optimize_compat(negll, β0, Optim.LBFGS(),
                              Optim.Options(g_tol = 1e-8, iterations = 2000);
                              autodiff = :forward)
         β  = Optim.minimizer(res)
@@ -10443,7 +10506,7 @@ function xttobit_re_stata(df; depvar::Symbol,
         end
         return -ll_p
     end
-    res_warm = Optim.optimize(negll_pooled_warm,
+    res_warm = _optimize_compat(negll_pooled_warm,
                               vcat(β_ols, log(σe_ols^2)),
                               Optim.LBFGS(),
                               Optim.Options(g_tol = 1e-7, iterations = 1000);
@@ -10495,7 +10558,7 @@ function xttobit_re_stata(df; depvar::Symbol,
     negll(θ) = negll_pre(θ)
 
     θ0 = vcat(β0, ll_σe2_0, ll_σu2_0)
-    res = Optim.optimize(negll, θ0, Optim.LBFGS(),
+    res = _optimize_compat(negll, θ0, Optim.LBFGS(),
                          Optim.Options(g_tol = 1e-7, iterations = 2000);
                          autodiff = :forward)
     θ̂   = Optim.minimizer(res)
@@ -10529,7 +10592,7 @@ function xttobit_re_stata(df; depvar::Symbol,
         end
         return -ll_p
     end
-    res_p = Optim.optimize(negll_pooled, θ0_pool, Optim.LBFGS(),
+    res_p = _optimize_compat(negll_pooled, θ0_pool, Optim.LBFGS(),
                            Optim.Options(g_tol = 1e-7, iterations = 1000);
                            autodiff = :forward)
     ll_pooled = -negll_pooled(Optim.minimizer(res_p))
@@ -11119,7 +11182,7 @@ function xtreg_re_table(m, df, idvar::Symbol;
     end
 
     # ---- Coefficient table ----
-    PrettyTables.pretty_table(
+    _pt_compat(
         DataFrames.DataFrame(
             variable = cnames,
             estimate = β,
@@ -11189,7 +11252,7 @@ function glm_table(m; robust::Bool=false, title::String="")
     ll0 = try StatsBase.nullloglikelihood(m) catch; NaN end
     pr2 = isnan(ll0) ? NaN : 1 - ll/ll0
     Printf.@printf("  N = %d   Log-likelihood = %.4f   Pseudo-R² = %.4f\n\n", n, ll, pr2)
-    PrettyTables.pretty_table(
+    _pt_compat(
         DataFrames.DataFrame(variable=cn, Coef=β, SE=se, z=z, P=pv,
             CI_lo = β .- 1.96 .* se, CI_hi = β .+ 1.96 .* se);
         formatters = PrettyTables.ft_printf("%.6f", 2:7))
@@ -11241,7 +11304,7 @@ function margins_binary(m, df; at=nothing, atmean::Bool=false)
     mode_label = at !== nothing ? "MER" : (atmean ? "MEM" : "AME")
     link_label = is_logit ? "logit" : "probit"
     println("margins, dydx(*) — $mode_label after $link_label")
-    PrettyTables.pretty_table(
+    _pt_compat(
         DataFrames.DataFrame(variable=cn, dydx=me);
         formatters = PrettyTables.ft_printf("%.6f", 2))
     return (; me, coefnames=cn, mode=mode_label)
@@ -11347,7 +11410,7 @@ function correlate(df, vars::AbstractVector)
     for (j, v) in enumerate(vars)
         out[!, Symbol(v)] = disp[:, j]
     end
-    PrettyTables.pretty_table(out; alignment=:r)
+    _pt_compat(out; alignment=:r)
     return (; cor=C, n=n, vars=string.(vars))
 end
 
@@ -11368,7 +11431,7 @@ function boot_regtable(β::AbstractVector, β_boot::AbstractMatrix;
     hi   = β .+ crit .* se
     isempty(title) || println(title)
     Printf.@printf("  (bootstrap replications = %d)\n\n", size(β_boot, 1))
-    PrettyTables.pretty_table(
+    _pt_compat(
         DataFrames.DataFrame(
             variable   = string.(coefnames),
             estimate   = β,
@@ -14284,7 +14347,7 @@ function boxcox_mle(df::DataFrame, depvar::Symbol, xvars::Vector{Symbol};
         return -n/2 * log(2π * sig2) - n/2 + (θ - 1) * sumlogy
     end
 
-    opt = Optim.optimize(θ -> -loglik(first(θ)), [0.1], Optim.BFGS())
+    opt = _optimize_compat(θ -> -loglik(first(θ)), [0.1], Optim.BFGS())
     th  = Optim.minimizer(opt)[1]
 
     yt  = bc(y, th)
@@ -14527,7 +14590,7 @@ function poisson_gmm_stata(df, depvar::Symbol,
         μ = exp.(X*β); G = -(μ .* Z)' * X
         H .= 2 .* (G' * W * G); H
     end
-    _fit(W, β0) = Optim.minimizer(Optim.optimize(Qf(W), Qg!(W), Qh!(W), β0,
+    _fit(W, β0) = Optim.minimizer(_optimize_compat(Qf(W), Qg!(W), Qh!(W), β0,
                        Optim.Newton(), Optim.Options(iterations = 1000,
                                                      g_tol = 1e-10)))
     β = _fit(Wmat, zeros(k))
@@ -16336,7 +16399,7 @@ function ivprobit_stata(df; depvar::Symbol,
     end
 
     θ0 = vcat(β_struct0, π0_full, log(σv0), 0.0)
-    res = Optim.optimize(negll, θ0, Optim.LBFGS(),
+    res = _optimize_compat(negll, θ0, Optim.LBFGS(),
                          Optim.Options(g_tol = 1e-7, iterations = 2000);
                          autodiff = :forward)
     θ̂  = Optim.minimizer(res)
@@ -17196,7 +17259,7 @@ function mlogit_stata(df::DataFrames.AbstractDataFrame, depvar::Symbol,
     end
 
     θ0 = zeros(K * (J - 1))
-    res = Optim.optimize(negll, θ0, Optim.LBFGS(),
+    res = _optimize_compat(negll, θ0, Optim.LBFGS(),
                          Optim.Options(g_tol = 1e-9, iterations = 1000);
                          autodiff = :forward)
     θ̂  = Optim.minimizer(res)
@@ -17458,7 +17521,7 @@ function mprobit_stata(df::DataFrames.AbstractDataFrame, depvar::Symbol,
 
     # Warm start: zeros (degenerate point is well-defined under MNP).
     θ0 = zeros(nparam)
-    res = Optim.optimize(negll, θ0, Optim.LBFGS(),
+    res = _optimize_compat(negll, θ0, Optim.LBFGS(),
                          Optim.Options(g_tol = 1e-8, iterations = 4000);
                          autodiff = :forward)
     θ̂  = Optim.minimizer(res)
@@ -17648,7 +17711,7 @@ function ologit_stata(df::DataFrames.AbstractDataFrame, depvar::Symbol,
         end
     end
 
-    res = Optim.optimize(negll, θ0, Optim.LBFGS(),
+    res = _optimize_compat(negll, θ0, Optim.LBFGS(),
                          Optim.Options(g_tol = 1e-9, iterations = 4000);
                          autodiff = :forward)
     θ̂  = Optim.minimizer(res)
@@ -17712,7 +17775,7 @@ function ologit_stata(df::DataFrames.AbstractDataFrame, depvar::Symbol,
         return -ll
     end
     τθ0 = θ0[k+1:end]
-    res_null = Optim.optimize(negll_null, τθ0, Optim.LBFGS();
+    res_null = _optimize_compat(negll_null, τθ0, Optim.LBFGS();
                               autodiff = :forward)
     # Re-evaluate at the (Float64) minimizer to guarantee a plain
     # Float64 LL — `Optim.minimum` sometimes returns a ForwardDiff.Dual
@@ -17853,7 +17916,7 @@ function tobit_stata(df::DataFrames.AbstractDataFrame, depvar::Symbol,
         return vcat(zeros(k), 0.0)
     end
     θ0 = _ols_warm()
-    res = Optim.optimize(negll, θ0, Optim.LBFGS(),
+    res = _optimize_compat(negll, θ0, Optim.LBFGS(),
                          Optim.Options(g_tol = 1e-8, iterations = 4000);
                          autodiff = :forward)
     θ̂  = Optim.minimizer(res)
@@ -18361,7 +18424,7 @@ function biprobit_stata(df::DataFrames.AbstractDataFrame,
     # `√|ρ|`, which kink at ρ = 0 (ForwardDiff returns a zero gradient
     # there and LBFGS terminates immediately).
     θ0 = zeros(nparam); θ0[end] = atanh(0.3)
-    res = Optim.optimize(negll, θ0, Optim.LBFGS(),
+    res = _optimize_compat(negll, θ0, Optim.LBFGS(),
                          Optim.Options(g_tol = 1e-8, iterations = 4000);
                          autodiff = :forward)
     θ̂  = Optim.minimizer(res)
@@ -18627,7 +18690,7 @@ function nlsur_two_eq_normal_stata(df::DataFrames.AbstractDataFrame,
 
     # Step 1 — unweighted NLS.
     α0 = zeros(nparam)
-    res1 = Optim.optimize(ssr, α0, Optim.LBFGS(),
+    res1 = _optimize_compat(ssr, α0, Optim.LBFGS(),
                           Optim.Options(g_tol = 1e-8, iterations = 4000);
                           autodiff = :forward)
     α̃ = Optim.minimizer(res1)
@@ -18637,7 +18700,7 @@ function nlsur_two_eq_normal_stata(df::DataFrames.AbstractDataFrame,
     Σinv = LinearAlgebra.inv(Σhat)
 
     # Step 2 — FGLS.
-    res2 = Optim.optimize(α -> gls_obj(α, Σinv), α̃, Optim.LBFGS(),
+    res2 = _optimize_compat(α -> gls_obj(α, Σinv), α̃, Optim.LBFGS(),
                           Optim.Options(g_tol = 1e-8, iterations = 4000);
                           autodiff = :forward)
     α̂ = Optim.minimizer(res2)
@@ -19183,7 +19246,7 @@ function asclogit_stata(df_long::DataFrames.AbstractDataFrame;
     end
 
     θ0 = zeros(nparam)
-    res = Optim.optimize(negll, θ0, Optim.LBFGS(),
+    res = _optimize_compat(negll, θ0, Optim.LBFGS(),
                          Optim.Options(g_tol = 1e-9, iterations = 2000);
                          autodiff = :forward)
     θ̂  = Optim.minimizer(res)
@@ -19365,7 +19428,7 @@ function clogit_fit_stata(df_long::DataFrames.AbstractDataFrame;
         return -ll
     end
 
-    res = Optim.optimize(negll, zeros(nparam), Optim.LBFGS(),
+    res = _optimize_compat(negll, zeros(nparam), Optim.LBFGS(),
                          Optim.Options(g_tol = 1e-9, iterations = 4000);
                          autodiff = :forward)
     β  = Optim.minimizer(res); ll = -Optim.minimum(res)
@@ -19543,7 +19606,7 @@ function asmprobit_stata(df_long::DataFrames.AbstractDataFrame;
         return -ll
     end
 
-    res = Optim.optimize(negll, zeros(nparam), Optim.LBFGS(),
+    res = _optimize_compat(negll, zeros(nparam), Optim.LBFGS(),
                          Optim.Options(g_tol = 1e-8, iterations = 4000);
                          autodiff = :forward)
     θ̂  = Optim.minimizer(res); ll = -Optim.minimum(res)
@@ -19753,7 +19816,7 @@ function mixlogit_stata(df_long::DataFrames.AbstractDataFrame;
     θ̂  = θ0
     ll = -Inf
     try
-        res = Optim.optimize(negll, θ0, Optim.LBFGS(),
+        res = _optimize_compat(negll, θ0, Optim.LBFGS(),
                              Optim.Options(g_tol = 1e-7, iterations = 4000);
                              autodiff = :forward)
         θ̂ = Optim.minimizer(res)
@@ -20199,7 +20262,7 @@ function hetprob_stata(df, formula_mean, het_vars; level::Float64 = 0.95,
                               1e-300)))
     end
     θ0  = vcat(β0, zeros(k_z))
-    res = Optim.optimize(negll, θ0, Optim.LBFGS(),
+    res = _optimize_compat(negll, θ0, Optim.LBFGS(),
                          Optim.Options(g_tol = 1e-9, iterations = 1000);
                          autodiff = :forward)
     θ̂   = Optim.minimizer(res)
@@ -20962,7 +21025,7 @@ function nbreg_stata(df, formula; vce::Symbol=:oim, level::Float64=0.95,
     # quality optimum from LBFGS (warm-started from Poisson β) but refine via
     # NelderMead and use central finite differences for the Hessian.
     p0  = Float64.(vcat(β0, log(1.0)))
-    res = Optim.optimize(nb_nll, p0, Optim.NelderMead(),
+    res = _optimize_compat(nb_nll, p0, Optim.NelderMead(),
                          Optim.Options(g_tol     = 1e-10,
                                        x_abstol  = 1e-10,
                                        f_reltol  = 1e-12,
@@ -21071,7 +21134,7 @@ function nbreg_stata(df, formula; vce::Symbol=:oim, level::Float64=0.95,
             (yv .+ inv_α) .* log.(1 .+ α .* μ) .+
             yv .* log(α) .+ yv .* β0_null)
     end
-    res0 = Optim.optimize(α -> -nb_ll_null_α(exp(α[1])), [log(1.0)],
+    res0 = _optimize_compat(α -> -nb_ll_null_α(exp(α[1])), [log(1.0)],
                           Optim.NelderMead())
     α̂_null   = exp(Float64(Optim.minimizer(res0)[1]))
     ll_null  = nb_ll_null_α(α̂_null)
@@ -21253,7 +21316,7 @@ function ztnb_stata(df, formula; vce::Symbol = :oim, level::Float64 = 0.95,
     end
 
     p0_start = Float64.(vcat(β0, log(1.0)))
-    res = Optim.optimize(ztnb_nll, p0_start, Optim.NelderMead(),
+    res = _optimize_compat(ztnb_nll, p0_start, Optim.NelderMead(),
                          Optim.Options(g_tol = 1e-10, x_abstol = 1e-10,
                                        f_reltol = 1e-12, iterations = 5000))
     p̂   = Float64.(Optim.minimizer(res))
@@ -21593,7 +21656,7 @@ function gnbreg_stata(df, formula;
     end
 
     θ0 = vcat(β0, zeros(k_z))
-    res = Optim.optimize(nll, θ0, Optim.LBFGS(),
+    res = _optimize_compat(nll, θ0, Optim.LBFGS(),
                         Optim.Options(g_tol = 1e-7, iterations = 500);
                         autodiff = :forward)
     θ̂  = Optim.minimizer(res)
@@ -21802,7 +21865,7 @@ function fmm_poisson_stata(df, formula; ncomponents::Int = 2,
         push!(θ0, (βp .* (1 + seed_split*(2*(c-1)/(max(C-1,1)) - 1)))...)
     end
     append!(θ0, zeros(C-1))
-    res = Optim.optimize(fmm_nll, θ0, Optim.NelderMead(),
+    res = _optimize_compat(fmm_nll, θ0, Optim.NelderMead(),
                          Optim.Options(iterations = 8000, g_tol = 1e-8))
     θ̂  = Optim.minimizer(res)
     ll = -fmm_nll(θ̂)::Float64
@@ -22020,7 +22083,7 @@ function fmm_nbreg_stata(df, formula; ncomponents::Int = 2,
     end
     append!(θ0, zeros(C))        # lnα_c = 0 (α = 1)
     append!(θ0, zeros(C-1))      # γ_c = 0 (equal shares)
-    res = Optim.optimize(nbfmm_nll, θ0, Optim.NelderMead(),
+    res = _optimize_compat(nbfmm_nll, θ0, Optim.NelderMead(),
                          Optim.Options(iterations = 8000, g_tol = 1e-8))
     θ̂  = Float64.(Optim.minimizer(res)); ll = -nbfmm_nll(θ̂)::Float64
 
@@ -22274,7 +22337,7 @@ function zinb_stata(df, count_formula; inflate_vars::AbstractVector{Symbol},
     end
 
     θ0  = Float64.(vcat(βp, zeros(kz), 0.0))
-    res = Optim.optimize(nll, θ0, Optim.NelderMead(),
+    res = _optimize_compat(nll, θ0, Optim.NelderMead(),
                          Optim.Options(iterations = 8000, g_tol = 1e-8))
     θ̂  = Float64.(Optim.minimizer(res)); ll = -nll(θ̂)::Float64
     β̂  = θ̂[1:kx]; γ̂ = θ̂[(kx+1):(kx+kz)]; lnα = θ̂[end]; α = exp(lnα)
@@ -22359,7 +22422,7 @@ function zinb_stata(df, count_formula; inflate_vars::AbstractVector{Symbol},
         ypos = y[y .> 0]
         θ0n = vcat(log(isempty(ypos) ? 1.0 : Statistics.mean(ypos)),
                    zeros(kz), 0.0)
-        rn = Optim.optimize(nll0, θ0n, Optim.NelderMead(),
+        rn = _optimize_compat(nll0, θ0n, Optim.NelderMead(),
                             Optim.Options(iterations = 8000, g_tol = 1e-9))
         -Optim.minimum(rn)
     end
@@ -22694,7 +22757,7 @@ function gmm_stata(df, depvar::Symbol, regs::Vector{Symbol},
         else
             zeros(k)
         end
-        res1 = Optim.optimize(β -> gmm_obj(β, W1), β_init, Optim.LBFGS();
+        res1 = _optimize_compat(β -> gmm_obj(β, W1), β_init, Optim.LBFGS();
                                 autodiff = :forward, inplace = false)
         β1 = Optim.minimizer(res1)
         Q1 = Optim.minimum(res1)
@@ -22708,7 +22771,7 @@ function gmm_stata(df, depvar::Symbol, regs::Vector{Symbol},
         u1 = y .- μ_fn(β1)
         Ω1 = (Z' * LinearAlgebra.Diagonal(u1.^2) * Z) ./ n
         W2 = LinearAlgebra.inv(Ω1)
-        res2 = Optim.optimize(β -> gmm_obj(β, W2), β1, Optim.BFGS();
+        res2 = _optimize_compat(β -> gmm_obj(β, W2), β1, Optim.BFGS();
                                 autodiff = :forward, inplace = false)
         β_final = Optim.minimizer(res2)
         Q_final = Optim.minimum(res2)
@@ -24824,7 +24887,7 @@ else
         yhat    = yhat[influential],
         uhat    = uhat[influential])
     sort!(listing, :dfits, by=abs, rev=true)
-    PrettyTables.pretty_table(listing; formatters=PrettyTables.ft_printf("%.3f", 2:6))
+    _pt_compat(listing; formatters=PrettyTables.ft_printf("%.3f", 2:6))
 end
 ```
 
@@ -26023,12 +26086,12 @@ se_sur = sqrt.(max.(LinearAlgebra.diag(V_sur), 0.0))
 
 k1 = size(X1, 2); k2 = size(X2, 2)
 println("=== SUR (FGLS) Equation 1: ldrugexp ===")
-PrettyTables.pretty_table(
+_pt_compat(
     DataFrame(variable=cn1, Coef=β_sur[1:k1], SE=se_sur[1:k1],
               z=β_sur[1:k1]./se_sur[1:k1]);
     formatters=PrettyTables.ft_printf("%.6f", 2:4))
 println("\n=== SUR (FGLS) Equation 2: ltotothr ===")
-PrettyTables.pretty_table(
+_pt_compat(
     DataFrame(variable=cn2, Coef=β_sur[k1+1:end], SE=se_sur[k1+1:end],
               z=β_sur[k1+1:end]./se_sur[k1+1:end]);
     formatters=PrettyTables.ft_printf("%.6f", 2:4))
@@ -26225,9 +26288,9 @@ pval   = 2 .* (1 .- Distributions.cdf.(Distributions.Normal(), abs.(z)))
 
 println("FGLS (SUR) with cross-equation constraint  [ldrugexp]private = [ltotothr]private")
 println("Residual cov matrix Σ̂ =")
-PrettyTables.pretty_table(Σ̂; header=["ldrugexp","ltotothr"], row_labels=["ldrugexp","ltotothr"])
+_pt_compat(Σ̂; header=["ldrugexp","ltotothr"], row_labels=["ldrugexp","ltotothr"])
 println("\nCoefficients:")
-PrettyTables.pretty_table(
+_pt_compat(
     DataFrames.DataFrame(variable=cnames, estimate=β_fgls, stderr=se, z=z, p=pval);
     formatters = PrettyTables.ft_printf("%.6f", 2:5))
 ```
@@ -26535,7 +26598,7 @@ est_table = DataFrames.DataFrame(
     TwoSLS_def_b  = β_2sls_def,    TwoSLS_def_se  = _se(V_2sls_def),
 )
 println("estimates table TwoSLS GMM_het GMM_igmm GMM_clu TwoSLS_def, b se")
-PrettyTables.pretty_table(est_table;
+_pt_compat(est_table;
     formatters = PrettyTables.ft_printf("%9.5f", 2:11))
 ```
 
@@ -26932,7 +26995,7 @@ p_F    = 1 - Distributions.cdf(Distributions.FDist(df_num, df_den), F_stat)
 CD = F_stat
 
 println("First-stage diagnostics — just-identified IV (hi_empunion = ssiratio)")
-PrettyTables.pretty_table(
+_pt_compat(
     DataFrames.DataFrame(
         statistic  = ["R²_full (first stage)",
                       "R²_restricted (no excl. IV)",
@@ -26950,7 +27013,7 @@ println("\nStock–Yogo weak-ID critical values for just-identified 2SLS (bias t
 sy = DataFrames.DataFrame(
     relative_bias = ["5%", "10%", "20%", "30%"],
     critical_F    = [16.38, 8.96, 6.66, 5.53])
-PrettyTables.pretty_table(sy)
+_pt_compat(sy)
 F_stat > 16.38 ? println("\n→ F > 16.38: instrument is NOT weak at the 5% bias threshold.") :
 F_stat > 10    ? println("\n→ 10 < F ≤ 16.38: instrument probably adequate but borderline.") :
                  println("\n→ F ≤ 10: instrument is WEAK; 2SLS estimates may be badly biased.")
@@ -27199,7 +27262,7 @@ XZ = X_l' * Z_l
 β_gmm = (XZ * Sinv * XZ') \ (XZ * Sinv * (Z_l' * y_l))
 
 println("Comparison: 2SLS vs LIML vs JIVE vs GMM (4 instruments)")
-PrettyTables.pretty_table(
+_pt_compat(
     DataFrames.DataFrame(variable=cn_iv,
         b_2SLS = β_2sls,
         b_LIML = β_liml,
@@ -27297,11 +27360,11 @@ se_3sls = sqrt.(max.(LinearAlgebra.diag(V_3sls), 0.0))
 z_3sls  = β_3sls ./ se_3sls
 
 println("=== 3SLS Equation 1: ldrugexp ===")
-PrettyTables.pretty_table(
+_pt_compat(
     DataFrame(variable=cn3_1, Coef=β_3sls[1:k1], SE=se_3sls[1:k1], z=z_3sls[1:k1]);
     formatters=PrettyTables.ft_printf("%.6f", 2:4))
 println("\n=== 3SLS Equation 2: hi_empunion ===")
-PrettyTables.pretty_table(
+_pt_compat(
     DataFrame(variable=cn3_2, Coef=β_3sls[k1+1:end], SE=se_3sls[k1+1:end], z=z_3sls[k1+1:end]);
     formatters=PrettyTables.ft_printf("%.6f", 2:4))
 ```
@@ -29089,7 +29152,7 @@ estat_abond(sys1; orders=1:3);
 #   div(occ south smsa ind)            →  xvars=[:occ,:south,:smsa,:ind]
 println("xtdpd with these options ≡ xtdpdsys — same coefficients, SEs, and instrument count.")
 println("See sys1 from §9.4.7 above:")
-PrettyTables.pretty_table(
+_pt_compat(
     DataFrames.DataFrame(variable=sys1.coefnames, Coef=sys1.β,
         Robust_SE=sqrt.(max.(LinearAlgebra.diag(sys1.V), 0.0)));
     formatters = PrettyTables.ft_printf("%.7f", 2:3))
@@ -30460,7 +30523,7 @@ end
 ```{julia}
 # Optim with NewtonTrustRegion for Poisson MLE — robust SEs separately
 β0 = zeros(k11)
-res_pois = Optim.optimize(β -> poisson_nll(β, X11, y11), β0,
+res_pois = _optimize_compat(β -> poisson_nll(β, X11, y11), β0,
                           Optim.LBFGS(); autodiff = :forward)
 println(res_pois)
 β_pois = Optim.minimizer(res_pois)
@@ -30563,7 +30626,7 @@ function negbin_nll(params, X, y)
     return -ll
 end
 
-res_nb = Optim.optimize(params -> negbin_nll(params, X11, y11),
+res_nb = _optimize_compat(params -> negbin_nll(params, X11, y11),
                         vcat(β_pois, log(1.0)),
                         Optim.LBFGS(); autodiff = :forward)
 β_nb = Optim.minimizer(res_nb)
@@ -30611,9 +30674,9 @@ end
 
 # Maximize via L-BFGS with autodiff (`ml maximize`'s default is BHHH-like;
 # either converges to the same MLE).
-const FD = Optim.NLSolversBase.ForwardDiff   # Optim already vendors ForwardDiff
+const FD = ForwardDiff   # ForwardDiff is now a direct dep (Project.toml); Optim no longer vendors it accessibly
 p0   = vcat(zeros(kβ_v), 1.0)                 # β = 0, α = 1
-res  = Optim.optimize(p -> -lfnb_total(p), p0, Optim.LBFGS();
+res  = _optimize_compat(p -> -lfnb_total(p), p0, Optim.LBFGS();
                       autodiff = :forward)
 p_ml = Optim.minimizer(res)
 β_ml = p_ml[1:kβ_v]; α_ml = p_ml[end]
@@ -30705,7 +30768,7 @@ function lfnls_total(β)
 end
 
 # Maximize via L-BFGS (mirrors Stata's `ml maximize`)
-res    = Optim.optimize(β -> -lfnls_total(β), zeros(k_v), Optim.LBFGS(),
+res    = _optimize_compat(β -> -lfnls_total(β), zeros(k_v), Optim.LBFGS(),
                         Optim.Options(g_tol = 1e-10, iterations = 500);
                         autodiff = :forward)
 β_nls  = Optim.minimizer(res)
@@ -30871,7 +30934,7 @@ end
 # Try Optim and watch it fail (the optimizer minimizes -lfnp_buggy, which
 # is unbounded BELOW, so it walks β to +∞ and trips a numerical overflow).
 res = try
-    Optim.optimize(β -> -lfpois_buggy(β), zeros(k_v), Optim.LBFGS(),
+    _optimize_compat(β -> -lfpois_buggy(β), zeros(k_v), Optim.LBFGS(),
                    Optim.Options(iterations = 50, g_tol = 1e-6);
                    autodiff = :forward)
 catch e
@@ -30895,7 +30958,7 @@ df11.extra2 = df11.income .+ 0.01 .* rand(DataFrames.nrow(df11))
 X11_e2 = hcat(X11, df11.extra2)
 @printf("Condition number with extra2 = %.2e\n", LinearAlgebra.cond(X11_e2))
 
-res_e2 = Optim.optimize(β -> poisson_nll(β, X11_e2, y11), zeros(size(X11_e2, 2)),
+res_e2 = _optimize_compat(β -> poisson_nll(β, X11_e2, y11), zeros(size(X11_e2, 2)),
                          Optim.LBFGS(); autodiff = :forward)
 println("Converged: ", Optim.converged(res_e2))
 println("Coefficients: ", round.(Optim.minimizer(res_e2), digits = 4))
@@ -31088,7 +31151,7 @@ X_d0 = hcat(Float64.(dfd.private), Float64.(dfd.chronic),
             ones(DataFrames.nrow(dfd)))
 
 # d0 demo: Optim with `poisson_nll` (no gradient supplied; autodiff handles it)
-res_d0  = Optim.optimize(β -> poisson_nll(β, X_d0, y_d0),
+res_d0  = _optimize_compat(β -> poisson_nll(β, X_d0, y_d0),
                          zeros(size(X_d0, 2)),
                          Optim.LBFGS(); autodiff = :forward)
 β_d0 = Optim.minimizer(res_d0)
@@ -31111,7 +31174,7 @@ function d1pois_grad!(g, β, X, y)
     g .= -X' * (y .- exp.(X * β))
 end
 
-res_d1 = Optim.optimize(β -> poisson_nll(β, X_d0, y_d0),
+res_d1 = _optimize_compat(β -> poisson_nll(β, X_d0, y_d0),
                         (g, β) -> d1pois_grad!(g, β, X_d0, y_d0),
                         zeros(size(X_d0, 2)),
                         Optim.LBFGS())
@@ -31182,7 +31245,7 @@ function d2pois_hess!(H, β, X, y)
     H .= X' * LinearAlgebra.Diagonal(μ) * X
 end
 
-res_d2 = Optim.optimize(β -> poisson_nll(β, X_d0, y_d0),
+res_d2 = _optimize_compat(β -> poisson_nll(β, X_d0, y_d0),
                         (g, β) -> d2pois_grad!(g, β, X_d0, y_d0),
                         (H, β) -> d2pois_hess!(H, β, X_d0, y_d0),
                         zeros(size(X_d0, 2)), Optim.NewtonTrustRegion())
@@ -31245,7 +31308,7 @@ poisson_grad_mata!(g, β, X, y) = (g .= -X' * (y .- exp.(X * β)))
 poisson_hess_mata!(H, β, X, y) =
     (H .= X' * LinearAlgebra.Diagonal(exp.(X * β)) * X)
 
-res_mata = Optim.optimize(β -> poisson_lnL(β, X_d0, y_d0),
+res_mata = _optimize_compat(β -> poisson_lnL(β, X_d0, y_d0),
                           (g, β) -> poisson_grad_mata!(g, β, X_d0, y_d0),
                           (H, β) -> poisson_hess_mata!(H, β, X_d0, y_d0),
                           zeros(size(X_d0, 2)), Optim.NewtonTrustRegion())
@@ -31349,7 +31412,7 @@ function pgmm_hess!(H, β, X, Z, y, W)
     H .= 2 .* (G' * W * G)         # Gauss–Newton-style Hessian
 end
 
-res_gmm = Optim.optimize(β -> pgmm_Q(β, X_g, Z_g, y_g, W_g),
+res_gmm = _optimize_compat(β -> pgmm_Q(β, X_g, Z_g, y_g, W_g),
                          (g, β) -> pgmm_grad!(g, β, X_g, Z_g, y_g, W_g),
                          (H, β) -> pgmm_hess!(H, β, X_g, Z_g, y_g, W_g),
                          zeros(k_g), Optim.NewtonTrustRegion())
@@ -37779,6 +37842,9 @@ estat overid
 # valid); a large J would flag instrument invalidity or
 # misspecification.
 estat_overid_gmm_stata(gmm_ts17);
+```
+
+# 18 Nonlinear panel-data models
 
 ## 18.1 Introduction
 

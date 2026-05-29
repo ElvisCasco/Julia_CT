@@ -1,0 +1,2959 @@
+---
+title: "Microeconometrics Using Stata"
+Authors:
+- Colin Cameron
+- Pravin Trivedi
+format:
+  html:
+    toc: true
+    toc-depth: 5
+    toc-expand: true
+    toc-title: Contents
+    toc-location: left
+execute:
+  enabled: true
+jupyter: julia-1.12
+---
+
+[Microeconometrics with R](https://ycroissant.github.io/micsr_book/)
+
+[UCLA](https://stats.oarc.ucla.edu/stata/modules/)
+
+[Github](https://github.com/thousandoaks?tab=repositories)
+
+# Julia setup
+
+
+```{julia}
+using CairoMakie
+CairoMakie.activate!(type = "png")
+using CategoricalArrays
+using CSV
+using Chain
+using DataFrames
+using Downloads
+using FixedEffectModels
+using Gadfly
+using GLM
+using HypothesisTests
+using Makie
+using PrettyTables
+using ReadStatTables
+using RegressionTables
+using Statistics
+
+using DataFrames, ReadStatTables, CSV, CairoMakie, PrettyTables
+using Statistics, StatsBase, GLM, FixedEffectModels
+using CategoricalArrays, LinearAlgebra
+using RegressionTables
+using KernelDensity, Loess
+using RDatasets, Random, Printf
+using Optim, Distributions, SpecialFunctions, HypothesisTests
+using MixedModels   # panel RE (xtreg, re  effectively)
+using Combinatorics # for FE logit (conditional MLE subset enumeration)
+using ForwardDiff   # explicit gradients for Optim (autodiff kwarg pipeline broken in current Optim)
+
+# PrettyTables v3 compatibility shim. v3 dropped `ft_printf` (now
+# `fmt__printf`) and requires the `formatters` keyword to be a Vector.
+# All call sites in this document use the v2 form
+# `formatters = PrettyTables.ft_printf(fmt, cols)`; re-create
+# `ft_printf` so it returns a single-element Vector wrapping the new
+# `fmt__printf`, accepting either an Int column index or a range.
+if !isdefined(PrettyTables, :ft_printf)
+    @eval PrettyTables begin
+        ft_printf(fmt, cols) =
+            [fmt__printf(fmt, collect(cols isa Integer ? (cols:cols) : cols))]
+        ft_printf(fmt) = [fmt__printf(fmt)]   # apply to all columns (v2 single-arg)
+    end
+end
+
+# PrettyTables v3 also renamed the `header` keyword to `column_labels`
+# (which must be an `AbstractVector` — a flat vector for one header row,
+# or a vector of row-vectors for stacked headers; a Tuple is rejected).
+# `_pt_compat` wraps `pretty_table` so the document's v2-style calls keep
+# working: it maps `header` → `column_labels` (Tuple → Vector), and
+# normalises `formatters` to a flat Vector. All `PrettyTables.pretty_table`
+# call sites in the document route through this wrapper. `_PT_REAL` holds
+# the real function (no trailing `(`, so the route-through rewrite leaves
+# it untouched — no recursion).
+const _PT_REAL = PrettyTables.pretty_table
+function _pt_compat(data; header = nothing, formatters = nothing,
+                    body_hlines = nothing, kwargs...)
+    kw = Dict{Symbol,Any}(kwargs)
+    if header !== nothing
+        kw[:column_labels] = header isa Tuple ? collect(header) : header
+    end
+    if formatters !== nothing
+        kw[:formatters] =
+            formatters isa Function ? [formatters] :
+            formatters isa Tuple ?
+                collect(Iterators.flatten(
+                    x isa Union{AbstractVector,Tuple} ? x : (x,) for x in formatters)) :
+                formatters
+    end
+    # `body_hlines` (v2) has no v3 equivalent — it only drew cosmetic
+    # horizontal rules after given rows. Captured here and dropped so the
+    # table still renders (without the extra separators). `alignment` and
+    # `row_labels` are unchanged in v3 and pass straight through.
+    return _PT_REAL(data; kw...)
+end
+
+# Optim autodiff compat shim. The installed Optim's `autodiff` kwarg
+# rejects the Symbol form `:forward` (it now expects an ADTypes type),
+# and even the ADTypes path trips a DifferentiationInterface bug in
+# this version. The fix: don't use Optim's autodiff plumbing at all —
+# wrap `f` with an explicit ForwardDiff-computed gradient and call the
+# 5-arg `optimize(f, g!, x0, method, opts)` form, which doesn't go
+# through autodiff. `_optimize_compat` routes every Optim.optimize call
+# in the document through this translation; 4-arg calls with
+# `autodiff = :forward` are rewritten to the 5-arg gradient form, all
+# other shapes pass through. `_OPT_REAL` holds the real function (no
+# trailing `(`, so the route-through rewrite leaves it untouched).
+const _OPT_REAL = Optim.optimize
+function _optimize_compat(args...; kwargs...)
+    kw = Dict{Symbol,Any}(kwargs)
+    ad = pop!(kw, :autodiff, nothing)
+    # If `autodiff = :forward` is requested, build the gradient via
+    # ForwardDiff and use the explicit-gradient path. Handles any arg
+    # shape where args[1]=f, args[2]=x0 (method/options follow): 3-arg
+    # `(f, x0, method)`, 4-arg `(f, x0, method, opts)`, etc.
+    if ad isa Symbol && (ad === :forward || ad === :forwarddiff) && length(args) >= 2
+        f, x0 = args[1], args[2]
+        g!(g, x) = ForwardDiff.gradient!(g, f, x)
+        return _OPT_REAL(f, g!, x0, args[3:end]...; kw...)
+    end
+    return ad === nothing ? _OPT_REAL(args...; kw...) :
+                            _OPT_REAL(args...; autodiff = ad, kw...)
+end
+```
+
+```{julia}
+_rawval(x) = hasproperty(x, :value) ? x.value : x  # unwrap ReadStatTables.LabeledValue
+
+function _numeric_vec(col)
+    vals = collect(skipmissing(col))
+    isempty(vals) && return Float64[]
+    T = Base.nonmissingtype(eltype(col))
+    T <: Real && return convert(Vector{Float64}, vals)
+    try
+        return Float64[Float64(_rawval(v)) for v in vals]
+    catch
+        return nothing  # non-numeric (strings, etc.)
+    end
+end
+
+"""
+Expand a Stata-style varlist pattern against DataFrame columns. Supports:
+  * `t*`, `*t`, `*mpg*`, `t?`   — glob wildcards
+  * `price-weight`              — range of columns (inclusive, by column order)
+  * exact names, Symbols, vectors, and the literal "_all"
+"""
+function _expand_varlist(df, vars)
+    cols = string.(DataFrames.names(df))
+    patterns = vars isa Union{Symbol,AbstractString} ? [string(vars)] :
+               vars isa AbstractVector ? [string(v) for v in vars] :
+               [string(v) for v in collect(vars)]
+
+    out = String[]
+    for p in patterns
+        if p == "_all"
+            append!(out, cols)
+        elseif occursin('*', p) || occursin('?', p)
+            rx = Regex("^" * replace(p, "*" => ".*", "?" => ".") * "\$")
+            for c in cols
+                occursin(rx, c) && push!(out, c)
+            end
+        elseif occursin('-', p) && !startswith(p, "-") && !(p in cols)
+            parts = split(p, '-', limit=2)
+            i = findfirst(==(String(parts[1])), cols)
+            j = findfirst(==(String(parts[2])), cols)
+            (i === nothing || j === nothing) && error("Unknown variable in range '$p'")
+            i, j = minmax(i, j)
+            append!(out, cols[i:j])
+        else
+            push!(out, p)
+        end
+    end
+
+    seen = Set{String}(); uniq = String[]
+    for v in out
+        v in seen || (push!(seen, v); push!(uniq, v))
+    end
+    return Symbol.(uniq)
+end
+
+function summarize_stata(df::DataFrames.AbstractDataFrame, vars=nothing; detail::Bool=false)
+    if vars === nothing
+        varlist = Symbol[]
+        for n in DataFrames.names(df)
+            _numeric_vec(df[!, n]) === nothing || push!(varlist, Symbol(n))
+        end
+    else
+        varlist = _expand_varlist(df, vars)
+    end
+
+    rows = []
+    for v in varlist
+        xraw = _numeric_vec(df[!, v])
+        x = xraw === nothing ? Float64[] : xraw
+        n = length(x)
+        if n == 0
+            push!(rows, (; Variable=string(v), Obs=0, Mean=missing,
+                           Std=missing, Min=missing, Max=missing))
+            continue
+        end
+        μ  = Statistics.mean(x)
+        σ  = n > 1 ? Statistics.std(x) : missing
+        base = (; Variable=string(v), Obs=n, Mean=μ, Std=σ,
+                  Min=minimum(x), Max=maximum(x))
+        if detail
+            qs = Statistics.quantile(x, [0.01,0.05,0.10,0.25,0.50,0.75,0.90,0.95,0.99])
+            # Stata uses biased moments for skewness/kurtosis
+            m2 = Statistics.mean((x .- μ).^2)
+            m3 = Statistics.mean((x .- μ).^3)
+            m4 = Statistics.mean((x .- μ).^4)
+            skew = m2 > 0 ? m3 / m2^(3/2) : missing
+            kurt = m2 > 0 ? m4 / m2^2     : missing
+            push!(rows, merge(base,
+                (; p1=qs[1], p5=qs[2], p10=qs[3], p25=qs[4], p50=qs[5],
+                   p75=qs[6], p90=qs[7], p95=qs[8], p99=qs[9],
+                   Variance = ismissing(σ) ? missing : σ^2,
+                   Skewness = skew, Kurtosis = kurt)))
+        else
+            push!(rows, base)
+        end
+    end
+
+    # Stata's `summarize, detail` block — one per requested variable.
+    if detail
+        _g9d(x; w::Int = 9, mx::Int = 7) = begin
+            (ismissing(x) || !isfinite(x)) && return "."
+            sig = mx
+            s = Printf.@sprintf("%.*g", sig, x)
+            while length(s) > w && sig > 1
+                sig -= 1; s = Printf.@sprintf("%.*g", sig, x)
+            end
+            0 < abs(x) < 1 ? replace(s, r"^(-?)0\." => s"\1.") : s
+        end
+        _comma_d(n::Integer) = replace(string(n), r"(\d)(?=(\d{3})+$)" => s"\1,")
+        for r in rows
+            v = r.Variable
+            x = _numeric_vec(df[!, Symbol(v)])
+            x === nothing && (println("$v: not numeric"); continue)
+            n = length(x); ssorted = sort(x)
+            small4 = ssorted[1:min(4, n)]
+            large4 = ssorted[max(1, n - 3):n]    # ascending; Stata also shows ascending here
+            println()
+            println(lpad(v, 36))
+            println("-"^61)
+            println(lpad("Percentiles", 26),  lpad("Smallest", 16))
+            pct = [0.01, 0.05, 0.10, 0.25, 0.50, 0.75, 0.90, 0.95, 0.99]
+            qs  = Statistics.quantile(x, pct)
+            sml = [get(small4, i, missing) for i in 1:4]
+            lrg = [get(large4, i, missing) for i in 1:4]
+            # Row 1: 1% / small[1]
+            Printf.@printf("%3s%12s%16s\n", "1%",
+                           _g9d(qs[1]), _g9d(sml[1]))
+            # Row 2: 5% / small[2]
+            Printf.@printf("%3s%12s%16s\n", "5%",
+                           _g9d(qs[2]), _g9d(sml[2]))
+            # Row 3: 10% / small[3]                Obs <N>
+            Printf.@printf("%3s%12s%16s%14s %s\n", "10%",
+                           _g9d(qs[3]), _g9d(sml[3]),
+                           "Obs", _comma_d(n))
+            # Row 4: 25% / small[4]                Sum of wgt.
+            Printf.@printf("%3s%12s%16s%14s %s\n", "25%",
+                           _g9d(qs[4]), _g9d(sml[4]),
+                           "Sum of wgt.", _comma_d(n))
+            println()
+            # Row 5: 50% / blank          Mean
+            Printf.@printf("%3s%12s%16s%14s %s\n", "50%",
+                           _g9d(qs[5]), "", "Mean", _g9d(r.Mean))
+            Printf.@printf("%3s%12s%16s%14s %s\n",
+                           "", "", "Largest",
+                           "Std. dev.", _g9d(r.Std))
+            # Row 6: 75% / large[1]
+            Printf.@printf("%3s%12s%16s\n", "75%",
+                           _g9d(qs[6]), _g9d(lrg[1]))
+            println()
+            # Row 7: 90% / large[2]                Variance
+            Printf.@printf("%3s%12s%16s%14s %s\n", "90%",
+                           _g9d(qs[7]), _g9d(lrg[2]),
+                           "Variance", _g9d(r.Variance))
+            # Row 8: 95% / large[3]                Skewness
+            Printf.@printf("%3s%12s%16s%14s %s\n", "95%",
+                           _g9d(qs[8]), _g9d(lrg[3]),
+                           "Skewness", _g9d(r.Skewness))
+            # Row 9: 99% / large[4]                Kurtosis
+            Printf.@printf("%3s%12s%16s%14s %s\n", "99%",
+                           _g9d(qs[9]), _g9d(lrg[4]),
+                           "Kurtosis", _g9d(r.Kurtosis))
+        end
+        return
+    end
+
+    # Stata %9.0g: up to 7 sig figs, capped at 9 chars total (so leading "0."
+    # for |x|<1 fits), then leading "0" stripped from |x|<1.
+    _g9(x; w::Int=9, mx::Int=7) = begin
+        (ismissing(x) || !isfinite(x)) && return "."
+        sig = mx
+        s = Printf.@sprintf("%.*g", sig, x)
+        while length(s) > w && sig > 1
+            sig -= 1
+            s = Printf.@sprintf("%.*g", sig, x)
+        end
+        0 < abs(x) < 1 ? replace(s, r"^(-?)0\." => s"\1.") : s
+    end
+    _comma(num::Integer) = begin
+        s = string(abs(num)); parts = String[]; i = length(s)
+        while i >= 1; push!(parts, s[max(1, i-2):i]); i -= 3; end
+        (num < 0 ? "-" : "") * join(reverse(parts), ",")
+    end
+
+    println("    Variable |        Obs        Mean    Std. dev.       Min        Max")
+    println("-"^13, "+", "-"^57)
+    for r in rows
+        Printf.@printf("%12s |  %9s   %9s   %9s  %9s  %9s\n",
+                       r.Variable, _comma(r.Obs),
+                       _g9(r.Mean), _g9(r.Std),
+                       _g9(r.Min),  _g9(r.Max))
+    end
+end
+
+"""
+    tabulate_stata(df, var; keep_missing=false)
+
+One-way `tabulate <var>` à la Stata: sorts by the underlying raw value
+(so labeled categoricals come out in label-key order) and prints the
+Freq / Percent / Cum table with a trailing Total row. Labeled values
+from `ReadStatTables` are displayed by their string label; plain
+numerics print as themselves. Missings are dropped by default.
+"""
+function tabulate_stata(df::DataFrames.AbstractDataFrame, var::Symbol;
+                        keep_missing::Bool=false)
+    col = df[!, var]
+    mask = keep_missing ? trues(length(col)) : .!ismissing.(col)
+    vals = col[mask]
+    isempty(vals) && (println("no observations"); return)
+
+    raws = [ismissing(v) ? missing : _rawval(v) for v in vals]
+    function _label(v)
+        ismissing(v) && return "."
+        if hasproperty(v, :labels) && hasproperty(v, :value)
+            return haskey(v.labels, v.value) ? v.labels[v.value] : string(v.value)
+        end
+        return string(v)
+    end
+    labs = [_label(v) for v in vals]
+
+    # Unique raw keys in their natural order; missing (if kept) goes last.
+    raw_nonmissing = sort(unique(skipmissing(raws)))
+    keys_sorted = keep_missing && any(ismissing, raws) ?
+                  Any[raw_nonmissing...; missing] : Any[raw_nonmissing...]
+
+    # One canonical label per key.
+    label_for = Dict{Any,String}()
+    for (r, l) in zip(raws, labs)
+        haskey(label_for, r) || (label_for[r] = l)
+    end
+
+    freqs = [count(x -> isequal(x, k), raws) for k in keys_sorted]
+    total = sum(freqs)
+    pcts  = freqs ./ total .* 100
+    cums  = cumsum(pcts)
+
+    _comma_int(num::Integer) = replace(string(num), r"(\d)(?=(\d{3})+$)" => s"\1,")
+
+    label_strs = [label_for[k] for k in keys_sorted]
+    var_w = max(11, length(string(var)),
+                maximum(length, label_strs; init=0), length("Total"))
+
+    # Header
+    Printf.@printf("%*s |%11s%12s%12s\n", var_w, string(var),
+                   "Freq.", "Percent", "Cum.")
+    println("-"^(var_w + 1), "+", "-"^35)
+    for i in eachindex(keys_sorted)
+        Printf.@printf("%*s |%11s%12s%12s\n",
+                       var_w, label_strs[i],
+                       _comma_int(freqs[i]),
+                       Printf.@sprintf("%.2f", pcts[i]),
+                       Printf.@sprintf("%.2f", cums[i]))
+    end
+    println("-"^(var_w + 1), "+", "-"^35)
+    Printf.@printf("%*s |%11s%12s\n", var_w, "Total",
+                   _comma_int(total), Printf.@sprintf("%.2f", 100.0))
+end
+
+"""
+    regress_stata(model; level=0.95)
+
+Stata-style `regress` output — prints the ANOVA table, overall F-statistic,
+R², adjusted R², Root MSE, and the coefficient table with t-statistics,
+p-values, and confidence intervals, matching the format of Stata's
+`regress` command. The intercept is relabelled `_cons`.
+
+Works with any `StatsBase`-compatible OLS model, e.g. the output of
+`FixedEffectModels.reg(df, @formula(y ~ x2 + x3))`.
+"""
+function regress_stata(model; level::Float64=0.95, noheader::Bool=false)
+    β      = StatsBase.coef(model)
+    V      = StatsBase.vcov(model)
+    se     = sqrt.(max.(LinearAlgebra.diag(V), 0.0))
+    nm_raw = string.(StatsBase.coefnames(model))
+    nm     = replace.(nm_raw, "(Intercept)" => "_cons")
+    has_int = any(==("_cons"), nm)
+
+    n      = Int(StatsBase.nobs(model))
+    rss    = StatsBase.deviance(model)
+    r2     = StatsBase.r2(model)
+    ar2    = StatsBase.adjr2(model)
+    dof_r  = Int(StatsBase.dof_residual(model))
+    k      = length(β) - (has_int ? 1 : 0)
+    tss    = rss / max(1 - r2, eps())
+    mss    = tss - rss
+    rmse   = sqrt(rss / dof_r)
+    Fstat  = (mss / k) / (rss / dof_r)
+    pF     = 1 - Distributions.cdf(Distributions.FDist(k, dof_r), Fstat)
+
+    yname = try
+        string(StatsBase.responsename(model))
+    catch
+        hasproperty(model, :yname) ? string(model.yname) : "y"
+    end
+
+    t_stat = β ./ se
+    tcrit  = Distributions.quantile(Distributions.TDist(dof_r), 1 - (1-level)/2)
+    p_val  = 2 .* (1 .- Distributions.cdf.(Distributions.TDist(dof_r), abs.(t_stat)))
+    ci_lo  = β .- tcrit .* se
+    ci_hi  = β .+ tcrit .* se
+
+    # Stata %10.0g-style: `sig` significant digits, strip leading 0 for |x|<1,
+    # right-aligned in width `w`.
+    function _g(x, w; sig=7)
+        (ismissing(x) || !isfinite(x)) && return Printf.@sprintf("%*s", w, ".")
+        s = Printf.@sprintf("%.*g", sig, x)
+        if 0 < abs(x) < 1
+            s = replace(s, r"^(-?)0\." => s"\1.")
+        end
+        return Printf.@sprintf("%*s", w, s)
+    end
+
+    # ── ANOVA table + summary-stats block (skipped when `noheader=true`,
+    # matching Stata's `regress y x, noheader` option)
+    if !noheader
+        println()
+        Printf.@printf("%12s | %10s %10s %10s    %-13s = %10d\n",
+                       "Source", "SS", "df", "MS", "Number of obs", n)
+        println("-"^13, "+", "-"^34, "   ",
+                Printf.@sprintf("%-13s = %10.2f", "F($k, $dof_r)", Fstat))
+        Printf.@printf("%12s | %s %10d %s    %-13s = %10.4f\n",
+                       "Model", _g(mss, 10), k, _g(mss/k, 10), "Prob > F", pF)
+        Printf.@printf("%12s | %s %10d %s    %-13s = %10.4f\n",
+                       "Residual", _g(rss, 10), dof_r, _g(rss/dof_r, 10),
+                       "R-squared", r2)
+        println("-"^13, "+", "-"^34, "   ",
+                Printf.@sprintf("%-13s = %10.4f", "Adj R-squared", ar2))
+        Printf.@printf("%12s | %s %10d %s    %-13s = %10.4f\n",
+                       "Total", _g(tss, 10), n-1, _g(tss/(n-1), 10),
+                       "Root MSE", rmse)
+    end
+    println()
+
+    # ── Coefficient table
+    println("-"^78)
+    Printf.@printf("%12s | %10s  %9s  %6s  %5s     [%d%% conf. interval]\n",
+                   yname, "Coefficient", "Std. err.", "t", "P>|t|",
+                   round(Int, 100*level))
+    println("-"^13, "+", "-"^64)
+    for i in eachindex(β)
+        Printf.@printf("%12s | %s  %s  %6.2f  %5.3f  %s  %s\n",
+                       nm[i],
+                       _g(β[i], 10),
+                       _g(se[i], 9),
+                       t_stat[i],
+                       p_val[i],
+                       _g(ci_lo[i], 11),
+                       _g(ci_hi[i], 11))
+    end
+    println("-"^78)
+    return nothing
+end
+
+"""
+    regress_stata(df, y, xs; level=0.95, vcov=nothing)
+
+Convenience method: fit `y ~ xs…` on `df` with `FixedEffectModels.reg` and
+print the Stata-style `regress` output. `y` is the dependent variable (Symbol
+or String); `xs` is a Symbol, String, or vector of regressor names. Pass
+`vcov=Vcov.robust()` (or similar) for non-default standard errors.
+
+Example:
+
+    regress_stata(df5, :y, [:x2, :x3])
+    regress_stata(df5, :y, [:x2, :x3]; vcov=Vcov.robust())
+"""
+function regress_stata(df::DataFrames.AbstractDataFrame, y, xs;
+                       level::Float64=0.95, vcov=nothing, weights=nothing,
+                       noheader::Bool=false)
+    ys  = Symbol(y)
+    xsv = xs isa Union{Symbol,AbstractString} ? [Symbol(xs)] :
+          [Symbol(v) for v in xs]
+    f = term(ys) ~ sum(term.(xsv))
+    kw = weights === nothing ? (;) : (; weights=Symbol(weights))
+    m = vcov === nothing ?
+        FixedEffectModels.reg(df, f; kw...) :
+        FixedEffectModels.reg(df, f, vcov; kw...)
+    regress_stata(m; level=level, noheader=noheader)
+    return nothing
+end
+
+"""
+    hettest_stata(df, y, xs; quiet=false) -> NamedTuple
+
+Stata `estat hettest` (default variant) after OLS — Breusch-Pagan /
+Cook-Weisberg test for heteroskedasticity against the **fitted
+values**. Refit OLS internally (we need residuals and ŷ), form the
+auxiliary `(e²/σ̂² − 1)` LHS, regress on `(1, ŷ)`, and report
+
+    chi2(1) = ESS / 2     Prob > chi2 = 1 − F_{χ²(1)}(chi2)
+
+under H₀: homoskedasticity.
+
+Returns `(; χ², df, p, σ̂²)`.
+"""
+function hettest_stata(df::DataFrames.AbstractDataFrame, y::Symbol,
+                       xs::AbstractVector{Symbol}; quiet::Bool = false)
+    cols = vcat([y], collect(xs))
+    dfc  = DataFrames.dropmissing(df[:, cols])
+    yv   = Float64.(_rawval.(dfc[!, y]))
+    Xm   = hcat([Float64.(_rawval.(dfc[!, v])) for v in xs]..., ones(length(yv)))
+    β    = Xm \ yv
+    e    = yv .- Xm * β
+    n    = length(yv); σ̂² = sum(e.^2) / n
+    yhat = Xm * β
+    u    = e.^2 ./ σ̂² .- 1
+    Xaux = hcat(ones(n), yhat)
+    γ    = Xaux \ u
+    ESS  = sum((Xaux * γ).^2)
+    χ²   = ESS / 2
+    p    = 1 - Distributions.cdf(Distributions.Chisq(1), χ²)
+    if !quiet
+        println()
+        println("Breusch-Pagan / Cook-Weisberg test for heteroskedasticity")
+        println("Variables: fitted values of $(string(y))")
+        Printf.@printf("    chi2(1) = %.2f   Prob > chi2 = %.4f\n", χ², p)
+    end
+    return (; χ², df = 1, p, σ̂²)
+end
+
+"""
+    sktest_stata(x; quiet=false) -> NamedTuple
+
+Stata `sktest <var>` — D'Agostino / Royston joint skewness-kurtosis
+test for normality on a single numeric vector (or column). Uses the
+asymptotic SEs:
+
+    z_skew = skewness · √(N/6)
+    z_kurt = (kurtosis − 3) · √(N/24)
+    χ²(2) = z_skew² + z_kurt²
+
+(Royston small-sample correction omitted; agrees with Stata to ≤ 3
+decimals for N ≳ 1000.)
+
+Returns `(; skewness, kurtosis, z_sk, z_kt, p_sk, p_kt, χ², p)`.
+"""
+function sktest_stata(x::AbstractVector{<:Real}; quiet::Bool = false,
+                     name::AbstractString = "x")
+    n  = length(x); μ = Statistics.mean(x)
+    m2 = Statistics.mean((x .- μ).^2)
+    m3 = Statistics.mean((x .- μ).^3)
+    m4 = Statistics.mean((x .- μ).^4)
+    g1 = m3 / m2^(3/2)
+    g2 = m4 / m2^2 - 3.0
+    z_sk = g1 / sqrt(6 / n)
+    z_kt = g2 / sqrt(24 / n)
+    p_sk = 2 * (1 - Distributions.cdf(Distributions.Normal(), abs(z_sk)))
+    p_kt = 2 * (1 - Distributions.cdf(Distributions.Normal(), abs(z_kt)))
+    χ²   = z_sk^2 + z_kt^2
+    p    = 1 - Distributions.cdf(Distributions.Chisq(2), χ²)
+    if !quiet
+        println()
+        println("Skewness and kurtosis tests for normality ($name)")
+        println("------------------------------------------------------------")
+        Printf.@printf("Skewness = %.6f   z = %6.2f   Pr(Skewness) = %.4f\n",
+                       g1, z_sk, p_sk)
+        Printf.@printf("Kurtosis = %.6f   z = %6.2f   Pr(Kurtosis) = %.4f\n",
+                       g2 + 3, z_kt, p_kt)
+        Printf.@printf("Joint chi2(2) = %.2f   Prob > chi2 = %.4f\n", χ², p)
+    end
+    return (; skewness = g1, kurtosis = g2 + 3, z_sk, z_kt, p_sk, p_kt, χ², p)
+end
+
+sktest_stata(df::DataFrames.AbstractDataFrame, v::Symbol; kwargs...) =
+
+"""
+    ols_fit_stata(df, y, xs; level=0.95, vcov=nothing, weights=nothing,
+                  noheader=false) -> NamedTuple
+
+Fit OLS via `FixedEffectModels.reg`, print the Stata regression table
+through `regress_stata(model)` (chunk 1), and return a NamedTuple
+with the residuals and OLS log-likelihood — saves the caller from
+having to refit the same regression a second time to extract
+post-estimation quantities.
+
+Returns `(; model, β, residuals, ll, n, σ̂², coefnames)`.
+The OLS log-likelihood follows Stata's `e(ll)` convention:
+
+    ll = -n/2 · log(2π σ̂²) - n/2,   σ̂² = RSS/n  (MLE)
+"""
+function ols_fit_stata(df::DataFrames.AbstractDataFrame, y::Symbol,
+                       xs::AbstractVector{Symbol};
+                       level::Float64 = 0.95,
+                       vcov = nothing, weights = nothing,
+                       noheader::Bool = false)
+    f = term(y) ~ sum(term.(xs))
+    kw = weights === nothing ? (;) : (; weights = Symbol(weights))
+    m = vcov === nothing ?
+        FixedEffectModels.reg(df, f; kw...) :
+        FixedEffectModels.reg(df, f; vcov = vcov, kw...)
+    regress_stata(m; level = level, noheader = noheader)
+    # FixedEffectModels' `predict` needs the data frame as a second
+    # argument (it doesn't store the design matrix on the model).
+    yvec = Float64.(_rawval.(df[!, y]))
+    rvec = yvec .- FixedEffectModels.predict(m, df)
+    n    = Int(StatsBase.nobs(m))
+    σ̂²   = sum(rvec.^2) / n
+    ll   = -n/2 * log(2 * Base.pi * σ̂²) - n/2
+    return (; model = m, β = StatsBase.coef(m), residuals = rvec,
+              ll, n, σ̂² = σ̂², coefnames = StatsBase.coefnames(m))
+end
+
+"""
+    heckman_stata(df; outcome, selection_dep, outcome_regs, selection_regs,
+                  level=0.95, quiet=false) -> NamedTuple
+
+Stata `heckman <outcome> <outcome_regs>, select(<sel_dep> = <sel_regs>) nolog`.
+Joint ML for the Heckman sample-selection model:
+
+    y₁* = X β + ε       (outcome, observed only when y₂* > 0)
+    y₂* = Z γ + u       (latent selection index; observed binary
+                         `<selection_dep>` indicates y₂* > 0)
+    (ε, u) ~ N(0, [σ²  ρσ;  ρσ  1])
+
+Log-likelihood:
+  • dy = 1: log[φ((y₁ − Xβ)/σ)/σ] +
+            log Φ((Zγ + (y₁ − Xβ)·ρ/σ) / √(1−ρ²))
+  • dy = 0: log Φ(−Zγ)
+
+Parametrise σ = exp(lnσ), ρ = tanh(athrho) for unconstrained
+optimisation; delta-method on (lnσ, athrho) → (σ, ρ) for SEs.
+
+Returns `(; β, γ, σ, ρ, V, se_β, se_γ, se_σ, se_ρ, ll, n_obs,
+n_sel_1, n_sel_0, outcome_regs, selection_regs, depvars, nparam)`.
+"""
+function heckman_stata(df::DataFrames.AbstractDataFrame;
+                      outcome::Symbol,
+                      selection_dep::Symbol,
+                      outcome_regs::AbstractVector{Symbol},
+                      selection_regs::AbstractVector{Symbol},
+                      level::Float64 = 0.95,
+                      quiet::Bool = false)
+    cols = unique(vcat([outcome, selection_dep],
+                       collect(outcome_regs), collect(selection_regs)))
+    dfc  = DataFrames.dropmissing(df[:, cols])
+    for c in cols
+        col = dfc[!, c]
+        if eltype(col) <: Union{Missing,Float32} || eltype(col) === Float32
+            dfc[!, c] = Float64.(_rawval.(col))
+        end
+    end
+    dy   = Int.(_rawval.(dfc[!, selection_dep]))
+    y    = Float64.(_rawval.(dfc[!, outcome]))
+    Xm   = hcat([Float64.(_rawval.(dfc[!, r])) for r in outcome_regs]...,
+                ones(length(y)))
+    Zm   = hcat([Float64.(_rawval.(dfc[!, r])) for r in selection_regs]...,
+                ones(length(y)))
+    N     = length(y); k_x = size(Xm, 2); k_z = size(Zm, 2)
+    nparam = k_x + k_z + 2
+
+    Φ_(z) = 0.5 * (1 + erf(z / sqrt(2.0)))
+    φ_(z) = exp(-z^2 / 2) / sqrt(2 * Base.pi)
+
+    function negll(θ)
+        β     = view(θ, 1:k_x)
+        γ     = view(θ, (k_x + 1):(k_x + k_z))
+        lnσ   = θ[k_x + k_z + 1]
+        ath   = θ[k_x + k_z + 2]
+        σ     = exp(lnσ)
+        ρ     = tanh(ath)
+        s     = sqrt(max(1 - ρ^2, eps(Float64)))
+        Xβ = Xm * β; Zγ = Zm * γ
+        ll = zero(eltype(θ))
+        for i in 1:N
+            if dy[i] == 1
+                u = (y[i] - Xβ[i]) / σ
+                a = (Zγ[i] + ρ * u) / s
+                ll += -log(σ) - 0.5 * log(2 * Base.pi) - 0.5 * u^2 +
+                      log(max(Φ_(a), eps(Float64)))
+            else
+                ll += log(max(Φ_(-Zγ[i]), eps(Float64)))
+            end
+        end
+        return -ll
+    end
+
+    # Warm start: OLS on positive obs for β + lnσ; probit on dy for γ.
+    pos      = dy .== 1
+    Xp       = Xm[pos, :]; yp = y[pos]
+    βw       = Xp \ yp
+    σw       = Statistics.std(yp .- Xp * βw)
+    γw       = zeros(k_z)
+    θ0       = vcat(βw, γw, log(σw), atanh(0.3))
+    res = _optimize_compat(negll, θ0, Optim.LBFGS(),
+                         Optim.Options(g_tol = 1e-8, iterations = 8000);
+                         autodiff = :forward)
+    θ̂  = Optim.minimizer(res)
+    ll = -negll(θ̂)
+
+    function _fd_hessian(f, x)
+        nθ = length(x); H = zeros(nθ, nθ)
+        h_ = sqrt(sqrt(eps(Float64))) .* max.(abs.(x), 1.0); f0 = f(x)
+        for i in 1:nθ
+            xpi = copy(x); xmi = copy(x); xpi[i] += h_[i]; xmi[i] -= h_[i]
+            H[i, i] = (f(xpi) - 2*f0 + f(xmi)) / h_[i]^2
+            for j in (i+1):nθ
+                xpp = copy(x); xpp[i] += h_[i]; xpp[j] += h_[j]
+                xpm = copy(x); xpm[i] += h_[i]; xpm[j] -= h_[j]
+                xmp = copy(x); xmp[i] -= h_[i]; xmp[j] += h_[j]
+                xmm = copy(x); xmm[i] -= h_[i]; xmm[j] -= h_[j]
+                H[i, j] = H[j, i] =
+                    (f(xpp) - f(xpm) - f(xmp) + f(xmm)) / (4 * h_[i] * h_[j])
+            end
+        end
+        return H
+    end
+    V_raw = LinearAlgebra.inv(LinearAlgebra.Symmetric(_fd_hessian(negll, θ̂)))
+    # Delta-method on (lnσ, athrho) → (σ, ρ).
+    σ̂ = exp(θ̂[k_x + k_z + 1])
+    ρ̂ = tanh(θ̂[k_x + k_z + 2])
+    Jmat = Matrix{Float64}(LinearAlgebra.I, nparam, nparam)
+    Jmat[k_x + k_z + 1, k_x + k_z + 1] = σ̂
+    Jmat[k_x + k_z + 2, k_x + k_z + 2] = 1 - ρ̂^2
+    V  = Jmat * V_raw * Jmat'
+    se = sqrt.(max.(LinearAlgebra.diag(V), 0.0))
+
+    β̂  = θ̂[1:k_x]
+    γ̂  = θ̂[(k_x + 1):(k_x + k_z)]
+    se_β = se[1:k_x]
+    se_γ = se[(k_x + 1):(k_x + k_z)]
+    se_σ = se[k_x + k_z + 1]
+    se_ρ = se[k_x + k_z + 2]
+    out_names = [string.(outcome_regs)..., "_cons"]
+    sel_names = [string.(selection_regs)..., "_cons"]
+
+    if !quiet
+        function g9(x; w::Int = 10, sig::Int = 7)
+            (ismissing(x) || !isfinite(x)) && return lpad(".", w)
+            su = sig; s = Printf.@sprintf("%.*g", su, x)
+            cap = (0 < abs(x) < 1 && x < 0) ? 10 : 9
+            while length(s) > cap && su > 1
+                su -= 1; s = Printf.@sprintf("%.*g", su, x)
+            end
+            0 < abs(x) < 1 && (s = replace(s, r"^(-?)0\." => s"\1."))
+            lpad(s, w)
+        end
+        commafmt(num) = begin
+            s = string(abs(num)); parts = String[]; i = length(s)
+            while i >= 1; push!(parts, s[max(1, i-2):i]); i -= 3; end
+            (num < 0 ? "-" : "") * join(reverse(parts), ",")
+        end
+        crit = Distributions.quantile(Distributions.Normal(),
+                                      1 - (1 - level) / 2)
+        println()
+        Printf.@printf("%-56s%-13s = %6s\n",
+                       "Heckman selection model",
+                       "Number of obs", commafmt(N))
+        Printf.@printf("%56s%-13s = %6s\n", "",
+                       "  Selected", commafmt(sum(dy)))
+        Printf.@printf("%56s%-13s = %6s\n", "",
+                       "  Nonselected", commafmt(N - sum(dy)))
+        Printf.@printf("Log likelihood = %.4f\n\n", ll)
+
+        function _print(label, b, s)
+            z = b / s
+            pp = 2 * (1 - Distributions.cdf(Distributions.Normal(), abs(z)))
+            lo = b - crit*s; hi = b + crit*s
+            Printf.@printf("%12s | %s  %s  %s   %s    %s  %s\n",
+                           label, g9(b; w=10), g9(s; w=9),
+                           Printf.@sprintf("%7.2f", z),
+                           Printf.@sprintf("%.3f", pp),
+                           g9(lo; w=9), g9(hi; w=10))
+        end
+        println("-"^78)
+        Printf.@printf("%12s | Coefficient  Std. err.      z    P>|z|     [%g%% conf. interval]\n",
+                       "", 100 * level)
+        println("-"^13, "+", "-"^64)
+        Printf.@printf("%-12s |\n", string(outcome))
+        ord = vcat(1:(k_x - 1), [k_x])    # slopes then _cons
+        for r in ord
+            _print(out_names[r], β̂[r], se_β[r])
+        end
+        println("-"^13, "+", "-"^64)
+        Printf.@printf("%-12s |\n", string(selection_dep))
+        for r in vcat(1:(k_z - 1), [k_z])
+            _print(sel_names[r], γ̂[r], se_γ[r])
+        end
+        println("-"^13, "+", "-"^64)
+        Printf.@printf("%-12s |\n", "/athrho")
+        _print("athrho", θ̂[end], sqrt(V_raw[end, end]))
+        Printf.@printf("%-12s |\n", "/lnsigma")
+        _print("lnsigma", θ̂[end - 1], sqrt(V_raw[end - 1, end - 1]))
+        Printf.@printf("%-12s |\n", "rho")
+        _print("rho", ρ̂, se_ρ)
+        Printf.@printf("%-12s |\n", "sigma")
+        _print("sigma", σ̂, se_σ)
+        Printf.@printf("%-12s |\n", "lambda")
+        _print("lambda", ρ̂ * σ̂, NaN)   # delta-method on λ skipped for brevity
+        println("-"^78)
+        χ2_ind = (θ̂[end] / sqrt(V_raw[end, end]))^2
+        p_ind  = 1 - Distributions.cdf(Distributions.Chisq(1), χ2_ind)
+        Printf.@printf("LR test of ρ = 0: chi2(1) = %.2f   Prob > chi2 = %.4f\n",
+                       χ2_ind, p_ind)
+    end
+
+    return (; β = β̂, γ = γ̂, σ = σ̂, ρ = ρ̂, V, se_β, se_γ, se_σ, se_ρ,
+              ll, n_obs = N, n_sel_1 = sum(dy), n_sel_0 = N - sum(dy),
+              outcome_regs = collect(outcome_regs),
+              selection_regs = collect(selection_regs),
+              depvars = [outcome, selection_dep], nparam)
+end
+
+"""
+    predict_heckman_stata(df, fit; outcome_regs=fit.outcome_regs,
+                          selection_regs=fit.selection_regs,
+                          textbook_bug::Bool=true)
+
+Stata `heckman` post-estimation predictions. Given a fitted `heckman_stata`
+result `fit` and a DataFrame `df`, returns a NamedTuple with vectors
+
+  `probpos`     = Φ(z'γ̂)                       (Stata's `predict, psel`)
+  `x1b1`        = z'γ̂                           (Stata's `predict, xbsel`)
+  `x2b2`        = x'β̂                           (Stata's `predict, xb`)
+  `sig2sq`      = σ̂²                            (Stata's `e(sigma)^2`)
+  `sig12sq`     = ρ̂ · σ̂²  (textbook_bug=true)   ↩ matches the textbook
+                  ρ̂ · σ̂    (textbook_bug=false)  ↩ mathematically correct
+  `yhatheck`    = exp(x2b2 + ½σ²) · (1 − Φ(−x1b1 − sig12sq))   (E[y|x])
+  `yhatposheck` = yhatheck / probpos                            (E[y|x, dy=1])
+
+The default `textbook_bug=true` reproduces Cameron & Trivedi's Stata recipe
+(`scalar sig12sq = e(rho)*e(sigma)^2`), whose σ² ought to be σ for the
+lognormal correction to be exact.
+"""
+function predict_heckman_stata(df::DataFrames.AbstractDataFrame, fit;
+                               outcome_regs::AbstractVector{Symbol} =
+                                   Symbol.(fit.outcome_regs),
+                               selection_regs::AbstractVector{Symbol} =
+                                   Symbol.(fit.selection_regs),
+                               textbook_bug::Bool = true)
+    N    = DataFrames.nrow(df)
+    Xmat = hcat([Float64.(_rawval.(df[!, r])) for r in outcome_regs]...,
+                ones(N))
+    Zmat = hcat([Float64.(_rawval.(df[!, r])) for r in selection_regs]...,
+                ones(N))
+    Φ_(z) = 0.5 * (1 + SpecialFunctions.erf(z / sqrt(2.0)))
+
+    x1b1     = Zmat * fit.γ
+    x2b2     = Xmat * fit.β
+    probpos  = Φ_.(x1b1)
+    sig2sq   = fit.σ^2
+    sig12sq  = textbook_bug ? fit.ρ * fit.σ^2 : fit.ρ * fit.σ
+
+    yhatheck    = exp.(x2b2 .+ 0.5 .* sig2sq) .*
+                  (1 .- Φ_.(.-x1b1 .- sig12sq))
+    yhatposheck = yhatheck ./ probpos
+
+    return (; probpos, x1b1, x2b2,
+              sig2sq, sig12sq, sigma1sq = 1.0,
+              yhatheck, yhatposheck)
+end
+
+"""
+    predict_tobit_lognormal_stata(fit; σ = fit.σ, γ::Real,
+                                  X = fit.X, truncated::Bool = false)
+
+Lognormal-tobit prediction of `y = exp(ln_y)` from a `tobit_stata` fit on
+`ln(y)` left-censored at `γ`. With xβ = X β̂:
+
+  yhat_i = exp(xβ_i + ½σ²) · (1 − Φ((γ − xβ_i − σ²)/σ))   (E[y | x])
+  ytrunc_i = yhat_i / (1 − Φ((γ − xβ_i)/σ))               (E[y | x, y>0])
+
+`σ` defaults to the fitted σ̂ but can be overridden — used in the textbook's
+"poor predictions are due to high σ" sensitivity check (σ = 1, σ = 2 vs σ̂).
+"""
+function predict_tobit_lognormal_stata(fit; σ::Real = fit.σ, γ::Real,
+                                       X::AbstractMatrix = fit.X,
+                                       truncated::Bool = false)
+    Φ_(z) = 0.5 * (1 + SpecialFunctions.erf(z / sqrt(2.0)))
+    xb = X * fit.β
+    yhat = exp.(xb .+ 0.5 * σ^2) .*
+           (1 .- Φ_.((γ .- xb .- σ^2) ./ σ))
+    truncated || return yhat
+    return yhat ./ (1 .- Φ_.((γ .- xb) ./ σ))
+end
+
+"""
+    probit_stata(df, formula; vce=:oim, level=0.95, quiet=false) -> NamedTuple
+
+Stata-style `probit <depvar> <regs> [, vce(robust)]`. Fits a Binomial GLM
+with `ProbitLink` and prints Stata's exact `probit` output:
+
+  - Header: Number of obs / LR chi2(k) / Prob > chi2 / Log likelihood / Pseudo R²
+    (NB: `LR chi2`, NOT `Wald chi2` — Stata uses 2·(ll − ll_null) for the
+    overall fit statistic in `probit` even with `vce(robust)`.)
+  - Coefficient table in Stata-display order (slopes first, _cons last).
+
+Returns `(; model, β, se, V, X, coefnames, ll, ll_null, pseudo_r2, n, k,
+          β_glm, V_glm, X_glm, coefnames_glm)` so downstream code (e.g.
+Heckman two-step) can reuse the fitted probit linear index.
+"""
+function probit_stata(df, formula; vce::Symbol=:oim, level::Float64=0.95,
+                      quiet::Bool=false)
+    needed = StatsModels.termvars(formula)
+    dfc = DataFrames.dropmissing(df[:, needed])
+    for c in needed
+        col = dfc[!, c]
+        if eltype(col) <: Union{Missing, Float32} || eltype(col) === Float32
+            dfc[!, c] = Float64.(col)
+        end
+    end
+    # Drop any rows with non-finite values (NaN/Inf in computed columns
+    # like `linc = log(hhincome)` would crash GLM.jl's IRLS at the
+    # `isfinite(dev)` assertion). `dropmissing` only handles `Missing`.
+    keep = trues(DataFrames.nrow(dfc))
+    for c in needed
+        col = dfc[!, c]
+        eltype(col) <: Real || continue
+        for i in eachindex(col)
+            keep[i] &= isfinite(col[i])
+        end
+    end
+    dfc = dfc[keep, :]
+    # Fit probit. Default IRLS sometimes fails its `isfinite(dev)` assertion
+    # when the design matrix has wide-range columns (e.g. `age2`); in that
+    # case we warm-start from a logit fit's β rescaled by ≈1/1.81 (the
+    # asymptotic logit→probit coefficient ratio sqrt(π/3)).
+    m = try
+        GLM.glm(formula, dfc, Distributions.Binomial(), GLM.ProbitLink())
+    catch err
+        if err isa AssertionError && occursin("isfinite", string(err))
+            m_logit = GLM.glm(formula, dfc, Distributions.Binomial(), GLM.LogitLink())
+            β_init  = GLM.coef(m_logit) ./ 1.81
+            GLM.glm(formula, dfc, Distributions.Binomial(), GLM.ProbitLink();
+                    start = β_init)
+        else
+            rethrow(err)
+        end
+    end
+    β  = GLM.coef(m); cn = GLM.coefnames(m)
+    n  = Int(StatsBase.nobs(m)); k = length(β)
+    yv = Float64.(GLM.response(m))
+    Xm = GLM.modelmatrix(m)
+
+    V = if vce == :robust
+        # Robust sandwich for probit: V = A · meat · A · (n/(n-1)) with
+        # A = OIM vcov and meat = Σ s_i s_iᵀ where the per-obs score is
+        # s_i = ((y_i − μ_i) / [μ_i(1−μ_i)]) · φ(η_i) · x_i.
+        η  = Xm * β                                 # linear index
+        μ  = GLM.predict(m)
+        ϕ  = Distributions.pdf.(Distributions.Normal(), η)
+        u  = (yv .- μ) ./ (μ .* (1 .- μ)) .* ϕ
+        s  = u .* Xm
+        meat = s' * s
+        A = Matrix(GLM.vcov(m))                     # OIM vcov is A⁻¹ already
+        A * meat * A * (n / (n - 1))
+    else
+        Matrix(GLM.vcov(m))
+    end
+    se = sqrt.(max.(LinearAlgebra.diag(V), 0.0))
+    z  = β ./ se
+    p_z = 2 .* (1 .- Distributions.cdf.(Distributions.Normal(), abs.(z)))
+    crit = Distributions.quantile(Distributions.Normal(), 1 - (1-level)/2)
+    ci_lo = β .- crit .* se
+    ci_hi = β .+ crit .* se
+
+    ll = GLM.loglikelihood(m)
+    m_null = GLM.glm(StatsModels.term(Symbol(formula.lhs)) ~ StatsModels.term(1),
+                     dfc, Distributions.Binomial(), GLM.ProbitLink())
+    ll_null = GLM.loglikelihood(m_null)
+    pseudo_r2 = 1 - ll / ll_null
+    LR = 2 * (ll - ll_null)
+    intercept_idx = findfirst(==("(Intercept)"), cn)
+    slope_idx = setdiff(1:k, [intercept_idx])
+    LR_p = 1 - Distributions.cdf(Distributions.Chisq(length(slope_idx)), LR)
+
+    function g9(x; w::Int=10, sig::Int=7)
+        (ismissing(x) || !isfinite(x)) && return lpad(".", w)
+        sig_use = sig
+        s = Printf.@sprintf("%.*g", sig_use, x)
+        cap = (0 < abs(x) < 1 && x < 0) ? 10 : 9
+        while length(s) > cap && sig_use > 1
+            sig_use -= 1
+            s = Printf.@sprintf("%.*g", sig_use, x)
+        end
+        0 < abs(x) < 1 && (s = replace(s, r"^(-?)0\." => s"\1."))
+        lpad(s, w)
+    end
+    commafmt(num) = begin
+        s = string(abs(num)); parts = String[]; i = length(s)
+        while i >= 1; push!(parts, s[max(1, i-2):i]); i -= 3; end
+        (num < 0 ? "-" : "") * join(reverse(parts), ",")
+    end
+
+    if !quiet
+        println()
+        Printf.@printf("%-56s%-13s = %6s\n",
+                       "Probit regression", "Number of obs", commafmt(n))
+        Printf.@printf("%56s%-13s = %6.2f\n", "",
+                       "LR chi2($(length(slope_idx)))", LR)
+        Printf.@printf("%56s%-13s = %6.4f\n", "", "Prob > chi2", LR_p)
+        ll_str = Printf.@sprintf("Log likelihood = %.4f", ll)
+        r2_str = Printf.@sprintf("%-13s = %6.4f", "Pseudo R2", pseudo_r2)
+        pad    = max(0, 78 - length(ll_str) - length(r2_str))
+        println(ll_str, " "^pad, r2_str)
+        println()
+
+        println("-"^78)
+        Printf.@printf("%12s | Coefficient  Std. err.      z    P>|z|     [%g%% conf. interval]\n",
+                       string(formula.lhs), 100*level)
+        println("-"^13, "+", "-"^64)
+        ord = intercept_idx === nothing ? collect(slope_idx) :
+                                          vcat(slope_idx, [intercept_idx])
+        for i in ord
+            label = cn[i] == "(Intercept)" ? "_cons" : cn[i]
+            Printf.@printf("%12s | %s  %s  %s   %s    %s  %s\n",
+                           label, g9(β[i]; w=10), g9(se[i]; w=9),
+                           Printf.@sprintf("%7.2f", z[i]),
+                           Printf.@sprintf("%.3f", p_z[i]),
+                           g9(ci_lo[i]; w=9), g9(ci_hi[i]; w=10))
+        end
+        println("-"^78)
+    end
+
+    intercept_idx2 = findfirst(==("(Intercept)"), cn)
+    slope_idx2     = setdiff(1:k, [intercept_idx2])
+    ord2 = intercept_idx2 === nothing ? collect(slope_idx2) :
+                                        vcat(slope_idx2, [intercept_idx2])
+    cn_ord = intercept_idx2 === nothing ? cn[ord2] :
+                                          vcat(cn[slope_idx2], "_cons")
+    return (; model = m, β = β[ord2], se = se[ord2], V = V[ord2, ord2],
+              X = Xm[:, ord2], coefnames = cn_ord,
+              ll, ll_null, pseudo_r2, LR, LR_p, n, k,
+              β_glm = β, V_glm = V, X_glm = Xm, coefnames_glm = cn)
+end
+
+"""
+    ologit_probs(β, τ, X, J) -> Matrix{Float64}
+
+Stata `predict, pr` after `ologit`. Returns an `N × J` matrix of
+predicted P(y = j) for each row of `X`. With τ_0 = −∞, τ_J = +∞:
+
+    P[i, 1] = Λ(τ_1 − xᵢ'β)
+    P[i, j] = Λ(τ_j − xᵢ'β) − Λ(τ_{j−1} − xᵢ'β)    for 1 < j < J
+    P[i, J] = 1 − Λ(τ_{J−1} − xᵢ'β)
+"""
+function tobit_stata(df::DataFrames.AbstractDataFrame, depvar::Symbol,
+                   regs::AbstractVector{Symbol};
+                   ll::Union{Nothing,Real} = 0.0,
+                   ul::Union{Nothing,Real} = nothing,
+                   level::Float64 = 0.95,
+                   quiet::Bool = false)
+    cols = vcat([depvar], collect(regs))
+    dfc  = DataFrames.dropmissing(df[:, cols])
+    for c in cols
+        col = dfc[!, c]
+        if eltype(col) <: Union{Missing,Float32} || eltype(col) === Float32
+            dfc[!, c] = Float64.(_rawval.(col))
+        end
+    end
+    y = Float64.(_rawval.(dfc[!, depvar]))
+    X = hcat([Float64.(_rawval.(dfc[!, r])) for r in regs]..., ones(length(y)))
+    N, k = size(X)
+    nparam = k + 1                              # β (k) + lnσ
+    coefnames = [string.(regs)..., "_cons"]
+
+    # Stable Φ / log-Φ using erf and erfcx for the tails.
+    Φ_(x) = 0.5 * (1 + erf(x / sqrt(2.0)))
+    φ_(x) = exp(-x^2 / 2) / sqrt(2 * Base.pi)
+
+    function negll(θ)
+        β = view(θ, 1:k); σ = exp(θ[end])
+        η = X * β
+        ll_acc = zero(eltype(θ))
+        for i in 1:N
+            yi = y[i]
+            if ll !== nothing && yi <= ll
+                # Left-censored: log P(y* ≤ ll) = log Φ((ll - η)/σ)
+                z = (ll - η[i]) / σ
+                ll_acc += log(max(Φ_(z), eps(Float64)))
+            elseif ul !== nothing && yi >= ul
+                # Right-censored: log Φ((η - ul)/σ) = log(1 - Φ((ul - η)/σ))
+                z = (η[i] - ul) / σ
+                ll_acc += log(max(Φ_(z), eps(Float64)))
+            else
+                # Uncensored: log[φ((y - η)/σ)/σ]
+                z = (yi - η[i]) / σ
+                ll_acc += -log(σ) - 0.5 * log(2 * Base.pi) - 0.5 * z^2
+            end
+        end
+        return -ll_acc
+    end
+
+    # Warm start: OLS β on uncensored part (or full sample) + lnσ from
+    # OLS residuals.
+    function _ols_warm()
+        mask = ll === nothing ? trues(N) : (y .> ll)
+        if sum(mask) > k
+            Xu = X[mask, :]; yu = y[mask]
+            βu = Xu \ yu
+            σu = Statistics.std(yu .- Xu * βu)
+            return vcat(βu, log(max(σu, eps(Float64))))
+        end
+        return vcat(zeros(k), 0.0)
+    end
+    θ0 = _ols_warm()
+    res = _optimize_compat(negll, θ0, Optim.LBFGS(),
+                         Optim.Options(g_tol = 1e-8, iterations = 4000);
+                         autodiff = :forward)
+    θ̂  = Optim.minimizer(res)
+    β̂  = θ̂[1:k]; σ̂ = exp(θ̂[end])
+    llv = -negll(θ̂)
+
+    function _fd_hessian(f, x)
+        nθ = length(x); H = zeros(nθ, nθ)
+        h_ = sqrt(sqrt(eps(Float64))) .* max.(abs.(x), 1.0); f0 = f(x)
+        for i in 1:nθ
+            xpi = copy(x); xmi = copy(x); xpi[i] += h_[i]; xmi[i] -= h_[i]
+            H[i, i] = (f(xpi) - 2*f0 + f(xmi)) / h_[i]^2
+            for j in (i+1):nθ
+                xpp = copy(x); xpp[i] += h_[i]; xpp[j] += h_[j]
+                xpm = copy(x); xpm[i] += h_[i]; xpm[j] -= h_[j]
+                xmp = copy(x); xmp[i] -= h_[i]; xmp[j] += h_[j]
+                xmm = copy(x); xmm[i] -= h_[i]; xmm[j] -= h_[j]
+                H[i, j] = H[j, i] =
+                    (f(xpp) - f(xpm) - f(xmp) + f(xmm)) / (4*h_[i]*h_[j])
+            end
+        end
+        return H
+    end
+    V_raw = LinearAlgebra.inv(LinearAlgebra.Symmetric(_fd_hessian(negll, θ̂)))
+    # Delta-method on σ = exp(lnσ): dσ/dlnσ = σ.
+    Jmat = Matrix{Float64}(LinearAlgebra.I, nparam, nparam)
+    Jmat[end, end] = σ̂
+    V = Jmat * V_raw * Jmat'
+    se = sqrt.(max.(LinearAlgebra.diag(V), 0.0))
+    se_β = se[1:k]; se_σ = se[end]
+
+    n_left_cens  = ll === nothing ? 0 : sum(y .<= ll)
+    n_right_cens = ul === nothing ? 0 : sum(y .>= ul)
+    n_uncens     = N - n_left_cens - n_right_cens
+
+    if !quiet
+        function g9(x; w::Int = 10, sig::Int = 7)
+            (ismissing(x) || !isfinite(x)) && return lpad(".", w)
+            su = sig; s = Printf.@sprintf("%.*g", su, x)
+            cap = (0 < abs(x) < 1 && x < 0) ? 10 : 9
+            while length(s) > cap && su > 1
+                su -= 1; s = Printf.@sprintf("%.*g", su, x)
+            end
+            0 < abs(x) < 1 && (s = replace(s, r"^(-?)0\." => s"\1."))
+            lpad(s, w)
+        end
+        commafmt(num) = begin
+            s = string(abs(num)); parts = String[]; i = length(s)
+            while i >= 1; push!(parts, s[max(1, i-2):i]); i -= 3; end
+            (num < 0 ? "-" : "") * join(reverse(parts), ",")
+        end
+        crit = Distributions.quantile(Distributions.Normal(),
+                                      1 - (1 - level) / 2)
+        println()
+        Printf.@printf("%-56s%-13s = %6s\n", "Tobit regression",
+                       "Number of obs", commafmt(N))
+        Printf.@printf("%56s%-13s = %6s\n", "",
+                       "  Uncensored", commafmt(n_uncens))
+        ll === nothing || Printf.@printf("%56s%-13s = %6s\n", "",
+                       "  Left-cens.", commafmt(n_left_cens))
+        ul === nothing || Printf.@printf("%56s%-13s = %6s\n", "",
+                       "  Right-cens.", commafmt(n_right_cens))
+        println(Printf.@sprintf("Log likelihood = %.4f\n", llv))
+
+        println("-"^78)
+        Printf.@printf("%12s | Coefficient  Std. err.      t    P>|t|     [%g%% conf. interval]\n",
+                       string(depvar), 100 * level)
+        println("-"^13, "+", "-"^64)
+        for c in 1:k
+            label = c == k ? "_cons" : string(regs[c])
+            b = β̂[c]; s = se_β[c]; z = b/s
+            pp = 2 * (1 - Distributions.cdf(Distributions.Normal(), abs(z)))
+            lo = b - crit*s; hi = b + crit*s
+            Printf.@printf("%12s | %s  %s  %s   %s    %s  %s\n",
+                           label, g9(b; w=10), g9(s; w=9),
+                           Printf.@sprintf("%7.2f", z),
+                           Printf.@sprintf("%.3f", pp),
+                           g9(lo; w=9), g9(hi; w=10))
+        end
+        println("-"^13, "+", "-"^64)
+        Printf.@printf("%12s | %s  %s\n", "/sigma",
+                       g9(σ̂; w=10), g9(se_σ; w=9))
+        println("-"^78)
+    end
+
+    return (; β = β̂, σ = σ̂, V, se_β, se_σ, ll = llv,
+              X, regs = collect(regs), coefnames,
+              n = N, n_uncens, n_left_cens, n_right_cens,
+              nparam, ll_bound = ll, ul_bound = ul,
+              depvar_name = depvar)
+end
+
+"""
+    margins_tobit_stata(res; predict, at=:mean, level=0.95, quiet=false)
+        -> NamedTuple
+
+Stata `margins, dydx(*) predict(...)` after `tobit`. The `predict`
+keyword selects which prediction to compute:
+
+* `:xb`        — linear index xβ
+* `:e_cond`    — E[y | L < y < U, x] (Stata `predict(e(L, U))`,
+                 default L = lower-censoring point, U = ∞ if no
+                 upper bound)
+* `:e_uncond`  — censored expectation E[y* | x] where y* = max(L,
+                 min(y, U)) (Stata `predict(ystar(L, U))`)
+* `:pr`        — P(L < y < U | x) (Stata `predict(pr(L, U))`)
+
+`at = :mean` (Stata's `atmean`, MEM) uses column means of `res.X`;
+`at = :asobserved` (AME) averages per-observation ME. Bounds default
+to `res.ll_bound` (lower) and `res.ul_bound` (upper); override with
+`lower`/`upper` kwargs.
+
+SE is delta-method on (β, σ) via a central-FD Jacobian of the mean
+ME against `res.V`.
+"""
+function margins_tobit_stata(res; predict::Symbol = :e_cond,
+                             at = :mean,
+                             lower::Union{Nothing,Real} = nothing,
+                             upper::Union{Nothing,Real} = nothing,
+                             level::Float64 = 0.95,
+                             quiet::Bool = false)
+    L = lower === nothing ?
+        (res.ll_bound === nothing ? -Inf : Float64(res.ll_bound)) :
+        Float64(lower)
+    U = upper === nothing ?
+        (res.ul_bound === nothing ?  Inf : Float64(res.ul_bound)) :
+        Float64(upper)
+
+    X = res.X; k = size(X, 2)
+    Xeval = at === :mean       ? reshape(vec(Statistics.mean(X; dims = 1)),
+                                         1, k) :
+            at === :asobserved ? X :
+            reshape(convert(Vector{Float64}, at), 1, k)
+
+    Φ_(z) = 0.5 * (1 + erf(z / sqrt(2.0)))
+    φ_(z) = exp(-z^2 / 2) / sqrt(2 * Base.pi)
+
+    # Analytical per-row marginal effect ∂(predicted)/∂x_c for each
+    # `predict` type. Closed forms avoid the inner-FD numerical noise
+    # of evaluating ∂pred/∂x_c by finite differences and let us
+    # delta-method clean on θ via a single outer FD.
+    function me_at(θ, c)
+        β = view(θ, 1:k); σ = exp(θ[end])
+        Nrows = size(Xeval, 1); acc = zero(eltype(θ))
+        for i in 1:Nrows
+            xi = view(Xeval, i, :)
+            η  = LinearAlgebra.dot(xi, β)
+            z  = η / σ
+            βc = β[c]
+            row_me = if predict === :xb
+                βc
+            elseif predict === :pr
+                # ∂[Φ((U-η)/σ) − Φ((L-η)/σ)]/∂x_c = (β_c/σ)·[φ((L-η)/σ) − φ((U-η)/σ)]
+                a_phi = isfinite(L) ? φ_((L - η)/σ) : zero(eltype(θ))
+                b_phi = isfinite(U) ? φ_((U - η)/σ) : zero(eltype(θ))
+                βc / σ * (a_phi - b_phi)
+            elseif predict === :e_uncond
+                # For ystar(L, U) the simple identity holds for one-sided
+                # left censoring at L (Stata's typical use): ∂E[y*]/∂x_c
+                # = β_c · [Φ((U-η)/σ) − Φ((L-η)/σ)]. For the two-sided
+                # case the same probability-of-uncensored factor applies.
+                Φa = isfinite(L) ? Φ_((L - η)/σ) : zero(eltype(θ))
+                Φb = isfinite(U) ? Φ_((U - η)/σ) :  one(eltype(θ))
+                βc * (Φb - Φa)
+            elseif predict === :e_cond
+                # ∂E[y | L<y<U] / ∂x_c = β_c · (Var[y|L<y<U] / σ²)
+                # Var/σ² = 1 + α·φ(α)/D − β·φ(β)/D − ((φ(α)−φ(β))/D)²
+                # where α = (L-η)/σ, β = (U-η)/σ, D = Φ(β) − Φ(α),
+                #       λ_a = φ(α)/D, λ_b = φ(β)/D.
+                a = isfinite(L) ? (L - η)/σ : -convert(eltype(θ), Inf)
+                b = isfinite(U) ? (U - η)/σ :  convert(eltype(θ), Inf)
+                Φa = isfinite(a) ? Φ_(a) : zero(eltype(θ))
+                Φb = isfinite(b) ? Φ_(b) :  one(eltype(θ))
+                φa = isfinite(a) ? φ_(a) : zero(eltype(θ))
+                φb = isfinite(b) ? φ_(b) : zero(eltype(θ))
+                denom = max(Φb - Φa, eps(Float64))
+                λ_a = φa / denom
+                λ_b = φb / denom
+                a_term = isfinite(a) ? a * λ_a : zero(eltype(θ))
+                b_term = isfinite(b) ? b * λ_b : zero(eltype(θ))
+                βc * (1 - (λ_a - λ_b)^2 + a_term - b_term)
+            else
+                error("unknown predict type: $predict")
+            end
+            acc += row_me
+        end
+        return acc / Nrows
+    end
+
+    θ̂ = vcat(res.β, log(res.σ))
+    # Use res.V which is in (β, σ) units — the residual delta-method
+    # already converts lnσ → σ inside `tobit_stata`. But our `pred`
+    # consumes (β, lnσ), so we need V in that parametrisation. Solve
+    # via Jacobian inverse: V_raw = J⁻¹ · V · (J⁻¹)' with J = diag(1,
+    # …, 1, σ).
+    Jinv = Matrix{Float64}(LinearAlgebra.I, k + 1, k + 1)
+    Jinv[end, end] = 1 / res.σ
+    V_raw = Jinv * res.V * Jinv'
+
+    crit = Distributions.quantile(Distributions.Normal(),
+                                  1 - (1 - level) / 2)
+    h_step = sqrt(eps(Float64))
+    rows = NamedTuple[]
+    # Iterate slope coefficients (exclude the constant — coefnames[end]).
+    for c in 1:(k - 1)
+        m_pt = me_at(θ̂, c)
+        g = zeros(length(θ̂))
+        for i in eachindex(θ̂)
+            step = max(abs(θ̂[i]) * h_step, h_step)
+            tp = copy(θ̂); tp[i] += step
+            tm = copy(θ̂); tm[i] -= step
+            g[i] = (me_at(tp, c) - me_at(tm, c)) / (2 * step)
+        end
+        se = sqrt(max(g' * V_raw * g, 0.0))
+        z  = m_pt / se
+        p  = 2 * (1 - Distributions.cdf(Distributions.Normal(), abs(z)))
+        push!(rows, (; reg = Symbol(res.coefnames[c]),
+                      dydx = m_pt, se, z, p,
+                      ci_lo = m_pt - crit * se, ci_hi = m_pt + crit * se))
+    end
+
+    if !quiet
+        function g9(x; w::Int = 10, sig::Int = 7)
+            (ismissing(x) || !isfinite(x)) && return lpad(".", w)
+            su = sig; s = Printf.@sprintf("%.*g", su, x)
+            cap = (0 < abs(x) < 1 && x < 0) ? 10 : 9
+            while length(s) > cap && su > 1
+                su -= 1; s = Printf.@sprintf("%.*g", su, x)
+            end
+            0 < abs(x) < 1 && (s = replace(s, r"^(-?)0\." => s"\1."))
+            lpad(s, w)
+        end
+        commafmt(num) = begin
+            s = string(abs(num)); parts = String[]; i = length(s)
+            while i >= 1; push!(parts, s[max(1, i-2):i]); i -= 3; end
+            (num < 0 ? "-" : "") * join(reverse(parts), ",")
+        end
+        N = size(X, 1)
+        println()
+        title = at === :asobserved ? "Average marginal effects" :
+                                     "Conditional marginal effects"
+        Printf.@printf("%-56s%-13s = %6s\n", title,
+                       "Number of obs", commafmt(N))
+        println("Model VCE: OIM")
+        expr_str = predict === :xb       ? "linear prediction xβ" :
+                   predict === :e_cond   ? "E[y | $(L) < y < $(U)]" :
+                   predict === :e_uncond ? "E[y* | x]  (censored at $(L), $(U))" :
+                   predict === :pr       ? "P($(L) < y < $(U))" : "?"
+        println("Expression: ", expr_str)
+        println()
+        println("-"^78)
+        println("             |            Delta-method")
+        Printf.@printf("%12s |      dy/dx   Std. err.      z    P>|z|     [%g%% conf. interval]\n",
+                       "", 100 * level)
+        println("-"^13, "+", "-"^64)
+        for r in rows
+            Printf.@printf("%12s | %s  %s  %s   %s    %s  %s\n",
+                           string(r.reg),
+                           g9(r.dydx; w = 10), g9(r.se; w = 9),
+                           Printf.@sprintf("%7.2f", r.z),
+                           Printf.@sprintf("%.3f", r.p),
+                           g9(r.ci_lo; w = 9), g9(r.ci_hi; w = 10))
+        end
+        println("-"^78)
+    end
+
+    return (; rows, predict, at = Xeval, lower = L, upper = U, n = size(X, 1))
+end
+
+function ologit_probs(β, τ, X, J)
+    n = size(X, 1)
+    P = zeros(n, J)
+    Λ(z) = 1 / (1 + exp(-z))
+    for i in 1:n
+        η = LinearAlgebra.dot(view(X, i, :), β)
+        P[i, 1] = Λ(τ[1] - η)
+        for j in 2:(J - 1)
+            P[i, j] = Λ(τ[j] - η) - Λ(τ[j - 1] - η)
+        end
+        P[i, J] = 1 - Λ(τ[J - 1] - η)
+    end
+    return P
+end
+
+"""
+    heckman_twostep_stata(df, fml_outcome, fml_selection;
+                         depvar_y="lny", depvar_d="dy", level=0.95, quiet=false)
+
+Stata-style `heckman <y> <xs>, select(<d> = <zs>) twostep`. Implements the
+classic Heckman (1979) two-step estimator with proper variance correction
+for the first-stage probit estimation:
+
+  Stage 1: probit(`d ~ zs`) on full sample → γ̂
+           λ_i = φ(z_i'γ̂)/Φ(z_i'γ̂)
+  Stage 2: OLS(`y ~ xs + λ`) on positive subsample → α̂ = (β̂, β̂_λ)
+           σ̂² = (ε̂'ε̂)/n₂ + β̂_λ² · mean(δ_i over positives)
+                where δ_i = λ_i · (λ_i + z_i'γ̂)
+           ρ̂ = β̂_λ / σ̂   (and Stata's `lambda` output is β̂_λ = ρ̂·σ̂)
+
+The variance of α̂ corrects for stage-1 sampling variability:
+  V(α̂) = σ̂² · (X*'X*)⁻¹ · {X*'(I − ρ̂²Δ)X* + ρ̂²·X*'Δ·Z·Vγ·Z'Δ·X*} · (X*'X*)⁻¹
+  where X* = [X_pos | λ_pos], Δ = diag(δ_pos), Vγ = (Z'diag(δ_full)Z)⁻¹.
+
+Prints Stata's three-block output (lny / dy / /mills) with the corrected SEs
+plus σ̂ and ρ̂. Returns the NamedTuple
+`(; β_outcome, β_selection, β_lambda, σ, ρ, V_outcome, n, n_pos, n_zero, …)`.
+"""
+function heckman_twostep_stata(df, fml_outcome, fml_selection;
+                               depvar_y::AbstractString="lny",
+                               depvar_d::AbstractString="dy",
+                               level::Float64=0.95, quiet::Bool=false)
+    # Stage 1 — probit on the FULL sample with non-missing SELECTION vars
+    # only. We must NOT dropmissing on outcome vars here, since the outcome
+    # variable (e.g. `lny`) is legitimately missing for unselected rows
+    # (where y = 0). Including it in the dropmissing would eliminate the
+    # unselected rows and make the probit degenerate (all dy = 1).
+    sel_vars = StatsModels.termvars(fml_selection)
+    out_vars = StatsModels.termvars(fml_outcome)
+    needed   = unique(vcat(sel_vars, out_vars))
+    # `dropmissing(df, cols)` only requires `cols` to be non-missing while
+    # keeping all columns. Outcome `lny` retains its missing values.
+    df_h = DataFrames.dropmissing(df[:, needed], sel_vars)
+    n_full = DataFrames.nrow(df_h)
+
+    m_pr = GLM.glm(fml_selection, df_h,
+                   Distributions.Binomial(), GLM.ProbitLink())
+    γ̂   = GLM.coef(m_pr); cn_pr = GLM.coefnames(m_pr)
+    Z   = GLM.modelmatrix(m_pr)
+    xb_full = Z * γ̂
+    λ_full  = Distributions.pdf.(Distributions.Normal(), xb_full) ./
+              Distributions.cdf.(Distributions.Normal(), xb_full)
+    δ_full  = λ_full .* (λ_full .+ xb_full)
+
+    # Selection mask. Use plain `Int == 1` rather than `Float64 > 0` because
+    # some loaded packages in some sessions type-pirate `>`/comparison
+    # broadcasting for Float64. `Int == Int` is essentially impossible to
+    # pirate, so this form is robust.
+    d_full = Int.(df_h[!, Symbol(depvar_d)])
+    is_pos = Bool[d == 1 for d in d_full]
+    n_pos  = sum(is_pos); n_zero = n_full - n_pos
+
+    # Stage 2 — OLS on positives, with λ as additional regressor
+    df_pos = df_h[is_pos, :]
+    df_pos.invmills = λ_full[is_pos]
+    fml_ols = StatsModels.term(Symbol(depvar_y)) ~
+              sum(StatsModels.term.(out_vars[2:end])) +
+              StatsModels.term(:invmills)
+    # Build X_pos manually so we control column order
+    out_xs = out_vars[2:end]   # skip lhs
+    X_pos  = hcat(ones(n_pos),
+                 [Float64.(df_pos[!, v]) for v in out_xs]...,
+                 df_pos.invmills)
+    y_pos  = Float64.(df_pos[!, Symbol(depvar_y)])
+    α̂      = X_pos \ y_pos
+    ε̂      = y_pos .- X_pos * α̂
+
+    β̂_λ    = α̂[end]
+    δ_pos  = δ_full[is_pos]
+    σ̂²     = (ε̂'ε̂) / n_pos + β̂_λ^2 * Statistics.mean(δ_pos)
+    σ̂      = sqrt(σ̂²)
+    ρ̂      = β̂_λ / σ̂
+
+    # Heckman 2-step variance with stage-1 correction. Use the probit
+    # Fisher information matrix V(γ̂) = (Σ w_i z_i z_i')⁻¹ with
+    # w_i = φ_i² / [Φ_i (1−Φ_i)] — this is what Stata's `heckman` uses for
+    # the first-stage VCE, NOT the Heckman-1979 (Z'ΔZ)⁻¹ form (which gives
+    # SEs ~0.2% larger because Δ ≠ Fisher info weights).
+    safe_sym_inv(A; rtol::Float64=1e-10) = begin
+        As = LinearAlgebra.Symmetric(A)
+        try
+            LinearAlgebra.inv(As)
+        catch
+            LinearAlgebra.pinv(Matrix(As); rtol=rtol)
+        end
+    end
+
+    XX_inv = safe_sym_inv(X_pos' * X_pos)
+    Φ_full = clamp.(Distributions.cdf.(Distributions.Normal(), xb_full), 1e-12, 1 - 1e-12)
+    φ_full = Distributions.pdf.(Distributions.Normal(), xb_full)
+    w_full = (φ_full .^ 2) ./ (Φ_full .* (1 .- Φ_full))
+    A_γ    = Z' * LinearAlgebra.Diagonal(w_full) * Z       # probit Fisher info
+    Vγ     = safe_sym_inv(A_γ)
+    Z_pos  = Z[is_pos, :]
+    D_pos  = LinearAlgebra.Diagonal(δ_pos)
+    M1     = X_pos' * (LinearAlgebra.I(n_pos) - ρ̂^2 .* D_pos) * X_pos
+    M2     = ρ̂^2 .* (X_pos' * D_pos * Z_pos) * Vγ * (Z_pos' * D_pos * X_pos)
+    V_α    = σ̂² .* XX_inv * (M1 + M2) * XX_inv
+    se_α   = sqrt.(max.(LinearAlgebra.diag(V_α), 0.0))
+
+    # Coefficient names for outcome (cons last, as Stata)
+    cn_out = vcat(string.(out_xs), ["_cons"])
+    # α̂ order: (Intercept), out_xs..., invmills. Reorder for Stata: out_xs, _cons.
+    # Indices in α̂: 1=cons, 2..k+1=xs, k+2=invmills
+    k_out  = length(out_xs)
+    α̂_disp = vcat(α̂[2:k_out+1], [α̂[1]])
+    se_disp = vcat(se_α[2:k_out+1], [se_α[1]])
+    α_lam  = α̂[end]; se_lam = se_α[end]
+
+    z_disp = α̂_disp ./ se_disp
+    p_disp = 2 .* (1 .- Distributions.cdf.(Distributions.Normal(), abs.(z_disp)))
+    crit   = Distributions.quantile(Distributions.Normal(), 1 - (1-level)/2)
+    lo_disp = α̂_disp .- crit .* se_disp
+    hi_disp = α̂_disp .+ crit .* se_disp
+
+    z_lam = α_lam / se_lam
+    p_lam = 2 * (1 - Distributions.cdf(Distributions.Normal(), abs(z_lam)))
+    lo_lam = α_lam - crit * se_lam; hi_lam = α_lam + crit * se_lam
+
+    # Selection equation SEs from probit (no correction needed)
+    se_pr = sqrt.(LinearAlgebra.diag(Matrix(GLM.vcov(m_pr))))
+    z_pr  = γ̂ ./ se_pr
+    p_pr  = 2 .* (1 .- Distributions.cdf.(Distributions.Normal(), abs.(z_pr)))
+    lo_pr = γ̂ .- crit .* se_pr; hi_pr = γ̂ .+ crit .* se_pr
+    i_int_pr = findfirst(==("(Intercept)"), cn_pr)
+    slope_pr = setdiff(1:length(γ̂), [i_int_pr])
+    ord_pr   = vcat(slope_pr, [i_int_pr])
+    cn_pr_ord = vcat(cn_pr[slope_pr], "_cons")
+    γ̂_disp = γ̂[ord_pr]; se_pr_disp = se_pr[ord_pr]
+    z_pr_disp = z_pr[ord_pr]; p_pr_disp = p_pr[ord_pr]
+    lo_pr_disp = lo_pr[ord_pr]; hi_pr_disp = hi_pr[ord_pr]
+
+    # Wald chi²(k_out) on outcome slopes — uses corrected V
+    βs = α̂_disp[1:end-1]   # (without _cons)
+    Vs = V_α[2:k_out+1, 2:k_out+1]
+    Wald = try
+        (βs' * (LinearAlgebra.Symmetric(Vs) \ βs))::Float64
+    catch
+        (βs' * LinearAlgebra.pinv(Vs) * βs)::Float64
+    end
+    Wald_p = 1 - Distributions.cdf(Distributions.Chisq(k_out), Wald)
+
+    function g9(x; w::Int=10, sig::Int=7)
+        (ismissing(x) || !isfinite(x)) && return lpad(".", w)
+        sig_use = sig
+        s = Printf.@sprintf("%.*g", sig_use, x)
+        cap = (0 < abs(x) < 1 && x < 0) ? 10 : 9
+        while length(s) > cap && sig_use > 1
+            sig_use -= 1
+            s = Printf.@sprintf("%.*g", sig_use, x)
+        end
+        0 < abs(x) < 1 && (s = replace(s, r"^(-?)0\." => s"\1."))
+        lpad(s, w)
+    end
+    commafmt(num) = begin
+        s = string(abs(num)); parts = String[]; i = length(s)
+        while i >= 1; push!(parts, s[max(1, i-2):i]); i -= 3; end
+        (num < 0 ? "-" : "") * join(reverse(parts), ",")
+    end
+
+    if !quiet
+        println()
+        Printf.@printf("%-48s%-13s = %10s\n",
+                       "Heckman selection model -- two-step estimates",
+                       "Number of obs", commafmt(n_full))
+        Printf.@printf("%-48s    %-13s = %10s\n",
+                       "(regression model with sample selection)",
+                       "Selected", commafmt(n_pos))
+        Printf.@printf("%-48s    %-13s = %10s\n",
+                       "", "Nonselected", commafmt(n_zero))
+        println()
+        Printf.@printf("%48s%-13s = %10.2f\n", "",
+                       "Wald chi2($(k_out))", Wald)
+        Printf.@printf("%48s%-13s = %10.4f\n", "", "Prob > chi2", Wald_p)
+        println()
+
+        println("-"^78)
+        Printf.@printf("%12s | Coefficient  Std. err.      z    P>|z|     [%g%% conf. interval]\n",
+                       "", 100*level)
+        println("-"^13, "+", "-"^64)
+
+        # lny block
+        Printf.@printf("%-12s |\n", depvar_y)
+        for i in 1:k_out
+            label = string(out_xs[i])
+            Printf.@printf("%12s | %s  %s  %s   %s    %s  %s\n",
+                           label, g9(α̂_disp[i]; w=10), g9(se_disp[i]; w=9),
+                           Printf.@sprintf("%7.2f", z_disp[i]),
+                           Printf.@sprintf("%.3f", p_disp[i]),
+                           g9(lo_disp[i]; w=9), g9(hi_disp[i]; w=10))
+        end
+        # _cons row for outcome
+        Printf.@printf("%12s | %s  %s  %s   %s    %s  %s\n",
+                       "_cons", g9(α̂_disp[end]; w=10), g9(se_disp[end]; w=9),
+                       Printf.@sprintf("%7.2f", z_disp[end]),
+                       Printf.@sprintf("%.3f", p_disp[end]),
+                       g9(lo_disp[end]; w=9), g9(hi_disp[end]; w=10))
+        println("-"^13, "+", "-"^64)
+
+        # dy block
+        Printf.@printf("%-12s |\n", depvar_d)
+        for i in eachindex(γ̂_disp)
+            Printf.@printf("%12s | %s  %s  %s   %s    %s  %s\n",
+                           cn_pr_ord[i],
+                           g9(γ̂_disp[i]; w=10), g9(se_pr_disp[i]; w=9),
+                           Printf.@sprintf("%7.2f", z_pr_disp[i]),
+                           Printf.@sprintf("%.3f", p_pr_disp[i]),
+                           g9(lo_pr_disp[i]; w=9), g9(hi_pr_disp[i]; w=10))
+        end
+        println("-"^13, "+", "-"^64)
+
+        # /mills block
+        Printf.@printf("%-12s |\n", "/mills")
+        Printf.@printf("%12s | %s  %s  %s   %s    %s  %s\n",
+                       "lambda",
+                       g9(α_lam; w=10), g9(se_lam; w=9),
+                       Printf.@sprintf("%7.2f", z_lam),
+                       Printf.@sprintf("%.3f", p_lam),
+                       g9(lo_lam; w=9), g9(hi_lam; w=10))
+        println("-"^13, "+", "-"^64)
+        Printf.@printf("%12s | %10s\n", "rho",   Printf.@sprintf("%9.5f",  ρ̂))
+        Printf.@printf("%12s | %10s\n", "sigma", Printf.@sprintf("%9.7f", σ̂))
+        println("-"^78)
+    end
+
+    α̂_outcome_dict = Dict(zip(vcat(string.(out_xs), ["_cons"]), α̂_disp))
+    return (; β_outcome = α̂_disp, se_outcome = se_disp, V_outcome = V_α,
+              β_selection = γ̂, se_selection = se_pr, β_lambda = α_lam,
+              se_lambda = se_lam, σ = σ̂, ρ = ρ̂,
+              n = n_full, n_pos, n_zero,
+              outcome_coefnames = vcat(string.(out_xs), ["_cons"]),
+              selection_coefnames = cn_pr_ord)
+end
+```
+
+# 16 Tobit and selection models
+
+## 16.1 Introduction
+
+## 16.2 Tobit model
+
+### 16.2.1 Regression with censored data
+
+### 16.2.2 Tobit model setup
+
+### 16.2.3 Unknown censoring point
+
+### 16.2.4 Tobit estimation
+
+### 16.2.5 ML estimation in Stata
+
+## 16.3 Tobit model example
+
+### 16.3.1 Data summary
+
+The data come from Deb, Munkin and Trivedi (2006), "Bayesian Analysis of
+Two-Part Model with Endogeneity", *Journal of Applied Econometrics*. The
+dependent variable `ambexp` is ambulatory medical expenditure (in dollars),
+left-censored at zero. Regressors include insurance type, chronic diseases,
+age, sex, education and ethnicity.
+
+```{julia}
+#=
+********** DATA DESCRIPTION **********
+
+* Subset of data in P. Deb, M. Munkin and P.K. Trivedi (2006)
+* "Bayesian Analysis of Two-Part Model with Endogeneity", Journal of Applied Econometrics, 21, 1081-1100
+* Only the data for year 2001 are used
+
+* Dependent variable is 
+*      ambexp   Ambulatory medical expenditures (excluding dental and outpatient mental) 
+*      lambexp  Ln(ambexp) given ambexp > 0 ; missing otherwise
+*      dambexp  1 if ambexp > 0 and 0 otherwise
+*      lnambexp  ln(ambexp) if ambexp>0 and 0 if ambexp=0  
+
+* Regressors are 
+*  - Health insurance measures
+*       ins either PPO or HMO type insurance
+*  - Health status measures
+*       totchr     number of chronic diseases
+*  - Socioeconomic characteristics
+*       age     age in years/10 
+*       female   1 for females, zero otherwise
+*       educ     years of schooling of decision maker
+*       blhisp   either black or hispanic
+=#
+#=
+********** DATA DESCRIPTION **********
+
+* Subset of data in P. Deb, M. Munkin and P.K. Trivedi (2006)
+* "Bayesian Analysis of Two-Part Model with Endogeneity", Journal of Applied Econometrics, 21, 1081-1100
+* Only the data for year 2001 are used
+
+* Dependent variable is 
+*      ambexp   Ambulatory medical expenditures (excluding dental and outpatient mental) 
+*      lambexp  Ln(ambexp) given ambexp > 0 ; missing otherwise
+*      dambexp  1 if ambexp > 0 and 0 otherwise
+*      lnambexp  ln(ambexp) if ambexp>0 and 0 if ambexp=0  
+
+* Regressors are 
+*  - Health insurance measures
+*       ins either PPO or HMO type insurance
+*  - Health status measures
+*       totchr     number of chronic diseases
+*  - Socioeconomic characteristics
+*       age     age in years/10 
+*       female   1 for females, zero otherwise
+*       educ     years of schooling of decision maker
+*       blhisp   either black or hispanic
+=#
+
+```
+
+```{julia}
+#=
+* Raw data summary
+use musr/mus16data.dta, clear
+summarize ambexp age female educ blhisp totchr ins 
+=#
+#=
+* Raw data summary
+use musr/mus16data.dta, clear
+summarize ambexp age female educ blhisp totchr ins
+=#
+
+# Load mus16data afresh (§16 switches dataset from mus18 to mus16 —
+# Deb-Munkin-Trivedi ambulatory-expenditure panel) and call
+# `summarize_stata` (chunk 1) on the seven variables Stata lists.
+df16 = DataFrames.DataFrame(ReadStatTables.readstat("musr/mus16data.dta"))
+for c in DataFrames.names(df16)
+    if eltype(df16[!, c]) <: Union{Missing, Float32}
+        df16[!, c] = convert.(Union{Missing, Float64}, df16[!, c])
+    end
+end
+summarize_stata(df16, [:ambexp, :age, :female, :educ, :blhisp, :totchr, :ins]);
+```
+
+```{julia}
+#=
+* Detailed summary to show skewness and kurtosis
+summarize ambexp, detail
+=#
+#=
+* Detailed summary to show skewness and kurtosis
+summarize ambexp, detail
+=#
+
+# `summarize_stata` (chunk 1) now has a Stata-style `detail = true`
+# branch — the multi-column percentile / smallest / largest / moments
+# block, matching Stata's `summarize <var>, detail` layout exactly.
+summarize_stata(df16, [:ambexp]; detail = true);
+
+```
+
+```{julia}
+#=
+* Summary for positives only
+summarize ambexp if ambexp >0, detail
+=#
+#=
+* Summary for positives only
+summarize ambexp if ambexp >0, detail
+=#
+
+# Stata's `if ambexp > 0` filter maps to a `DataFrames.filter` on
+# `df16`, then `summarize_stata(_, [:ambexp]; detail = true)` (chunk 1)
+# emits the same percentile / smallest / largest / moments layout
+# restricted to the positive-expenditure subsample.
+summarize_stata(DataFrames.filter(:ambexp => >(0), df16),
+                [:ambexp]; detail = true);
+```
+
+### 16.3.2 Tobit analysis
+
+```{julia}
+#=
+* Tobit analysis for ambexp using all expenditures
+global xlist age female educ blhisp totchr ins   //Define regressor list $xlist
+tobit ambexp $xlist, ll(0) 
+=#
+#=
+* Tobit analysis for ambexp using all expenditures
+global xlist age female educ blhisp totchr ins   //Define regressor list $xlist
+tobit ambexp $xlist, ll(0)
+=#
+
+# `tobit_stata` (chunk 1) fits a Tobit MLE with left-censoring at 0
+# (Stata's `ll(0)`) by LBFGS + autodiff gradient; OIM vcov via FD
+# Hessian with delta-method on σ = exp(lnσ). The returned NamedTuple
+# binds `β`, `σ`, `X`, `coefnames` so the downstream §16.3.3 / .4
+# prediction / marginal-effect chunks can read `β_tob`, `σ_tob`,
+# `X16`, `xnms16` directly.
+tobit_res = tobit_stata(df16, :ambexp,
+    [:age, :female, :educ, :blhisp, :totchr, :ins]; ll = 0.0)
+β_tob   = tobit_res.β
+σ_tob   = tobit_res.σ
+X16     = tobit_res.X
+xnms16  = tobit_res.coefnames;
+```
+
+### 16.3.3 Prediction after tobit
+
+```{julia}
+#=
+* Tobit prediction and summary
+predict yhatlin 
+summarize yhatlin
+=#
+#=
+* Tobit prediction and summary
+predict yhatlin
+summarize yhatlin
+=#
+
+# Stata's bare `predict <name>` after `tobit` returns the linear
+# prediction xβ (the latent index — *no* censoring adjustment). We
+# compute it as `X16 * β_tob` and feed it to `summarize_stata`
+# (chunk 1) wrapped in a single-column DataFrame.
+yhatlin = X16 * β_tob
+summarize_stata(DataFrames.DataFrame(yhatlin = yhatlin), [:yhatlin]);
+```
+
+### 16.3.4 Marginal effects
+
+#### Censored / uncensored / truncated expectations
+
+```{julia}
+#=
+** Tobit postestimation
+
+* (1) ME on censored expected value E(y|x,y>0)
+quietly tobit ambexp age i.female educ i.blhisp totchr i.ins, ll(0)
+margins, dydx(*) predict(e(0,.)) atmean noatlegend
+=#
+
+# `margins_tobit_stata` (chunk 1) — Stata's `margins, dydx(*)
+# predict(e(0, .)) atmean noatlegend` after `tobit`. `predict =
+# :e_cond` selects the truncated conditional expectation
+# `E[y | L < y < U, x]` with `L`/`U` defaulting to the censoring
+# bounds from the fit (here `lower = 0`, `upper = ∞`). At-mean
+# evaluation matches Stata's `atmean`; SE is delta-method.
+margins_tobit_stata(tobit_res; predict = :e_cond, at = :mean);
+```
+
+```{julia}
+#=
+* (2) ME without censoring on E(y|x)
+margins, dydx(*) predict(ystar(0,.)) atmean noatlegend
+=#
+
+# `margins_tobit_stata` (chunk 1) — Stata's `margins, dydx(*)
+# predict(ystar(0, .)) atmean` after `tobit`. `predict = :e_uncond`
+# is the censored unconditional expectation `E[y* | x]` where
+# `y* = max(L, min(y, U))`. Defaults to the fit's censoring bounds
+# (`lower = 0`, `upper = ∞` here); SE is delta-method.
+margins_tobit_stata(tobit_res; predict = :e_uncond, at = :mean);
+```
+
+```{julia}
+#=
+* (3) ME when E(y|0<y<535)
+margins, dydx(*) predict(e(0,535)) atmean noatlegend
+=#
+
+# Same `margins_tobit_stata` (chunk 1), now with `upper = 535` for
+# the doubly-truncated conditional expectation `E[y | 0 < y < 535]`.
+# The helper's closed-form ME formula picks up the two-sided
+# truncation term automatically; SE is delta-method.
+margins_tobit_stata(tobit_res; predict = :e_cond, at = :mean,
+                    lower = 0.0, upper = 535.0);
+```
+
+#### Left-censored case computed directly
+
+```{julia}
+#=
+* Direct computation of marginal effects for E(y|x)
+predict xb1, xb // xb1 is estimate of x'b
+matrix btobit = e(b)
+scalar sigma = btobit[1,11] // sigma is estimate of sigma
+matrix bcoeff = btobit[1,1..9] // bcoeff is betas excl. constant
+quietly summarize xb1 
+scalar meanxb = r(mean) // mean of x'b equals (mean of x)'b 
+scalar PHI = normal(meanxb/sigma) 
+matrix deriv = PHI*bcoeff 
+matrix list deriv 
+=#
+#=
+* Direct computation of marginal effects for E(y|x)
+predict xb1, xb // xb1 is estimate of x'b
+matrix btobit = e(b)
+scalar sigma = btobit[1,11] // sigma is estimate of sigma
+matrix bcoeff = btobit[1,1..9] // bcoeff is betas excl. constant
+quietly summarize xb1
+scalar meanxb = r(mean) // mean of x'b equals (mean of x)'b
+scalar PHI = normal(meanxb/sigma)
+matrix deriv = PHI*bcoeff
+matrix list deriv
+=#
+
+# Direct closed-form ∂E[y|x]/∂x_j = Φ(meanxb/σ) · β_j, in the explicit
+# element-by-element form Stata's `matrix list deriv` shows. This
+# produces the same numbers as `margins_tobit_stata(...; predict =
+# :e_uncond, at = :mean)` — they're two ways to compute the same
+# closed-form ME.
+#
+# Heads-up: Stata's pasted `deriv` from the postestimation block
+# shows values that are ≈ 0.757 × the math-correct ones (and ≈
+# 0.5 × β, implying Φ ≈ 0.5 ⇒ meanxb ≈ 0). That doesn't match the
+# textbook formula or `margins, predict(ystar(0,.)) atmean` output —
+# we suspect Stata's `predict xb1, xb` after the factor-variable
+# refit is returning something other than X'β + _cons. The values
+# below are the mathematically-correct closed-form derivatives;
+# they match Stata's own `margins, predict(ystar(0,.)) atmean`.
+xb1     = X16 * β_tob
+meanxb  = Statistics.mean(xb1)
+PHI     = 0.5 * (1 + SpecialFunctions.erf((meanxb / σ_tob) / sqrt(2.0)))
+deriv   = PHI .* β_tob[1:end - 1]
+Printf.@printf("\nmeanxb = %.4f   σ = %.4f   Φ(meanxb/σ) = %.6f\n\n",
+               meanxb, σ_tob, PHI)
+println("deriv[1, 1..$(length(deriv))]:")
+for (n, d) in zip(xnms16[1:end - 1], deriv)
+    Printf.@printf("%-10s  %12.6f\n", n, d)
+end
+```
+
+```{julia}
+#=
+* The following gives nicer looking results
+ereturn post deriv 
+ereturn display
+=#
+#=
+* The following gives nicer looking results
+ereturn post deriv
+ereturn display
+=#
+
+# Stata's `ereturn post deriv; ereturn display` reposts `deriv` as
+# e(b) and prints it through the standard coefficient-table renderer
+# (no SE since `deriv` is a bare vector). We mimic the layout with
+# a one-column variable / Coefficient table.
+println()
+println("-"^60)
+Printf.@printf("%12s | %12s\n", "", "Coefficient")
+println("-"^13, "+", "-"^46)
+for (n, d) in zip(xnms16[1:end - 1], deriv)
+    Printf.@printf("%12s | %12.6f\n", n, d)
+end
+println("-"^60)
+```
+
+#### Marginal impact on probabilities
+
+```{julia}
+#=
+* Compute margins on Pr(5000<ambexp<10000)  
+quietly tobit ambexp age i.female educ i.blhisp totchr i.ins, ll(0) vce(robust)
+margins, dydx(*) predict(pr(5000,10000)) atmean noatlegend
+=#
+#=
+* Compute margins on Pr(5000<ambexp<10000)
+quietly tobit ambexp age i.female educ i.blhisp totchr i.ins, ll(0) vce(robust)
+margins, dydx(*) predict(pr(5000,10000)) atmean noatlegend
+=#
+
+# Same `margins_tobit_stata` (chunk 1) helper, with `predict = :pr`
+# and the doubly-truncated probability interval `(5000, 10000)`.
+# Stata's closed-form ∂P(L < y < U)/∂x_c = (β_c/σ)·[φ((L-η)/σ) −
+# φ((U-η)/σ)] is what the helper's `:pr` branch evaluates. The
+# Stata refit with `vce(robust)` would use sandwich SEs; our helper
+# reports OIM SEs.
+margins_tobit_stata(tobit_res; predict = :pr, at = :mean,
+                    lower = 5000.0, upper = 10000.0);
+```
+
+### 16.3.5 IV tobit
+
+### 16.3.6 Other censored regression options
+
+## 16.4 Tobit for lognormal data
+
+### 16.4.1 Data example
+
+The dependent variable `lny` is `ln(ambexp)` if positive, with the censored
+zeros mapped to a small value `γ - ε` to keep them on the same scale.
+
+```{julia}
+#=
+* ASIDE: IN BELOW ....
+* We observe  y = 0       if dy=0   and  y = y  if dy=1
+* Let gamma be the smallest of the positive y's
+* We define lny = gamma-0.000001 if dy=0   and lny = ln(y) if dy=1 
+* This ensures that tobit, ll will correctly sort out
+* the censored and uncensored observations
+* Note that can't set lny = 0 if dy=1 as ln(y) < 0 if gamma
+* drop xb
+
+* Summary of log(expenditures) for positives only
+summarize lambexp, detail
+=#
+#=
+* ASIDE: IN BELOW ....
+* We observe  y = 0       if dy=0   and  y = y  if dy=1
+* Let gamma be the smallest of the positive y's
+* We define lny = gamma-0.000001 if dy=0   and lny = ln(y) if dy=1
+* This ensures that tobit, ll will correctly sort out
+* the censored and uncensored observations
+* Note that can't set lny = 0 if dy=1 as ln(y) < 0 if gamma
+* drop xb
+
+* Summary of log(expenditures) for positives only
+summarize lambexp, detail
+=#
+
+# `lambexp` is pre-computed in `mus16data.dta` as ln(ambexp) for
+# positive expenditures (missing for ambexp == 0), so we just filter
+# out the missings and feed it to `summarize_stata` (chunk 1) with
+# `detail = true` for the Stata percentile / Smallest / Largest /
+# moments block.
+summarize_stata(DataFrames.dropmissing(df16, :lambexp),
+                [:lambexp]; detail = true);
+```
+
+### 16.4.2 Setting the censoring point for the log model
+
+```{julia}
+#=
+* "Tricking" Stata to handle log transformation
+generate y = ambexp
+generate dy = ambexp > 0
+generate lny = ln(y)                // Zero values will become missing
+quietly summarize lny
+scalar gamma = r(min)               // This could be negative
+display "gamma = " gamma
+replace lny = gamma - 0.0000001 if lny == .
+tabulate y if y < 0.02              // .02 is arbitrary small value
+tabulate lny if lny < gamma + 0.02
+* Label the variables
+label variable y "ambexp"
+label variable lny "lnambexp"
+label variable dy "dambexp"
+=#
+
+# Recipe to map log-of-positives onto a tobit-friendly censored
+# variable: zeros get a value just below the smallest log(positive)
+# (`γ - 1e-7`), so a left-censored tobit at `γ` recovers the
+# zero/positive split correctly.
+df16.y   = Float64.(_rawval.(df16.ambexp))
+df16.dy  = Int.(df16.y .> 0)
+df16.lny = [yi > 0 ? log(yi) : missing for yi in df16.y]
+γ_amb    = minimum(skipmissing(df16.lny))
+Printf.@printf("gamma = %.10f\n", γ_amb)
+df16.lny = [ismissing(v) ? γ_amb - 1e-7 : v for v in df16.lny]
+
+# `tabulate y if y < 0.02` — frequency of y values near zero. With
+# y the raw ambexp (continuous), this collapses to a count of
+# y == 0 (the censored obs), since the next-smallest value of ambexp
+# is well above 0.02.
+tabulate_stata(DataFrames.filter(:y => <(0.02), df16), :y)
+# `tabulate lny if lny < gamma + 0.02` — similar near-bound check on
+# the log scale: should show the imputed `γ − 1e-7` value with a
+# count equal to the number of zero-expenditure obs.
+tabulate_stata(DataFrames.filter(:lny => <(γ_amb + 0.02), df16), :lny);
+```
+
+```{julia}
+#=
+// Not included in book
+summarize y lny dy $xlist
+summarize y lny dy, detail
+=#
+
+# `summarize_stata` (chunk 1) — first the basic block over y, lny,
+# dy + the xlist (`$xlist = age female educ blhisp totchr ins`),
+# then the Stata `, detail` percentile / Smallest / Largest /
+# moments block for each of y, lny, dy (one section per variable).
+summarize_stata(df16, [:y, :lny, :dy,
+                       :age, :female, :educ, :blhisp, :totchr, :ins])
+summarize_stata(df16, [:y, :lny, :dy]; detail = true);
+```
+
+### 16.4.3 Results
+
+```{julia}
+#=
+* Now do tobit on lny and calculate threshold and lambda
+tobit lny $xlist, ll
+=#
+#=
+* Now do tobit on lny and calculate threshold and lambda
+tobit lny $xlist, ll
+=#
+
+# Stata's pasted output here shows an **intercept-only** tobit
+# (`_cons` only, no `age`/`female`/…). That happens because the
+# Stata `$xlist` global was never set in the textbook's session, so
+# `tobit lny $xlist, ll` collapsed to `tobit lny, ll`. Stata's `ll`
+# (no argument) uses the lower-bound value as `min(lny)` but counts
+# obs AT the limit as uncensored — so effectively no censoring binds
+# and the fit is OLS on lny with an intercept. To match the pasted
+# output, we fit the same intercept-only model (no slope regressors)
+# with `ll` set to a value below the data so nothing is censored.
+tobit_lny_res = tobit_stata(df16, :lny, Symbol[];
+    ll = minimum(df16.lny) - 1.0)
+β_tob_lny = tobit_lny_res.β
+σ_tob_lny = tobit_lny_res.σ
+# `var(e.lny)` in Stata is the biased ML variance — divides by N,
+# not N - 1. We report both for clarity.
+N = tobit_lny_res.n
+var_mle = σ_tob_lny^2
+var_unbiased = var_mle * N / (N - 1)
+Printf.@printf("\nThreshold (lower bound)  ll = %.4f\n",
+        tobit_lny_res.ll_bound)
+Printf.@printf("Mean (_cons)               = %.6f\n", β_tob_lny[end])
+Printf.@printf("σ̂ (MLE)                    = %.6f\n", σ_tob_lny)
+Printf.@printf("var(e.lny)  (= σ̂²)         = %.6f\n", var_mle)
+```
+
+```{julia}
+#=
+* OLS, not tobit
+regress lny $xlist, noheader
+=#
+#=
+* OLS, not tobit
+regress lny $xlist, noheader
+=#
+
+# Stata's pasted output is again intercept-only — the `$xlist` global
+# wasn't defined in the textbook's session, so `regress lny $xlist,
+# noheader` collapsed to `regress lny, noheader`. For an intercept-
+# only regression the closed form is β̂ = mean(lny) with
+# SE = std(lny)/√N, t = β̂ / SE. We just print that in Stata's table
+# format.
+let
+    y = collect(skipmissing(df16.lny))
+    n = length(y)
+    μ̂ = Statistics.mean(y)
+    σ̂ = Statistics.std(y)            # sample std (N-1 denom)
+    se = σ̂ / sqrt(n)
+    t  = μ̂ / se
+    crit = Distributions.quantile(Distributions.TDist(n - 1), 0.975)
+    lo  = μ̂ - crit * se
+    hi  = μ̂ + crit * se
+    println("-"^78)
+    Printf.@printf("%12s | Coefficient  Std. err.      t    P>|t|     [95%% conf. interval]\n",
+                   "lny")
+    println("-"^13, "+", "-"^64)
+    p_val = 2 * (1 - Distributions.cdf(Distributions.TDist(n - 1), abs(t)))
+    Printf.@printf("%12s | %10.6f  %9.7f  %6.2f   %.3f    %8.6f   %8.6f\n",
+                   "_cons", μ̂, se, t, p_val, lo, hi)
+    println("-"^78)
+end;
+```
+
+### 16.4.4 Two-limit tobit
+
+```{julia}
+#=
+* Now do two-limit tobit 
+scalar upper = log(10000)
+display upper
+tobit lny $xlist, ll ul(9.2103404)
+=#
+#=
+* Now do two-limit tobit
+scalar upper = log(10000)
+display upper
+tobit lny $xlist, ll ul(9.2103404)
+=#
+
+# `tobit_stata` (chunk 1) supports both lower and upper censoring
+# bounds. Stata's `tobit lny $xlist, ll ul(9.2103404)` would set
+# `ll = min(lny)` and `ul = log(10000)`, but the pasted Stata
+# output is intercept-only (the `$xlist` global is undefined in
+# the textbook session) with Stata's `Left-censored = 0` quirk
+# (obs AT the lower limit are treated as uncensored). We mimic that
+# by fitting intercept-only with only the upper bound active —
+# `ll = nothing` skips left-censoring, `ul = log(10000)` left-
+# clips the 48 obs with ambexp ≥ 10000.
+upper = log(10000)
+@printf("upper = log(10000) = %.7f\n", upper)
+tobit_2lim_res = tobit_stata(df16, :lny, Symbol[];
+    ll = nothing, ul = upper);
+
+```
+
+### 16.4.5 Model diagnostics
+
+### 16.4.6 Tests of normality and homoskedasticity
+
+#### Generalized residuals
+
+```{julia}
+#=
+* Mills' ratio
+quietly tobit lny $xlist, ll
+predict xb, xb                            // xb is estimate of x'b
+matrix btobit = e(b)
+scalar sigma = btobit[1,e(df_m)+2]        // sigma is estimate of sigma
+generate threshold = (gamma-xb)/sigma     // gamma: lower censoring point
+generate lambda = normalden(threshold)/normal(threshold)
+
+* Generalized residuals
+* gres1 and gres2 should have mean zero by the first-order conditions
+* gres3 and gres4 have mean zero if model correctly specified
+* Residual (scaled by sigma) for positive values
+quietly generate uifdyeq1 = (lny - xb)/sigma if dy == 1
+* First-sample moment
+quietly generate double gres1 = uifdyeq1
+quietly replace gres1 = -lambda if dy == 0
+summarize gres1
+=#
+
+# Tobit generalized-residual `gres1` per Gourieroux-Monfort-Renault-
+# Trognon (1987). With the textbook's `$xlist` undefined in Stata's
+# session, the underlying tobit collapses to intercept-only — we
+# reuse `tobit_lny_res` from §16.4.3 (intercept-only, no effective
+# censoring).
+#
+# Subtle: the textbook's Stata line
+#     `scalar sigma = btobit[1,e(df_m)+2]`
+# reads the SECOND-from-last entry of `e(b)`, which in newer Stata
+# versions is `var(e.lny)` — the *variance* — not σ̂. So the
+# downstream `threshold = (gamma-xb)/sigma` is actually using σ̂²,
+# and `gres1` for positives is `(lny − xb) / σ̂²`. We replicate
+# Stata's pasted output by following the same (buggy) substitution.
+xb        = tobit_lny_res.X * tobit_lny_res.β
+σ_lny     = tobit_lny_res.σ
+sigma_buggy = σ_lny^2                              # what Stata reads
+threshold = (γ_amb .- xb) ./ sigma_buggy
+λ_tobit   = [exp(-z^2/2)/sqrt(2π) /
+             (0.5 * (1 + SpecialFunctions.erf(z/sqrt(2.0))))
+             for z in threshold]
+gres1     = [df16.dy[i] == 1 ? (df16.lny[i] - xb[i]) / sigma_buggy :
+                                -λ_tobit[i]
+             for i in 1:nrow(df16)]
+df16.gres1 = gres1
+summarize_stata(df16, [:gres1]);
+```
+
+```{julia}
+#=
+* Second- to fourth-sample moments
+quietly generate double gres2 = uifdyeq1^2 - 1
+quietly replace gres2 = -threshold*lambda if dy == 0
+quietly generate double gres3 = uifdyeq1^3
+replace gres3 = -(2 + threshold^2)*lambda if dy == 0
+quietly generate double gres4 = uifdyeq1^4 - 3
+quietly replace gres4 = -(3*threshold + threshold^3)*lambda if dy == 0
+=#
+
+# Higher-order generalized residuals (Gourieroux et al.):
+#   gres2_i = u_i² − 1                  if dy_i = 1
+#           = −threshold_i · λ_i        if dy_i = 0
+#   gres3_i = u_i³                      if dy_i = 1
+#           = −(2 + threshold_i²) · λ_i if dy_i = 0
+#   gres4_i = u_i⁴ − 3                  if dy_i = 1
+#           = −(3·threshold_i + threshold_i³) · λ_i  if dy_i = 0
+# where u_i = (lny_i − xb_i)/sigma, threshold_i = (γ − xb_i)/sigma,
+# λ_i = φ(threshold_i)/Φ(threshold_i). `sigma` follows the buggy
+# textbook substitution from the previous chunk (= σ̂², not σ̂).
+uifdyeq1 = (df16.lny .- xb) ./ sigma_buggy
+df16.gres2 = [df16.dy[i] == 1 ? uifdyeq1[i]^2 - 1 :
+                                -threshold[i] * λ_tobit[i]
+              for i in 1:nrow(df16)]
+df16.gres3 = [df16.dy[i] == 1 ? uifdyeq1[i]^3 :
+                                -(2 + threshold[i]^2) * λ_tobit[i]
+              for i in 1:nrow(df16)]
+df16.gres4 = [df16.dy[i] == 1 ? uifdyeq1[i]^4 - 3 :
+                                -(3 * threshold[i] + threshold[i]^3) * λ_tobit[i]
+              for i in 1:nrow(df16)];
+```
+
+#### Test of normality
+
+```{julia}
+#=
+* Re-declare $xlist in case it was cleared between chunk runs.
+global xlist age female educ blhisp totchr ins
+
+* Generate the scores to use in the LM test
+* These are actual scores up to a multiple constant over i
+* So get same LM test as would if added the multiple
+* The scores wrt b are gres1 times the relevant component of x
+
+* Generate the scores to use in the LM test
+capture drop score*
+foreach var in $xlist {
+   generate score`var' = gres1*`var'
+}
+global scores score* gres1 gres2
+=#
+#=
+* Re-declare $xlist in case it was cleared between chunk runs.
+global xlist age female educ blhisp totchr ins
+
+* Generate the scores to use in the LM test
+* These are actual scores up to a multiple constant over i
+* So get same LM test as would if added the multiple
+* The scores wrt b are gres1 times the relevant component of x
+
+capture drop score*
+foreach var in $xlist {
+   generate score`var' = gres1*`var'
+}
+global scores score* gres1 gres2
+
+// Following not included in book
+* The score wrt sigma can be shown to be gres2
+* So the scores are the score`var', gres1 (for the intercept) and gres2
+* Test that calculations done correct
+* All the score components should have a mean of zero
+* gres3 and gres4 may not if model misspecified and these are the basis of the test
+summarize $scores gres3 gres4 threshold lambda
+=#
+
+# Build score_<var> = gres1·<var> for each of the textbook xlist
+# regressors. Also stash `threshold` and `λ_tobit` (built in the
+# Mills' ratio chunk above) as `df16` columns so `summarize_stata`
+# can pick them up by name.
+xlist = [:age, :female, :educ, :blhisp, :totchr, :ins]
+for v in xlist
+    df16[!, Symbol("score_$v")] = df16.gres1 .* Float64.(_rawval.(df16[!, v]))
+end
+df16.threshold = threshold
+df16.lambda    = λ_tobit
+
+# Stata's `$scores = score* gres1 gres2`, plus gres3, gres4,
+# threshold, lambda → 12 variables.
+scores_vars = [:score_age, :score_female, :score_educ,
+               :score_blhisp, :score_totchr, :score_ins,
+               :gres1, :gres2]
+summarize_stata(df16,
+    [scores_vars; :gres3; :gres4; :threshold; :lambda]);
+```
+
+```{julia}
+#=
+// Following not included in book
+* The score wrt sigma can be shown to be gres2
+* So the scores are the score`var', gres1 (for the intercept) and gres2
+* Test that calculations done correct
+* All the score components should have a mean of zero
+* gres3 and gres4 may not if model misspecified and these are the basis of the test
+summarize $scores gres3 gres4 threshold lambda
+=#
+#=
+* Test of normality in tobit regression
+* NR^2 from the uncentered regression has chi-squared distribution
+capture drop one
+generate one = 1
+quietly regress one gres3 gres4 $scores, noconstant
+display "N R^2 = " e(N)*e(r2) " with p-value = " chi2tail(2,e(N)*e(r2))
+=#
+
+# LM test of normality (Pagan-Vella / Newey style): regress a vector
+# of ones on (gres3, gres4, score_*, gres1, gres2) with NO constant.
+# The score components alone are mean-zero by the tobit FOC, so the
+# uncentered R² reflects what gres3 and gres4 add. N·R² ~ χ²(2)
+# under H0: normality.
+let
+    N_h = DataFrames.nrow(df16)
+    one = ones(N_h)
+    X = hcat(df16.gres3, df16.gres4,
+             df16.score_age, df16.score_female, df16.score_educ,
+             df16.score_blhisp, df16.score_totchr, df16.score_ins,
+             df16.gres1, df16.gres2)
+    β = X \ one
+    yhat = X * β
+    RSS = sum((one .- yhat).^2)
+    TSS_uncentered = sum(one.^2)     # = N
+    R2_uncentered  = 1 - RSS / TSS_uncentered
+    LM = N_h * R2_uncentered
+    p  = 1 - Distributions.cdf(Distributions.Chisq(2), LM)
+    Printf.@printf("N R^2 = %.6f  with p-value = %.6g\n", LM, p)
+end;
+```
+
+#### Test of homoskedasticity
+
+```{julia}
+#=
+* Test of homoskedasticity in tobit regression
+* Re-declare $xlist in case it was cleared between chunk runs.
+global xlist age female educ blhisp totchr ins
+
+capture drop score2*
+foreach var in $xlist {
+   generate score2`var' = gres2*`var'
+}
+global scores2 score* score2* gres1 gres2
+* summarize $scores2
+quietly regress one gres3 gres4 $scores2, noconstant
+display "N R^2 = " e(N)*e(r2) " with p-value = " chi2tail(2,e(N)*e(r2))
+=#
+#=
+* Test of homoskedasticity in tobit regression
+* Re-declare $xlist in case it was cleared between chunk runs.
+global xlist age female educ blhisp totchr ins
+
+capture drop score2*
+foreach var in $xlist {
+   generate score2`var' = gres2*`var'
+}
+global scores2 score* score2* gres1 gres2
+* summarize $scores2
+quietly regress one gres3 gres4 $scores2, noconstant
+display "N R^2 = " e(N)*e(r2) " with p-value = " chi2tail(2,e(N)*e(r2))
+=#
+
+# LM test of homoskedasticity — adds `score2_<var> = gres2·<var>`
+# (the σ-equation gradient pieces) on top of the score_<var> block
+# from the normality test. `gres3` and `gres4` remain the test
+# directions; N·R² ~ χ²(2) under H0: homoskedastic error.
+xlist = [:age, :female, :educ, :blhisp, :totchr, :ins]
+for v in xlist
+    df16[!, Symbol("score2_$v")] = df16.gres2 .* Float64.(_rawval.(df16[!, v]))
+end
+let
+    N_h = DataFrames.nrow(df16)
+    one = ones(N_h)
+    X = hcat(df16.gres3, df16.gres4,
+             df16.score_age, df16.score_female, df16.score_educ,
+             df16.score_blhisp, df16.score_totchr, df16.score_ins,
+             df16.score2_age, df16.score2_female, df16.score2_educ,
+             df16.score2_blhisp, df16.score2_totchr, df16.score2_ins,
+             df16.gres1, df16.gres2)
+    β   = X \ one
+    yhat = X * β
+    RSS = sum((one .- yhat).^2)
+    R2_uncentered = 1 - RSS / N_h
+    LM = N_h * R2_uncentered
+    p  = 1 - Distributions.cdf(Distributions.Chisq(2), LM)
+    Printf.@printf("N R^2 = %.6f  with p-value = %.6g\n", LM, p)
+end;
+```
+
+```{julia}
+#=
+// Following not included in book
+* tobcm command is deprecated - use margins to compute marginal effects after tobit
+* For our example lny is left-censored at 0- but 0 is a noncensored observation
+* This leads to slightly different result due to this single observation
+tobit lny $xlist, ll(0)
+margins, dydx(*) predict(ystar(0,.)) atmeans
+=#
+#=
+// Following not included in book
+* tobcm command is deprecated - use margins to compute marginal effects after tobit
+* For our example lny is left-censored at 0- but 0 is a noncensored observation
+* This leads to slightly different result due to this single observation
+tobit lny $xlist, ll(0)
+margins, dydx(*) predict(ystar(0,.)) atmeans
+=#
+
+# Refit tobit on `lny` (the trick'd log-expenditure) with explicit
+# left-censoring at 0, then compute the at-mean marginal effects on
+# `ystar(0, .) = max(0, y)` (censored expectation). Both helpers are
+# in chunk 1.
+tobit_lny_ll0 = tobit_stata(df16, :lny,
+    [:age, :female, :educ, :blhisp, :totchr, :ins]; ll = 0.0)
+margins_tobit_stata(tobit_lny_ll0; predict = :e_uncond, at = :mean);
+
+```
+
+### 16.4.7 Next step?
+
+## 16.5 Two-part model in logs
+
+### 16.5.1 Model structure
+
+### 16.5.2 Part 1 specification
+
+```{julia}
+#=
+* Part 1 of the two-part model
+probit dy $xlist, nolog
+scalar llprobit = e(ll)
+=#
+#=
+* Part 1 of the two-part model
+probit dy $xlist, nolog
+scalar llprobit = e(ll)
+=#
+
+# Part 1 of the two-part model: probit on the 0/1 indicator `dy =
+# 1{ambexp > 0}`. `probit_stata` (chunk 1) takes a StatsModels
+# `@formula` and prints the Stata-style table. We stash the
+# log-likelihood as `llprobit` for the §16.5.x sum-of-LLs check.
+probit_part1 = probit_stata(df16,
+    StatsModels.@formula(dy ~ age + female + educ + blhisp + totchr + ins))
+llprobit = probit_part1.ll
+Printf.@printf("llprobit = %.6f\n", llprobit);
+```
+
+### 16.5.3 Part 2 of the two-part model
+
+```{julia}
+#=
+* Part 2 of the two-part model
+regress lny $xlist if dy==1
+scalar lllognormal = e(ll)
+predict rlambexp, residuals
+=#
+#=
+* Part 2 of the two-part model
+regress lny $xlist if dy==1
+scalar lllognormal = e(ll)
+predict rlambexp, residuals
+=#
+
+# Part 2: OLS of `lny` on `$xlist` restricted to the dy == 1
+# subsample (positive expenditures). `ols_fit_stata` (chunk 1) fits
+# once via FixedEffectModels, prints the Stata table, and hands
+# back residuals + OLS log-likelihood (= Stata's `e(ll)`) so we
+# don't refit.
+df16_pos  = DataFrames.filter(:dy => ==(1), df16)
+ols_part2 = ols_fit_stata(df16_pos, :lny,
+    [:age, :female, :educ, :blhisp, :totchr, :ins])
+df16_pos.rlambexp = ols_part2.residuals
+lllognormal       = ols_part2.ll
+Printf.@printf("lllognormal = %.6f   (n = %d, σ̂² = %.6f)\n",
+               lllognormal, ols_part2.n, ols_part2.σ̂²)
+
+# Stata's `predict rlambexp, residuals` after `regress … if dy==1`
+# writes residuals for **all** rows (using the fitted β on the
+# imputed-zero `lny` values for dy==0 obs), not just the regression
+# sample. We replicate that on `df16` so downstream `sktest rlambexp`
+# (N = 3,328) reads the full-sample residual vector.
+df16.rlambexp = Float64.(df16.lny) .-
+                FixedEffectModels.predict(ols_part2.model, df16);
+```
+
+```{julia}
+#=
+* Create two-part model log likelihood 
+scalar lltwopart = llprobit + lllognormal  //two-part model log likelihood
+display "lltwopart = " lltwopart
+=#
+#=
+* Create two-part model log likelihood
+scalar lltwopart = llprobit + lllognormal  //two-part model log likelihood
+display "lltwopart = " lltwopart
+=#
+
+# Two-part log-likelihood: sum of Part-1 probit LL (Bernoulli for the
+# zero/positive selection) and Part-2 lognormal/OLS LL (on positive
+# expenditures). Their factorisation works because the joint density
+# under the two-part assumption is f_dy(dy) · f_lny|dy=1(lny | dy=1).
+lltwopart = llprobit + lllognormal
+Printf.@printf("lltwopart = %.6f\n", lltwopart);
+```
+
+```{julia}
+#=
+* hettest and sktest commands
+quietly regress lny $xlist if dy==1
+hettest
+sktest rlambexp
+=#
+#=
+* hettest and sktest commands
+quietly regress lny $xlist if dy==1
+hettest
+sktest rlambexp
+=#
+
+# `hettest_stata` (chunk 1) — Breusch-Pagan / Cook-Weisberg test
+# against the fitted values on the estimation sample (dy == 1).
+hettest_stata(df16_pos, :lny,
+    [:age, :female, :educ, :blhisp, :totchr, :ins])
+
+# `sktest_stata` (chunk 1) on the **full-sample** residual vector
+# (Stata's `predict` writes residuals for all 3,328 rows, including
+# the imputed-zero `dy == 0` obs whose residuals come from
+# applying β̂_part2 to their imputed `lny = γ − 1e-7`).
+sktest_stata(df16, :rlambexp);
+```
+
+## 16.6 Selection model
+
+### 16.6.1 Model structure and assumptions
+
+### 16.6.2 ML estimation
+
+### 16.6.3 Estimation without exclusion restrictions
+
+```{julia}
+#=
+* Heckman MLE without exclusion restrictions
+heckman lny $xlist, select(dy = $xlist) nolog
+=#
+#=
+* Heckman MLE without exclusion restrictions
+heckman lny $xlist, select(dy = $xlist) nolog
+=#
+
+# `heckman_stata` (chunk 1) — full-information ML for the sample-
+# selection model. With no exclusion restriction the outcome and
+# selection equations share the same regressor list `$xlist`. The
+# helper fits jointly by LBFGS + autodiff (σ = exp(lnσ), ρ =
+# tanh(athrho) reparametrisations), OIM SEs from FD Hessian with
+# delta-method back to the (σ, ρ) scale, and prints the standard
+# Stata `heckman` two-equation block plus the σ̂, ρ̂, λ̂ summary.
+heckman_res = heckman_stata(df16;
+    outcome        = :lny,
+    selection_dep  = :dy,
+    outcome_regs   = [:age, :female, :educ, :blhisp, :totchr, :ins],
+    selection_regs = [:age, :female, :educ, :blhisp, :totchr, :ins]);
+```
+
+### 16.6.4 Two-step estimation
+
+```{julia}
+#=
+* Heckman 2-step without exclusion restrictions
+heckman lny $xlist, select(dy = $xlist) twostep
+=#
+#=
+* Heckman 2-step without exclusion restrictions
+heckman lny $xlist, select(dy = $xlist) twostep
+=#
+
+# `heckman_twostep_stata` (chunk 1) — Heckman (1979) two-step
+# estimator: probit selection on dy, plug the inverse Mills ratio
+# into the outcome equation, OLS on the positives, then Greene's
+# first-stage-corrected variance for the outcome block. Without
+# exclusion restrictions the outcome and selection equations share
+# the same regressor list, identified solely off non-linearity in
+# the inverse Mills term — this is what Stata's `, twostep` reports.
+heckman_twostep_res = heckman_twostep_stata(df16,
+    StatsModels.@formula(lny ~ age + female + educ + blhisp + totchr + ins),
+    StatsModels.@formula(dy  ~ age + female + educ + blhisp + totchr + ins));
+
+```
+
+### 16.6.5 Estimation with exclusion restrictions
+
+```{julia}
+#=
+* Heckman MLE with exclusion restriction
+heckman lny $xlist, select(dy = $xlist income) nolog
+=#
+#=
+
+* Heckman MLE with exclusion restriction
+heckman lny $xlist, select(dy = $xlist income) nolog
+=#
+
+# Same `heckman_stata` (chunk 1) helper, now with `income` added to
+# the selection equation only — the textbook exclusion restriction.
+# With `income` excluded from the outcome equation but included in
+# the selection equation, ρ is identified off the linear-projection
+# difference rather than only off the non-linearity in the Mills
+# ratio.
+heckman_excl_res = heckman_stata(df16;
+    outcome        = :lny,
+    selection_dep  = :dy,
+    outcome_regs   = [:age, :female, :educ, :blhisp, :totchr, :ins],
+    selection_regs = [:age, :female, :educ, :blhisp, :totchr, :ins, :income]);
+```
+
+```{julia}
+#=
+// Following not included in book
+* Heckman 2-step with exclusion restrictions
+heckman lny $xlist, select(dy = $xlist income) twostep
+=#
+#=
+// Following not included in book
+* Heckman 2-step with exclusion restrictions
+heckman lny $xlist, select(dy = $xlist income) twostep
+=#
+
+# Same `heckman_twostep_stata` (chunk 1), now with `income` added to
+# the selection equation only. The exclusion restriction lets ρ be
+# identified off the linear-projection difference between selection
+# and outcome regressors (not just off the Mills-ratio
+# non-linearity), so SEs on β̂ and λ̂ are typically tighter.
+heckman_twostep_excl = heckman_twostep_stata(df16,
+    StatsModels.@formula(lny ~ age + female + educ + blhisp + totchr + ins),
+    StatsModels.@formula(dy  ~ age + female + educ + blhisp + totchr + ins + income));
+```
+
+## 16.7 Prediction from log-outcome models
+
+### 16.7.1 Predictions from tobit
+
+```{julia}
+#=
+// The following yields results that differ from book - book is in error
+* Prediction from tobit on lny
+generate yhat = exp(xb+0.5*sigma^2)*(1-normal((gamma-xb-sigma^2)/sigma))
+generate ytrunchat = yhat / (1 - normal(threshold)) if dy==1
+summarize y yhat 
+summarize y yhat ytrunchat if dy==1
+=#
+#=
+// The following yields results that differ from book - book is in error
+* Prediction from tobit on lny
+generate yhat = exp(xb+0.5*sigma^2)*(1-normal((gamma-xb-sigma^2)/sigma))
+generate ytrunchat = yhat / (1 - normal(threshold)) if dy==1
+summarize y yhat
+summarize y yhat ytrunchat if dy==1
+=#
+
+# Predict ambexp level from the tobit on lny — `predict_tobit_lognormal_stata`
+# (chunk 1) wraps the closed-form lognormal correction:
+#
+#   ŷ_i        = exp(xβ̂ + ½σ²) · (1 − Φ((γ − xβ̂ − σ²)/σ))
+#   ŷ_trunc_i  = ŷ_i / (1 − Φ((γ − xβ̂)/σ))           for dy_i = 1
+#
+# Two Stata-session quirks reproduced here:
+#   1. `$xlist` was undefined when the tobit was fit, so the model
+#      collapsed to **intercept-only** — `xb` is just α̂ ≈ 5.519
+#      (the unconditional mean of `lny`), so `yhat` is the same for
+#      every observation. We use `tobit_lny_res` from §16.4.3 (no
+#      effective censoring → α̂ = mean(lny), σ̂ ≈ 2.719).
+#   2. Newer Stata stores `var(e.lny) = σ̂²` in the second-to-last
+#      slot of `e(b)`, so the textbook's `scalar sigma = btobit[1,
+#      e(df_m)+2]` carries σ̂² (≈ 7.39), not σ̂. The yhat formula
+#      then substitutes σ ← σ̂², blowing the lognormal correction
+#      to ~10¹⁴ — the "book is in error" pathology Stata flags.
+sigma_buggy_lny = tobit_lny_res.σ^2          # what Stata's `sigma` carries
+df16.yhat       = predict_tobit_lognormal_stata(tobit_lny_res;
+                                                σ = sigma_buggy_lny,
+                                                γ = γ_amb)
+ytrunchat_all   = predict_tobit_lognormal_stata(tobit_lny_res;
+                                                σ = sigma_buggy_lny,
+                                                γ = γ_amb,
+                                                truncated = true)
+df16.ytrunchat  = [df16.dy[i] == 1 ? ytrunchat_all[i] : missing
+                   for i in 1:DataFrames.nrow(df16)]
+
+# `summarize y yhat` over the FULL sample.
+summarize_stata(df16, [:y, :yhat])
+
+# `summarize y yhat ytrunchat if dy==1` over the positive subsample.
+summarize_stata(DataFrames.filter(:dy => ==(1), df16),
+                [:y, :yhat, :ytrunchat]);
+```
+
+```{julia}
+#=
+// Following not included in book
+* THE FOLLOWING SHOWS THAT THE POOR PREDICTIONS ARE DUE TO HIGH SIGMA
+* THE ABOVE MODEL HAD SIGMA = 2.78
+* BY CONTRAST IF WE JUST REGRESS LNY on $XLIST WITH POSITIVE OBS THEN SIGMA = 1.27
+scalar sigma = 1
+generate yhatsigma1 = exp(xb+0.5*sigma^2)*(1-normal((gamma-xb-sigma^2)/sigma))
+scalar sigma = 2
+generate yhatsigma2 = exp(xb+0.5*sigma^2)*(1-normal((gamma-xb-sigma^2)/sigma))
+summarize yhat*
+summarize yhat* if dy==1
+=#
+
+# σ-sensitivity check on the tobit lognormal prediction. The §16.7.1
+# main `yhat` exploded to ~10¹⁴ because Stata's `sigma` scalar held
+# σ̂² (≈ 7.39), not σ̂. Plugging the textbook-target values σ = 1 and
+# σ = 2 (closer to the OLS-on-positives RMSE ≈ 1.27) tames the
+# correction back to normal magnitudes — and shows how much of the
+# pathology is driven by σ alone, with the intercept-only `xb` ≈
+# 5.519 held fixed.
+#
+# `predict_tobit_lognormal_stata` (chunk 1) takes the `tobit_stata`
+# fit plus a keyword `σ` override; using `tobit_lny_res` (intercept-
+# only, §16.4.3) keeps `xb` constant across rows just like Stata's.
+df16.yhatsigma1 = predict_tobit_lognormal_stata(tobit_lny_res;
+                                                σ = 1.0, γ = γ_amb)
+df16.yhatsigma2 = predict_tobit_lognormal_stata(tobit_lny_res;
+                                                σ = 2.0, γ = γ_amb)
+
+# `summarize yhat*` over the full sample (yhat, yhatsigma1, yhatsigma2).
+summarize_stata(df16, [:yhat, :yhatsigma1, :yhatsigma2])
+
+# `summarize yhat* if dy==1` over the positive subsample.
+summarize_stata(DataFrames.filter(:dy => ==(1), df16),
+                [:yhat, :yhatsigma1, :yhatsigma2]);
+```
+
+### 16.7.2 Predictions from two-part model
+
+```{julia}
+#=
+* Two-part model predictions
+quietly probit dy $xlist
+predict dyhat, pr
+quietly regress lny $xlist if dy==1
+predict xbpos, xb
+generate  yhatpos = exp(xbpos+0.5*e(rmse)^2)
+=#
+#=
+* Two-part model predictions
+quietly probit dy $xlist
+predict dyhat, pr
+quietly regress lny $xlist if dy==1
+predict xbpos, xb
+generate  yhatpos = exp(xbpos+0.5*e(rmse)^2)
+
+* Unconditional prediction from two-part model
+generate yhat2step = dyhat*yhatpos
+summarize yhat2step y
+summarize yhatpos y if dy==1
+=#
+
+# Two-part model predictions reusing the fits from §16.5.2 / §16.5.3.
+#   dyhat_i    = Φ(x_i' γ̂)               (probit, Part 1)
+#   xbpos_i   = x_i' β̂_part2              (OLS on positives, applied
+#                                           to all rows)
+#   yhatpos_i = exp(xbpos_i + ½·rmse²)    (lognormal mean adjustment;
+#                                           rmse² = σ̂²_unbiased)
+#   yhat2step = dyhat · yhatpos           (unconditional two-part)
+df16.dyhat   = GLM.predict(probit_part1.model, df16)
+df16.xbpos   = FixedEffectModels.predict(ols_part2.model, df16)
+
+# Stata's `e(rmse) = sqrt(RSS / (N − k))` — the *unbiased* root-MSE,
+# not the MLE σ̂.
+let k = length(ols_part2.β)
+    rmse² = sum(ols_part2.residuals.^2) / (ols_part2.n - k)
+    df16.yhatpos    = exp.(df16.xbpos .+ 0.5 .* rmse²)
+end
+df16.yhat2step = df16.dyhat .* df16.yhatpos
+
+# `summarize yhat2step y` over the full sample.
+summarize_stata(df16, [:yhat2step, :y])
+
+# `summarize yhatpos y if dy==1` over the positive subsample.
+summarize_stata(DataFrames.filter(:dy => ==(1), df16),
+                [:yhatpos, :y]);
+```
+
+### 16.7.3 Predictions from selection model
+
+```{julia}
+#=
+* Heckman model predictions
+quietly heckman lny $xlist, select(dy = $xlist) 
+predict probpos, psel 
+predict x1b1, xbsel 
+predict x2b2, xb 
+scalar sig2sq = e(sigma)^2 
+scalar sig12sq = e(rho)*e(sigma)^2 
+display "sigma1sq = 1" " sigma12sq = " sig12sq " sigma2sq = " sig2sq 
+generate yhatheck = exp(x2b2 + 0.5*(sig2sq))*(1 - normal(-x1b1-sig12sq)) 
+generate yhatposheck = yhatheck/probpos 
+summarize yhatheck y probpos dy 
+summarize yhatposheck probpos dy y if dy==1
+=#
+#=
+* Heckman model predictions
+quietly heckman lny $xlist, select(dy = $xlist)
+predict probpos, psel
+predict x1b1, xbsel
+predict x2b2, xb
+scalar sig2sq = e(sigma)^2
+scalar sig12sq = e(rho)*e(sigma)^2
+display "sigma1sq = 1" " sigma12sq = " sig12sq " sigma2sq = " sig2sq
+generate yhatheck = exp(x2b2 + 0.5*(sig2sq))*(1 - normal(-x1b1-sig12sq))
+generate yhatposheck = yhatheck/probpos
+summarize yhatheck y probpos dy
+summarize yhatposheck probpos dy y if dy==1
+=#
+
+# `predict_heckman_stata` (chunk 1) — Stata `heckman` post-estimation
+# predictions from the no-exclusion fit `heckman_res` (§16.6.3):
+#   probpos = Φ(z'γ̂)  (psel),  x1b1 = z'γ̂  (xbsel),  x2b2 = x'β̂  (xb)
+#   sig2sq  = σ̂²,  sig12sq = ρ̂σ̂²  (textbook scalar; σ² is the textbook
+#                                     bug — see helper docstring)
+#   yhatheck    = exp(x2b2 + ½σ²)·(1 − Φ(−x1b1 − sig12sq))
+#   yhatposheck = yhatheck / probpos
+heck_pred = predict_heckman_stata(df16, heckman_res)
+df16.probpos     = heck_pred.probpos
+df16.x1b1        = heck_pred.x1b1
+df16.x2b2        = heck_pred.x2b2
+df16.yhatheck    = heck_pred.yhatheck
+df16.yhatposheck = heck_pred.yhatposheck
+
+Printf.@printf("sigma1sq = 1 sigma12sq = %.7g sigma2sq = %.7g\n",
+               heck_pred.sig12sq, heck_pred.sig2sq)
+
+# `summarize yhatheck y probpos dy` over the full sample.
+summarize_stata(df16, [:yhatheck, :y, :probpos, :dy])
+
+# `summarize yhatposheck probpos dy y if dy==1` over the positives.
+summarize_stata(DataFrames.filter(:dy => ==(1), df16),
+                [:yhatposheck, :probpos, :dy, :y]);
+```
+
+```{julia}
+#=
+// Following not included in book 
+* THE FOLLOWING SHOWS THAT THE POOR PREDICTIONS ARE DUE TO HIGH SIGMA
+* THE ABOVE MODEL HAD SIGMA = 2.78
+* BY CONTRAST IF WE JUST REGRESS LNY on $XLIST WITH POSITIVE OBS THEN SIGMA = 1.27 
+scalar sigma = 1 
+generate yhatsigma1 = exp(xb+0.5*sigma^2)*(1-normal((gamma-xb-sigma^2)/sigma))
+scalar sigma = 2
+generate yhatsigma2 = exp(xb+0.5*sigma^2)*(1-normal((gamma-xb-sigma^2)/sigma))
+summarize yhat*
+summarize yhat* if dy==1
+=#
+#=
+// Following not included in book
+* THE FOLLOWING SHOWS THAT THE POOR PREDICTIONS ARE DUE TO HIGH SIGMA
+* THE ABOVE MODEL HAD SIGMA = 2.78
+* BY CONTRAST IF WE JUST REGRESS LNY on $XLIST WITH POSITIVE OBS THEN SIGMA = 1.27
+scalar sigma = 1
+generate yhatsigma1 = exp(xb+0.5*sigma^2)*(1-normal((gamma-xb-sigma^2)/sigma))
+scalar sigma = 2
+generate yhatsigma2 = exp(xb+0.5*sigma^2)*(1-normal((gamma-xb-sigma^2)/sigma))
+summarize yhat*
+summarize yhat* if dy==1
+=#
+
+# Final wrap-up `summarize yhat*` after §16.7.1 — §16.7.3 have all
+# been run: 5 model-based predictions (yhat, yhatpos, yhat2step,
+# yhatheck, yhatposheck) plus the σ-counterfactual pair
+# (yhatsigma1, yhatsigma2). All three constant columns (`yhat`,
+# `yhatsigma1`, `yhatsigma2`) share the intercept-only tobit `xb` ≈
+# 5.519 — only `yhat` carries the §16.5.3 buggy `sigma = σ̂²`
+# substitution (the other two use the explicit `scalar sigma = 1` /
+# `= 2`). `predict_tobit_lognormal_stata` (chunk 1) is re-applied
+# here so the chunk is self-contained — overwriting any earlier
+# binding of yhatsigma1 / yhatsigma2 in `df16`.
+df16.yhatsigma1 = predict_tobit_lognormal_stata(tobit_lny_res;
+                                                σ = 1.0, γ = γ_amb)
+df16.yhatsigma2 = predict_tobit_lognormal_stata(tobit_lny_res;
+                                                σ = 2.0, γ = γ_amb)
+
+# `summarize yhat*` — Stata expands `yhat*` in insertion (variable-
+# creation) order: yhat → yhatpos → yhat2step → yhatheck →
+# yhatposheck → yhatsigma1 → yhatsigma2.
+yhat_cols = [:yhat, :yhatpos, :yhat2step,
+             :yhatheck, :yhatposheck,
+             :yhatsigma1, :yhatsigma2]
+summarize_stata(df16, yhat_cols)
+
+# `summarize yhat* if dy==1` — same set on the positive subsample.
+summarize_stata(DataFrames.filter(:dy => ==(1), df16), yhat_cols);
+```
+
+## 16.8 Stata resources
+
+## 16.9 Exercises
